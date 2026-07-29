@@ -58,6 +58,12 @@ public sealed class ChineseTimeParser : IChineseTimeParser
                 return Invalid(originalText, "重复提醒不能使用相对时长。");
             }
 
+            if (DatePattern.IsMatch(remaining) || ClockPattern.IsMatch(remaining) ||
+                AmbiguousPattern.IsMatch(remaining))
+            {
+                return Invalid(originalText, "相对时长不能与日期或钟点组合。");
+            }
+
             var durationTitle = ExtractTitle(DurationPattern.Replace(remaining, string.Empty));
             if (!TryValidateTitle(durationTitle, originalText, out var invalid))
             {
@@ -95,9 +101,15 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             var ambiguousMatch = AmbiguousPattern.Match(remaining);
             if (ambiguousMatch.Success)
             {
-                return Ambiguous(originalText,
-                    ExtractTitle(AmbiguousPattern.Replace(remaining, string.Empty, 1)), localNow, zone,
-                    ambiguousMatch.Groups["phrase"].Value);
+                var ambiguousTitle = ExtractTitle(
+                    AmbiguousPattern.Replace(remaining, string.Empty, 1));
+                if (!TryValidateTitle(ambiguousTitle, originalText, out var ambiguousTitleInvalid))
+                {
+                    return ambiguousTitleInvalid;
+                }
+
+                return Ambiguous(originalText, ambiguousTitle, now, zone,
+                    ambiguousMatch.Groups["phrase"].Value, null, recurrenceRule);
             }
 
             return Invalid(originalText, "未找到明确的提醒时间。");
@@ -113,6 +125,20 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         if (!TryParseClock(clockMatch, out var time))
         {
             return Invalid(originalText, "时间格式无效。");
+        }
+
+        var ambiguousClockMatch = AmbiguousPattern.Match(remaining);
+        if (ambiguousClockMatch.Success)
+        {
+            var ambiguousTitle = ExtractTitle(AmbiguousPattern.Replace(
+                ClockPattern.Replace(remaining, string.Empty, 1), string.Empty, 1));
+            if (!TryValidateTitle(ambiguousTitle, originalText, out var ambiguousTitleInvalid))
+            {
+                return ambiguousTitleInvalid;
+            }
+
+            return Ambiguous(originalText, ambiguousTitle, now, zone,
+                ambiguousClockMatch.Groups["phrase"].Value, time, recurrenceRule);
         }
 
         var recurrenceValue = recurrence ? recurrenceRule! with { Time = time } : null;
@@ -266,31 +292,71 @@ public sealed class ChineseTimeParser : IChineseTimeParser
     }
 
     private static ParseResult.Ambiguous Ambiguous(
-        string originalText, string title, DateTimeOffset localNow, TimeZoneInfo zone, string phrase)
+        string originalText,
+        string title,
+        DateTimeOffset now,
+        TimeZoneInfo zone,
+        string phrase,
+        TimeOnly? clock,
+        RecurrenceRule? recurrence)
     {
         var choices = phrase switch
         {
-            "晚上" => Choices(title, localNow.Date, zone, (20, 0), (21, 0), "晚上8点", "晚上9点"),
-            "待会" => RelativeChoices(title, localNow, 15, 30),
-            _ => NextWeekChoices(title, localNow, zone)
+            "晚上" => TimeChoices(title, now, zone, recurrence, (20, 0), (21, 0), "晚上8点", "晚上9点"),
+            "待会" when clock is not null => ClockChoices(title, now, zone, clock.Value),
+            "待会" => RelativeChoices(title, now, 15, 30),
+            _ => NextWeekChoices(title, now, zone, clock)
         };
 
         return new(originalText, choices);
     }
 
-    private static IReadOnlyList<ParseChoice> Choices(string title, DateTime date, TimeZoneInfo zone,
-        (int Hour, int Minute) first, (int Hour, int Minute) second, string firstLabel, string secondLabel) =>
-        [new(firstLabel, CreateDraft(title, ResolveLocal(date.AddHours(first.Hour).AddMinutes(first.Minute), zone))),
-         new(secondLabel, CreateDraft(title, ResolveLocal(date.AddHours(second.Hour).AddMinutes(second.Minute), zone)))];
+    private static IReadOnlyList<ParseChoice> TimeChoices(
+        string title,
+        DateTimeOffset now,
+        TimeZoneInfo zone,
+        RecurrenceRule? recurrence,
+        (int Hour, int Minute) first,
+        (int Hour, int Minute) second,
+        string firstLabel,
+        string secondLabel) =>
+        [CreateTimeChoice(title, now, zone, recurrence, first, firstLabel),
+         CreateTimeChoice(title, now, zone, recurrence, second, secondLabel)];
+
+    private static ParseChoice CreateTimeChoice(
+        string title,
+        DateTimeOffset now,
+        TimeZoneInfo zone,
+        RecurrenceRule? recurrence,
+        (int Hour, int Minute) time,
+        string label)
+    {
+        var choiceTime = new TimeOnly(time.Hour, time.Minute);
+        var rule = recurrence is null ? null : recurrence with { Time = choiceTime };
+        var due = rule is null
+            ? NextOneOffOccurrence(choiceTime, now, zone)
+            : NextOccurrence(rule, choiceTime, now, zone);
+
+        return new(label, CreateDraft(title, due, rule));
+    }
 
     private static IReadOnlyList<ParseChoice> RelativeChoices(
         string title, DateTimeOffset now, int firstMinutes, int secondMinutes) =>
         [new($"{firstMinutes}分钟后", CreateDraft(title, now.AddMinutes(firstMinutes))),
          new($"{secondMinutes}分钟后", CreateDraft(title, now.AddMinutes(secondMinutes)))];
 
-    private static IReadOnlyList<ParseChoice> NextWeekChoices(
-        string title, DateTimeOffset localNow, TimeZoneInfo zone)
+    private static IReadOnlyList<ParseChoice> ClockChoices(
+        string title, DateTimeOffset now, TimeZoneInfo zone, TimeOnly clock)
     {
+        var alternativeHour = clock.Hour is >= 1 and <= 11 ? clock.Hour + 12 : clock.Hour;
+        return TimeChoices(title, now, zone, null, (clock.Hour, clock.Minute),
+            (alternativeHour, clock.Minute), $"{clock.Hour}点", $"下午{alternativeHour - 12}点");
+    }
+
+    private static IReadOnlyList<ParseChoice> NextWeekChoices(
+        string title, DateTimeOffset now, TimeZoneInfo zone, TimeOnly? clock)
+    {
+        var localNow = TimeZoneInfo.ConvertTime(now, zone);
         var daysUntilMonday = ((int)DayOfWeek.Monday - (int)localNow.DayOfWeek + 7) % 7;
         if (daysUntilMonday == 0)
         {
@@ -298,11 +364,31 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         }
 
         var monday = localNow.Date.AddDays(daysUntilMonday);
-        return Choices(title, monday, zone, (9, 0), (18, 0), "下周一上午9点", "下周一下午6点");
+        var friday = monday.AddDays(4);
+        var firstTime = clock ?? new TimeOnly(9, 0);
+        var secondTime = clock ?? new TimeOnly(18, 0);
+        return
+        [new($"下周一{FormatTime(firstTime)}", CreateDraft(title,
+             ResolveLocal(monday + firstTime.ToTimeSpan(), zone))),
+         new($"下周五{FormatTime(secondTime)}", CreateDraft(title,
+             ResolveLocal(friday + secondTime.ToTimeSpan(), zone)))];
     }
 
-    private static ReminderDraft CreateDraft(string title, DateTimeOffset due) =>
-        new(title, due, ReminderKind.Countdown, ReminderImportance.Normal, null);
+    private static DateTimeOffset NextOneOffOccurrence(TimeOnly time, DateTimeOffset now, TimeZoneInfo zone)
+    {
+        var localNow = TimeZoneInfo.ConvertTime(now, zone);
+        var localCandidate = localNow.Date + time.ToTimeSpan();
+        var candidate = ResolveLocal(localCandidate, zone);
+        return candidate > now ? candidate : ResolveLocal(localCandidate.AddDays(1), zone);
+    }
+
+    private static string FormatTime(TimeOnly time) => time.Minute == 0
+        ? $"{time.Hour}点"
+        : $"{time.Hour}点{time.Minute}分";
+
+    private static ReminderDraft CreateDraft(
+        string title, DateTimeOffset due, RecurrenceRule? recurrence = null) =>
+        new(title, due, ReminderKind.Countdown, ReminderImportance.Normal, recurrence);
 
     private static ParseResult.Success Success(string title, DateTimeOffset due, RecurrenceRule? recurrence) =>
         new(new ReminderDraft(title, due, ReminderKind.Countdown, ReminderImportance.Normal, recurrence));

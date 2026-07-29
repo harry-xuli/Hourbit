@@ -74,4 +74,122 @@ public sealed class ChineseTimeParserTests
         Assert.IsType<ParseResult.Invalid>(
             new ChineseTimeParser().Parse(text, Now, ChinaTimeZone));
     }
+
+    [Fact]
+    public void Returns_time_preserving_choices_for_an_ambiguous_week()
+    {
+        var result = Assert.IsType<ParseResult.Ambiguous>(
+            new ChineseTimeParser().Parse("下周下午4点写周报", Now, ChinaTimeZone));
+
+        Assert.All(result.Choices, choice =>
+        {
+            Assert.Equal("写周报", choice.Draft.Title);
+            Assert.Equal(new TimeOnly(16, 0), TimeOnly.FromDateTime(choice.Draft.DueAt.DateTime));
+            Assert.True(choice.Draft.DueAt > Now);
+        });
+    }
+
+    [Fact]
+    public void Does_not_silently_schedule_a_vague_relative_phrase_with_a_clock()
+    {
+        var earlyNow = DateTimeOffset.Parse("2026-07-29T01:00:00+08:00");
+        var result = Assert.IsType<ParseResult.Ambiguous>(
+            new ChineseTimeParser().Parse("待会3点提醒我喝水", earlyNow, ChinaTimeZone));
+
+        Assert.All(result.Choices, choice =>
+        {
+            Assert.Equal("喝水", choice.Draft.Title);
+            Assert.True(choice.Draft.DueAt > earlyNow);
+        });
+    }
+
+    [Fact]
+    public void Retains_recurrence_in_choices_for_an_ambiguous_recurring_clock()
+    {
+        var result = Assert.IsType<ParseResult.Ambiguous>(
+            new ChineseTimeParser().Parse("每周五晚上看书", Now, ChinaTimeZone));
+
+        Assert.All(result.Choices, choice =>
+        {
+            var recurrence = Assert.IsType<RecurrenceRule>(choice.Draft.Recurrence);
+            Assert.Equal(RecurrenceKind.Weekly, recurrence.Kind);
+            Assert.Equal([DayOfWeek.Friday], recurrence.DaysOfWeek.Order());
+            Assert.Equal(recurrence.Time, TimeOnly.FromDateTime(choice.Draft.DueAt.DateTime));
+            Assert.True(choice.Draft.DueAt > Now);
+        });
+    }
+
+    [Theory]
+    [InlineData("晚上提醒我")]
+    [InlineData("待会提醒我")]
+    [InlineData("下周提醒我")]
+    public void Rejects_an_ambiguous_phrase_without_a_title(string text)
+    {
+        Assert.IsType<ParseResult.Invalid>(
+            new ChineseTimeParser().Parse(text, Now, ChinaTimeZone));
+    }
+
+    [Fact]
+    public void Rejects_an_overlong_title_in_an_ambiguous_phrase()
+    {
+        var text = $"晚上提醒我{new string('测', 201)}";
+
+        Assert.IsType<ParseResult.Invalid>(
+            new ChineseTimeParser().Parse(text, Now, ChinaTimeZone));
+    }
+
+    [Fact]
+    public void Offers_only_future_candidates_for_an_ambiguous_phrase()
+    {
+        var lateNow = DateTimeOffset.Parse("2026-07-29T22:00:00+08:00");
+        var result = Assert.IsType<ParseResult.Ambiguous>(
+            new ChineseTimeParser().Parse("晚上提醒我看书", lateNow, ChinaTimeZone));
+
+        Assert.All(result.Choices, choice => Assert.True(choice.Draft.DueAt > lateNow));
+    }
+
+    [Theory]
+    [InlineData("0点开会")]
+    [InlineData("24点开会")]
+    [InlineData("9点60分开会")]
+    [InlineData("999999999999999999999分钟后喝水")]
+    public void Rejects_invalid_clock_values_and_duration_overflow(string text)
+    {
+        Assert.IsType<ParseResult.Invalid>(
+            new ChineseTimeParser().Parse(text, Now, ChinaTimeZone));
+    }
+
+    [Theory]
+    [InlineData("每周五20分钟后写周报")]
+    [InlineData("明天20分钟后开会")]
+    [InlineData("下午3点20分钟后打电话")]
+    public void Rejects_conflicting_time_expressions(string text)
+    {
+        Assert.IsType<ParseResult.Invalid>(
+            new ChineseTimeParser().Parse(text, Now, ChinaTimeZone));
+    }
+
+    [Fact]
+    public void Resolves_an_invalid_dst_local_time_to_the_first_valid_minute()
+    {
+        var eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        var now = DateTimeOffset.Parse("2026-03-07T12:00:00-05:00");
+
+        var result = Assert.IsType<ParseResult.Success>(
+            new ChineseTimeParser().Parse("明天2点半提醒我检查", now, eastern));
+
+        Assert.Equal(DateTimeOffset.Parse("2026-03-08T03:00:00-04:00"), result.Draft.DueAt);
+    }
+
+    [Fact]
+    public void Resolves_an_ambiguous_dst_local_time_to_the_earlier_utc_instant()
+    {
+        var eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        var now = DateTimeOffset.Parse("2026-10-31T12:00:00-04:00");
+
+        var result = Assert.IsType<ParseResult.Success>(
+            new ChineseTimeParser().Parse("明天1点半提醒我检查", now, eastern));
+
+        Assert.Equal(DateTimeOffset.Parse("2026-11-01T01:30:00-04:00"), result.Draft.DueAt);
+    }
 }

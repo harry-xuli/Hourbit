@@ -32,3 +32,25 @@ Smart App Control did not block any command; no retry and no `0x800711C7` extern
 - `晚上`, `待会`, and `下周` return explicit `ParseChoice` candidates rather than silently choosing a due time. UI callers must require a choice before scheduling.
 - Explicit past due times, blank input, missing title, invalid clock values, and titles longer than 200 characters return `ParseResult.Invalid`.
 - The supported grammar is intentionally narrow and deterministic. Chinese numerals, natural-language variants outside the stated grammar, and unsupported composite expressions are not guessed.
+
+## Fix round 1 — reviewed parser findings
+
+### TDD evidence
+
+1. RED: added adversarial parser tests, then ran the focused filter. It failed as expected: `下周下午4点写周报` was a `Success`; `待会3点提醒我喝水` was also a `Success` when evaluated at 01:00; recurring `每周五晚上看书` choices had no recurrence; ambiguous blank/overlong titles returned choices; evening choices could be past; and duration/date or duration/clock combinations were accepted.
+2. GREEN: after passing ambiguity context through the parser, validating titles before choice construction, and making one-off alternatives advance to the next future local occurrence, the focused adversarial command passed 17/17.
+
+### Changes and policy
+
+- A vague date token (`下周`) is detected before a success result even when a clock is present. Its explicit alternatives retain the parsed clock (for example, 16:00) and remove the token from the title.
+- A vague relative token plus a clock (`待会3点`) returns explicit clock alternatives, rather than silently selecting the current-day 3:00. This is deliberately an ambiguity policy, not a natural-language inference.
+- Ambiguous recurring clocks retain their recurrence rule. Each choice gets a rule with the candidate clock and the next valid recurrence occurrence as `DueAt`.
+- Ambiguous paths validate title length and emptiness before creating a choice. Every choice is strictly later than `now`; passed evening times move to the following day.
+- Parser-level invalid clocks (`0点`, `24点`, `9点60分`), duration numeric overflow, recurrence-with-duration, duration-with-date, and duration-with-clock combinations are rejected as `Invalid`.
+- Parser DST tests cover invalid local times (advance to the first valid minute) and ambiguous local times (earlier UTC instant).
+
+### Verification
+
+- Focused adversarial parser filter: passed 17/17.
+- `dotnet build Moment.slnx --no-restore`: succeeded with 0 warnings and 0 errors.
+- The first full Parsing run and its required single retry were blocked by Windows Smart App Control loading `Moment.Core.dll` (`0x800711C7`), after compilation completed. The broader Core and solution test attempts failed for the same external assembly-policy reason, including pre-existing Core and Infrastructure tests; they did not expose a parser assertion failure.
