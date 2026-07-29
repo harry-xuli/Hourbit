@@ -192,4 +192,26 @@ public sealed class ChineseTimeParserTests
 
         Assert.Equal(DateTimeOffset.Parse("2026-11-01T01:30:00-04:00"), result.Draft.DueAt);
     }
+
+    [Theory]
+    [InlineData("待会下午3点提醒我喝水", 15, "下午3点")]
+    [InlineData("待会中午12点提醒我喝水", 12, "中午12点")]
+    [InlineData("待会12点提醒我喝水", 12, "12点")]
+    public void Returns_distinct_future_choices_when_a_vague_relative_phrase_has_a_disambiguated_clock(
+        string text, int hour, string label)
+    {
+        var result = Assert.IsType<ParseResult.Ambiguous>(
+            new ChineseTimeParser().Parse(text, Now, ChinaTimeZone));
+
+        Assert.Equal(2, result.Choices.Count);
+        Assert.Equal(2, result.Choices.Select(choice => choice.Draft.DueAt).Distinct().Count());
+        Assert.All(result.Choices, choice =>
+        {
+            Assert.Equal("喝水", choice.Draft.Title);
+            Assert.Equal(hour, choice.Draft.DueAt.Hour);
+            Assert.True(choice.Draft.DueAt > Now);
+            Assert.DoesNotContain("下午0点", choice.Label);
+        });
+        Assert.Contains(result.Choices, choice => choice.Label.Contains(label, StringComparison.Ordinal));
+    }
 }

@@ -54,3 +54,19 @@ Smart App Control did not block any command; no retry and no `0x800711C7` extern
 - Focused adversarial parser filter: passed 17/17.
 - `dotnet build Moment.slnx --no-restore`: succeeded with 0 warnings and 0 errors.
 - The first full Parsing run and its required single retry were blocked by Windows Smart App Control loading `Moment.Core.dll` (`0x800711C7`), after compilation completed. The broader Core and solution test attempts failed for the same external assembly-policy reason, including pre-existing Core and Infrastructure tests; they did not expose a parser assertion failure.
+
+## Fix round 2 — distinct explicit-period choices
+
+### TDD evidence
+
+- Added focused real-parser tests before implementation for `待会下午3点提醒我喝水`, `待会中午12点提醒我喝水`, and unqualified `待会12点提醒我喝水`. They require two distinct, future-only choices with a clean title and no `下午0点` label.
+- The first RED attempt was blocked before assertions by the external Smart App Control assembly policy (`0x800711C7`). After the minimal change, the focused test passed 3/3.
+
+### Changes and final verification
+
+- The parser now passes the matched period into vague-relative clock choice generation. An explicit period (and unqualified 12:00) creates next-occurrence and next-day choices for the same clock, rather than inventing an AM/PM alternative. Labels retain the supplied period, so noon is `中午12点`, never `下午0点`.
+- `dotnet test tests\\Moment.Core.Tests\\Moment.Core.Tests.csproj --filter "Returns_distinct_future_choices_when_a_vague_relative_phrase_has_a_disambiguated_clock"` — passed 3/3.
+- `dotnet test tests\\Moment.Core.Tests\\Moment.Core.Tests.csproj --filter Parsing` — passed 32/32.
+- `dotnet test tests\\Moment.Core.Tests\\Moment.Core.Tests.csproj` — passed 41/41.
+- `dotnet test Moment.slnx` — passed: Moment.Core.Tests 41/41; Moment.Infrastructure.Tests 19/19.
+- `dotnet build Moment.slnx --no-restore` — succeeded with 0 warnings and 0 errors.
