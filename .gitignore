@@ -1,7 +1,7 @@
 .superpowers/
+.worktrees/
 bin/
 obj/
 .vs/
 *.user
 *.suo
-
