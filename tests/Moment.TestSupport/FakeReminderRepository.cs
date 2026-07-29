@@ -13,8 +13,15 @@ public class FakeReminderRepository : IReminderRepository
     {
         lock (_gate)
         {
-            _items[item.Id] = item;
-            _occurrences[occurrence.Id] = occurrence;
+            if (_items.ContainsKey(item.Id) || occurrence.ItemId != item.Id || _occurrences.ContainsKey(occurrence.Id)
+                || _occurrences.Values.Any(existing => existing.ItemId == occurrence.ItemId
+                    && existing.DueAt.UtcDateTime == occurrence.DueAt.UtcDateTime))
+            {
+                throw new InvalidOperationException("Item already exists or does not own the occurrence.");
+            }
+
+            _items.Add(item.Id, item);
+            _occurrences.Add(occurrence.Id, occurrence);
         }
 
         return Task.CompletedTask;
@@ -70,7 +77,8 @@ public class FakeReminderRepository : IReminderRepository
     {
         lock (_gate)
         {
-            _occurrences[occurrence.Id] = occurrence;
+            EnsureOccurrenceCanBeInserted(occurrence);
+            _occurrences.Add(occurrence.Id, occurrence);
         }
 
         return Task.CompletedTask;
@@ -95,14 +103,21 @@ public class FakeReminderRepository : IReminderRepository
     {
         lock (_gate)
         {
-            if (_occurrences.TryGetValue(occurrenceId, out var occurrence))
+            if (!_occurrences.TryGetValue(occurrenceId, out var occurrence)
+                || occurrence.State is not (OccurrenceState.Scheduled or OccurrenceState.Fired))
             {
-                _occurrences[occurrenceId] = occurrence with { State = state, HandledAt = handledAt };
+                return Task.CompletedTask;
             }
 
             if (nextOccurrence is not null)
             {
-                _occurrences[nextOccurrence.Id] = nextOccurrence;
+                EnsureOccurrenceCanBeInserted(nextOccurrence);
+            }
+
+            _occurrences[occurrenceId] = occurrence with { State = state, HandledAt = handledAt };
+            if (nextOccurrence is not null)
+            {
+                _occurrences.Add(nextOccurrence.Id, nextOccurrence);
             }
         }
 
@@ -114,13 +129,32 @@ public class FakeReminderRepository : IReminderRepository
     {
         lock (_gate)
         {
-            if (scope == SeriesScope.ThisAndFuture)
+            if (!_occurrences.TryGetValue(occurrenceId, out var current))
             {
-                _items[item.Id] = item;
+                return Task.CompletedTask;
             }
 
-            _occurrences.Remove(occurrenceId);
-            _occurrences[occurrence.Id] = occurrence;
+            if (scope == SeriesScope.ThisAndFuture)
+            {
+                var futureItem = item with { Id = Guid.NewGuid() };
+                _items.Add(futureItem.Id, futureItem);
+                foreach (var id in _occurrences
+                             .Where(pair => pair.Value.ItemId == current.ItemId
+                                 && pair.Value.State == OccurrenceState.Scheduled
+                                 && pair.Value.DueAt >= current.DueAt)
+                             .Select(pair => pair.Key)
+                             .ToArray())
+                {
+                    _occurrences.Remove(id);
+                }
+
+                _occurrences.Add(occurrence.Id, occurrence with { ItemId = futureItem.Id });
+                return Task.CompletedTask;
+            }
+
+            var singleItem = item with { Id = Guid.NewGuid(), Recurrence = null };
+            _items.Add(singleItem.Id, singleItem);
+            _occurrences[occurrenceId] = occurrence with { ItemId = singleItem.Id };
         }
 
         return Task.CompletedTask;
@@ -172,4 +206,19 @@ public class FakeReminderRepository : IReminderRepository
         _occurrences.TryGetValue(occurrenceId, out var occurrence) && _items.TryGetValue(occurrence.ItemId, out var item)
             ? new ScheduledReminder(item, occurrence)
             : null;
+
+    private void EnsureOccurrenceCanBeInserted(ReminderOccurrence occurrence)
+    {
+        if (!_items.ContainsKey(occurrence.ItemId))
+        {
+            throw new InvalidOperationException("Occurrence item does not exist.");
+        }
+
+        if (_occurrences.ContainsKey(occurrence.Id)
+            || _occurrences.Values.Any(existing => existing.ItemId == occurrence.ItemId
+                && existing.DueAt.UtcDateTime == occurrence.DueAt.UtcDateTime))
+        {
+            throw new InvalidOperationException("Occurrence already exists.");
+        }
+    }
 }

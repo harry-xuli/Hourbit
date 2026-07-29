@@ -39,10 +39,10 @@ public sealed class SqliteReminderRepository : IReminderRepository
         }, ct);
 
     public async Task<IReadOnlyList<ScheduledReminder>> GetDueAsync(DateTimeOffset through, CancellationToken ct) =>
-        await GetScheduledRemindersAsync("o.state = $state AND julianday(o.due_at) <= julianday($through)", command =>
+        await GetScheduledRemindersAsync("o.state = $state AND o.due_at_utc <= $throughUtc", command =>
         {
             command.Parameters.AddWithValue("$state", (int)OccurrenceState.Scheduled);
-            command.Parameters.AddWithValue("$through", Format(through));
+            command.Parameters.AddWithValue("$throughUtc", FormatUtcKey(through));
         }, ct);
 
     public async Task<ScheduledReminder?> GetScheduledReminderAsync(Guid occurrenceId, CancellationToken ct)
@@ -103,7 +103,12 @@ public sealed class SqliteReminderRepository : IReminderRepository
     {
         await using var connection = await OpenConnectionAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
-        await UpdateOccurrenceStateAsync(connection, transaction, occurrenceId, state, handledAt, ct);
+        if (!await TryApplyActionStateAsync(connection, transaction, occurrenceId, state, handledAt, ct))
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
         if (nextOccurrence is not null)
         {
             await InsertOccurrenceAsync(connection, transaction, nextOccurrence, ct);
@@ -118,13 +123,34 @@ public sealed class SqliteReminderRepository : IReminderRepository
     {
         await using var connection = await OpenConnectionAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
-        if (scope == SeriesScope.ThisAndFuture)
+        var current = await GetOccurrenceContextAsync(connection, transaction, occurrenceId, ct);
+        if (current is null)
         {
-            await UpdateItemAsync(connection, transaction, item, ct);
-            await UpsertRecurrenceAsync(connection, transaction, item, ct);
+            await transaction.CommitAsync(ct);
+            return;
         }
 
-        await UpdateOccurrenceAsync(connection, transaction, occurrenceId, occurrence, ct);
+        if (scope == SeriesScope.ThisAndFuture)
+        {
+            var futureItem = item with { Id = Guid.NewGuid() };
+            await InsertItemAsync(connection, transaction, futureItem, ct);
+            if (futureItem.Recurrence is not null)
+            {
+                await InsertRecurrenceAsync(connection, transaction, futureItem.Id, futureItem.Recurrence, ct);
+            }
+
+            await DeleteScheduledOccurrencesAtOrAfterAsync(connection, transaction,
+                current.Value.ItemId, current.Value.DueAt, ct);
+            await InsertOccurrenceAsync(connection, transaction, occurrence with { ItemId = futureItem.Id }, ct);
+        }
+        else
+        {
+            var singleItem = item with { Id = Guid.NewGuid(), Recurrence = null };
+            await InsertItemAsync(connection, transaction, singleItem, ct);
+            await UpdateOccurrenceAsync(connection, transaction, occurrenceId,
+                occurrence with { ItemId = singleItem.Id }, ct);
+        }
+
         await transaction.CommitAsync(ct);
     }
 
@@ -180,7 +206,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
             INNER JOIN items i ON i.id = o.item_id
             LEFT JOIN recurrence_rules r ON r.item_id = i.id
             WHERE {predicate}
-            ORDER BY o.due_at, o.id;
+            ORDER BY o.due_at_utc, o.id;
             """;
         return command;
     }
@@ -254,12 +280,13 @@ public sealed class SqliteReminderRepository : IReminderRepository
         await using var command = connection.CreateCommand();
         command.Transaction = transaction as SqliteTransaction;
         command.CommandText = """
-            INSERT INTO occurrences(id, item_id, due_at, state, handled_at, snooze_parent_id)
-            VALUES ($id, $itemId, $dueAt, $state, $handledAt, $snoozeParentId);
+            INSERT INTO occurrences(id, item_id, due_at, due_at_utc, state, handled_at, snooze_parent_id)
+            VALUES ($id, $itemId, $dueAt, $dueAtUtc, $state, $handledAt, $snoozeParentId);
             """;
         command.Parameters.AddWithValue("$id", occurrence.Id.ToString("D"));
         command.Parameters.AddWithValue("$itemId", occurrence.ItemId.ToString("D"));
         command.Parameters.AddWithValue("$dueAt", Format(occurrence.DueAt));
+        command.Parameters.AddWithValue("$dueAtUtc", FormatUtcKey(occurrence.DueAt));
         command.Parameters.AddWithValue("$state", (int)occurrence.State);
         command.Parameters.AddWithValue("$handledAt", occurrence.HandledAt is null ? DBNull.Value : Format(occurrence.HandledAt.Value));
         command.Parameters.AddWithValue("$snoozeParentId", occurrence.SnoozeParentId is null ? DBNull.Value : occurrence.SnoozeParentId.Value.ToString("D"));
@@ -276,6 +303,24 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.Parameters.AddWithValue("$handledAt", Format(handledAt));
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task<bool> TryApplyActionStateAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        Guid occurrenceId, OccurrenceState state, DateTimeOffset handledAt, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            UPDATE occurrences
+            SET state = $state, handled_at = $handledAt
+            WHERE id = $id AND state IN ($scheduled, $fired);
+            """;
+        command.Parameters.AddWithValue("$state", (int)state);
+        command.Parameters.AddWithValue("$handledAt", Format(handledAt));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
+        command.Parameters.AddWithValue("$fired", (int)OccurrenceState.Fired);
+        return await command.ExecuteNonQueryAsync(ct) == 1;
     }
 
     private static async Task InsertActionLogAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
@@ -327,12 +372,13 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.CommandText = """
             UPDATE occurrences
             SET id = $newId, item_id = $itemId, due_at = $dueAt, state = $state,
-                handled_at = $handledAt, snooze_parent_id = $snoozeParentId
+                due_at_utc = $dueAtUtc, handled_at = $handledAt, snooze_parent_id = $snoozeParentId
             WHERE id = $id;
             """;
         command.Parameters.AddWithValue("$newId", occurrence.Id.ToString("D"));
         command.Parameters.AddWithValue("$itemId", occurrence.ItemId.ToString("D"));
         command.Parameters.AddWithValue("$dueAt", Format(occurrence.DueAt));
+        command.Parameters.AddWithValue("$dueAtUtc", FormatUtcKey(occurrence.DueAt));
         command.Parameters.AddWithValue("$state", (int)occurrence.State);
         command.Parameters.AddWithValue("$handledAt", occurrence.HandledAt is null ? DBNull.Value : Format(occurrence.HandledAt.Value));
         command.Parameters.AddWithValue("$snoozeParentId", occurrence.SnoozeParentId is null ? DBNull.Value : occurrence.SnoozeParentId.Value.ToString("D"));
@@ -382,15 +428,17 @@ public sealed class SqliteReminderRepository : IReminderRepository
             DELETE FROM occurrences
             WHERE item_id = $itemId
               AND state = $scheduled
-              AND julianday(due_at) >= julianday($cutoff);
+              AND due_at_utc >= $cutoffUtc;
             """;
         command.Parameters.AddWithValue("$itemId", itemId.ToString("D"));
         command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
-        command.Parameters.AddWithValue("$cutoff", Format(cutoff));
+        command.Parameters.AddWithValue("$cutoffUtc", FormatUtcKey(cutoff));
         await command.ExecuteNonQueryAsync(ct);
     }
 
     private static string Format(DateTimeOffset value) => value.ToString("O", CultureInfo.InvariantCulture);
+
+    private static string FormatUtcKey(DateTimeOffset value) => value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
 
     private static string FormatDays(IEnumerable<DayOfWeek> days) => string.Join(',', days.OrderBy(static day => day).Select(static day => ((int)day).ToString(CultureInfo.InvariantCulture)));
 

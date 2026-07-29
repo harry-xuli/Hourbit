@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Globalization;
 
 namespace Moment.Infrastructure.Data;
 
@@ -56,10 +57,11 @@ public static class DatabaseMigrator
                     id TEXT PRIMARY KEY,
                     item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
                     due_at TEXT NOT NULL,
+                    due_at_utc TEXT NOT NULL,
                     state INTEGER NOT NULL,
                     handled_at TEXT NULL,
                     snooze_parent_id TEXT NULL,
-                    UNIQUE(item_id, due_at)
+                    UNIQUE(item_id, due_at_utc)
                 );
                 CREATE TABLE recurrence_rules (
                     item_id TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
@@ -77,13 +79,78 @@ public static class DatabaseMigrator
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
                 );
-                CREATE INDEX ix_occurrences_state_due_at ON occurrences(state, due_at);
+                CREATE INDEX ix_occurrences_state_due_at ON occurrences(state, due_at_utc);
                 CREATE INDEX ix_occurrences_item_id ON occurrences(item_id);
                 INSERT INTO schema_info(version) VALUES (1);
                 """;
             await command.ExecuteNonQueryAsync(ct);
         }
 
+        command.CommandText = "SELECT COUNT(*) FROM schema_info WHERE version = 2;";
+        var versionTwoExists = Convert.ToInt32(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 0;
+        if (!versionTwoExists)
+        {
+            if (!await HasColumnAsync(connection, (SqliteTransaction)transaction, "occurrences", "due_at_utc", ct))
+            {
+                command.CommandText = "ALTER TABLE occurrences ADD COLUMN due_at_utc TEXT NULL;";
+                await command.ExecuteNonQueryAsync(ct);
+            }
+
+            await PopulateUtcKeysAsync(connection, (SqliteTransaction)transaction, ct);
+            command.CommandText = """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_occurrences_item_due_at_utc
+                    ON occurrences(item_id, due_at_utc);
+                CREATE INDEX IF NOT EXISTS ix_occurrences_state_due_at_utc
+                    ON occurrences(state, due_at_utc);
+                INSERT INTO schema_info(version) VALUES (2);
+                """;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
         await transaction.CommitAsync(ct);
+    }
+
+    private static async Task<bool> HasColumnAsync(SqliteConnection connection, SqliteTransaction transaction,
+        string table, string column, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"PRAGMA table_info({table});";
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static async Task PopulateUtcKeysAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken ct)
+    {
+        var rows = new List<(string Id, string DueAt)>();
+        await using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = "SELECT id, due_at FROM occurrences WHERE due_at_utc IS NULL;";
+            await using var reader = await select.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                rows.Add((reader.GetString(0), reader.GetString(1)));
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            var dueAt = DateTimeOffset.Parse(row.DueAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+            await using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = "UPDATE occurrences SET due_at_utc = $dueAtUtc WHERE id = $id;";
+            update.Parameters.AddWithValue("$dueAtUtc", dueAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+            update.Parameters.AddWithValue("$id", row.Id);
+            await update.ExecuteNonQueryAsync(ct);
+        }
     }
 }
