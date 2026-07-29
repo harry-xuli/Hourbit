@@ -3,6 +3,8 @@ using Moment.Core.Domain;
 
 namespace Moment.Core.Scheduling;
 
+public sealed record SchedulerDeliveryFailure(ScheduledReminder Reminder, Exception Exception);
+
 public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
 {
     private readonly IReminderRepository _repository;
@@ -14,6 +16,19 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
     private CancellationTokenSource? _runCancellation;
     private Task? _loop;
     private bool _disposed;
+
+    public event Action<SchedulerDeliveryFailure>? DeliveryFailed;
+
+    public Task Completion
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _loop ?? Task.CompletedTask;
+            }
+        }
+    }
 
     public ReminderScheduler(IReminderRepository repository, IReminderSink sink, IClock clock)
     {
@@ -125,13 +140,45 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
                 {
                     if (await _repository.TryMarkFiredAsync(reminder.Occurrence.Id, _clock.Now, ct).ConfigureAwait(false))
                     {
-                        await _sink.DeliverAsync(reminder, ct).ConfigureAwait(false);
+                        try
+                        {
+                            await _sink.DeliverAsync(reminder, ct).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception exception)
+                        {
+                            ReportDeliveryFailure(new SchedulerDeliveryFailure(reminder, exception));
+                        }
                     }
                 }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+        }
+    }
+
+    private void ReportDeliveryFailure(SchedulerDeliveryFailure failure)
+    {
+        var handlers = DeliveryFailed;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Action<SchedulerDeliveryFailure> handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(failure);
+            }
+            catch
+            {
+                // Observers must not be allowed to stop the scheduling loop.
+            }
         }
     }
 }

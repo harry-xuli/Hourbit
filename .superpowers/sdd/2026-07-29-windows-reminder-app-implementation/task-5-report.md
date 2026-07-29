@@ -42,3 +42,23 @@
 ## Concerns
 
 - The recovery classifier is intentionally a pure boundary-policy component; invoking `IReminderSink.DeliverMissedSummaryAsync` belongs to the app resume orchestration task, outside Task 5's stated scope.
+
+## Fix round 1 — sink failure resilience
+
+### TDD evidence
+
+1. RED: `dotnet test tests/Moment.Core.Tests/Moment.Core.Tests.csproj --filter Sink_failure_is_reported` failed with CS0246/CS1061 because `SchedulerDeliveryFailure`, `ReminderScheduler.DeliveryFailed`, and `ReminderScheduler.Completion` did not exist.
+2. GREEN: the same focused test passed after adding observable delivery-failure reporting and catching only non-cancellation sink exceptions around a successful `TryMarkFiredAsync` transition.
+
+### Policy
+
+- A non-cancellation `IReminderSink.DeliverAsync` failure raises `ReminderScheduler.DeliveryFailed` with the reminder and exception. Each subscriber is isolated so an observer failure cannot stop scheduling.
+- The scheduler keeps the occurrence `Fired`: it does not invent a repository rollback or automatic retry contract. This preserves the existing atomic at-most-once state transition; an application consumer can record, surface, or remediate the reported failure.
+- `OperationCanceledException` is rethrown to retain cancellation semantics. Other sink failures are handled per reminder, so the loop continues and `Dispose()` does not rethrow that already-reported sink failure.
+
+### Verification
+
+- Focused sink-failure test: passed 1/1.
+- Scheduling: passed 12/12.
+- Core: passed 55/55.
+- Solution: Moment.Core.Tests 55/55 and Moment.Infrastructure.Tests 19/19.
