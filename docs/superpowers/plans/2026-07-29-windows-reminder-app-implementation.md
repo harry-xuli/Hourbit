@@ -19,7 +19,7 @@
 - Installed data path is `%LOCALAPPDATA%\Moment\data\moment.db`; portable data path is `Data\moment.db` beside `portable.flag`.
 - Normal missed reminders older than five minutes are grouped; important missed reminders remain individual.
 - Use high-contrast text, keyboard-accessible controls, non-color status indicators, 100%–200% scaling, and reduced-motion support.
-- Pin package versions centrally: `Microsoft.WindowsAppSDK` 2.3.1, `Microsoft.Data.Sqlite` 10.0.10, `xunit` 2.9.3, and `Microsoft.NET.Test.Sdk` 18.8.1.
+- Pin package versions centrally: `Microsoft.WindowsAppSDK` 2.3.1, `Microsoft.Data.Sqlite` 10.0.10, `SQLitePCLRaw.bundle_e_sqlite3` 2.1.12, `SQLitePCLRaw.lib.e_sqlite3` 2.1.12, `xunit` 2.9.3, and `Microsoft.NET.Test.Sdk` 18.8.1. Enable `CentralPackageTransitivePinningEnabled` so the SQLitePCLRaw security fix wins transitively; do not suppress vulnerability checks.
 - Do not begin implementation until the .NET 10 SDK is installed; packaging tasks additionally require Inno Setup 6.
 
 ---
@@ -174,9 +174,12 @@ Create `Directory.Packages.props`:
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
     <PackageVersion Include="Microsoft.WindowsAppSDK" Version="2.3.1" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />
@@ -332,6 +335,8 @@ dotnet add tests/Moment.Infrastructure.Tests/Moment.Infrastructure.Tests.csproj 
 dotnet sln Moment.slnx add src/Moment.Infrastructure/Moment.Infrastructure.csproj
 dotnet sln Moment.slnx add tests/Moment.Infrastructure.Tests/Moment.Infrastructure.Tests.csproj
 ```
+
+Keep `Microsoft.Data.Sqlite` at 10.0.10 and centrally pin its SQLitePCLRaw bundle and native library dependencies to 2.1.12 with transitive pinning enabled. This is required to keep vulnerability checks enabled while avoiding GHSA-2m69-gcr7-jv3q.
 
 - [ ] **Step 2: Write the failing persistence test**
 

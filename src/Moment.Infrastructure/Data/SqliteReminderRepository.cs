@@ -1,0 +1,400 @@
+using System.Globalization;
+using Microsoft.Data.Sqlite;
+using Moment.Core.Abstractions;
+using Moment.Core.Domain;
+
+namespace Moment.Infrastructure.Data;
+
+public sealed class SqliteReminderRepository : IReminderRepository
+{
+    private readonly string _databasePath;
+
+    private SqliteReminderRepository(string databasePath) => _databasePath = databasePath;
+
+    public static async Task<SqliteReminderRepository> OpenAsync(string databasePath, CancellationToken ct)
+    {
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(databasePath, ct);
+        await DatabaseMigrator.MigrateAsync(connection, ct);
+        return new SqliteReminderRepository(databasePath);
+    }
+
+    public async Task SaveItemWithOccurrenceAsync(ReminderItem item, ReminderOccurrence occurrence, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        await InsertItemAsync(connection, transaction, item, ct);
+        if (item.Recurrence is not null)
+        {
+            await InsertRecurrenceAsync(connection, transaction, item.Id, item.Recurrence, ct);
+        }
+
+        await InsertOccurrenceAsync(connection, transaction, occurrence, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ScheduledReminder>> GetScheduledAsync(CancellationToken ct) =>
+        await GetScheduledRemindersAsync("o.state = $state", command =>
+        {
+            command.Parameters.AddWithValue("$state", (int)OccurrenceState.Scheduled);
+        }, ct);
+
+    public async Task<IReadOnlyList<ScheduledReminder>> GetDueAsync(DateTimeOffset through, CancellationToken ct) =>
+        await GetScheduledRemindersAsync("o.state = $state AND julianday(o.due_at) <= julianday($through)", command =>
+        {
+            command.Parameters.AddWithValue("$state", (int)OccurrenceState.Scheduled);
+            command.Parameters.AddWithValue("$through", Format(through));
+        }, ct);
+
+    public async Task<ScheduledReminder?> GetScheduledReminderAsync(Guid occurrenceId, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = CreateReminderQuery(connection, "o.id = $id");
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadScheduledReminder(reader) : null;
+    }
+
+    public async Task<ReminderItem?> GetItemAsync(Guid itemId, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT i.id, i.title, i.kind, i.importance, i.created_at,
+                   r.kind, r.days_of_week, r.time
+            FROM items i
+            LEFT JOIN recurrence_rules r ON r.item_id = i.id
+            WHERE i.id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", itemId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadItem(reader) : null;
+    }
+
+    public async Task SetOccurrenceStateAsync(Guid occurrenceId, OccurrenceState state, DateTimeOffset handledAt, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await UpdateOccurrenceStateAsync(connection, null, occurrenceId, state, handledAt, ct);
+    }
+
+    public async Task SaveOccurrenceAsync(ReminderOccurrence occurrence, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await InsertOccurrenceAsync(connection, null, occurrence, ct);
+    }
+
+    public async Task<bool> TryMarkFiredAsync(Guid occurrenceId, DateTimeOffset firedAt, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE occurrences
+            SET state = $fired, handled_at = $firedAt
+            WHERE id = $id AND state = $scheduled;
+            """;
+        command.Parameters.AddWithValue("$fired", (int)OccurrenceState.Fired);
+        command.Parameters.AddWithValue("$firedAt", Format(firedAt));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    public async Task ApplyActionAsync(Guid occurrenceId, OccurrenceState state,
+        DateTimeOffset handledAt, ReminderOccurrence? nextOccurrence, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        await UpdateOccurrenceStateAsync(connection, transaction, occurrenceId, state, handledAt, ct);
+        if (nextOccurrence is not null)
+        {
+            await InsertOccurrenceAsync(connection, transaction, nextOccurrence, ct);
+        }
+
+        await InsertActionLogAsync(connection, transaction, occurrenceId, state, handledAt, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task EditAsync(Guid occurrenceId, ReminderItem item,
+        ReminderOccurrence occurrence, SeriesScope scope, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        if (scope == SeriesScope.ThisAndFuture)
+        {
+            await UpdateItemAsync(connection, transaction, item, ct);
+            await UpsertRecurrenceAsync(connection, transaction, item, ct);
+        }
+
+        await UpdateOccurrenceAsync(connection, transaction, occurrenceId, occurrence, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        if (scope == SeriesScope.OccurrenceOnly)
+        {
+            await DeleteOccurrenceAsync(connection, transaction, occurrenceId, ct);
+        }
+        else
+        {
+            var occurrence = await GetOccurrenceContextAsync(connection, transaction, occurrenceId, ct);
+            if (occurrence is not null)
+            {
+                await DeleteRecurrenceAsync(connection, transaction, occurrence.Value.ItemId, ct);
+                await DeleteScheduledOccurrencesAtOrAfterAsync(connection, transaction,
+                    occurrence.Value.ItemId, occurrence.Value.DueAt, ct);
+            }
+        }
+
+        await transaction.CommitAsync(ct);
+    }
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken ct) =>
+        await DatabaseMigrator.OpenConnectionAsync(_databasePath, ct);
+
+    private async Task<IReadOnlyList<ScheduledReminder>> GetScheduledRemindersAsync(
+        string predicate, Action<SqliteCommand> configure, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = CreateReminderQuery(connection, predicate);
+        configure(command);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        var reminders = new List<ScheduledReminder>();
+        while (await reader.ReadAsync(ct))
+        {
+            reminders.Add(ReadScheduledReminder(reader));
+        }
+
+        return reminders;
+    }
+
+    private static SqliteCommand CreateReminderQuery(SqliteConnection connection, string predicate)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT i.id, i.title, i.kind, i.importance, i.created_at,
+                   r.kind, r.days_of_week, r.time,
+                   o.id, o.item_id, o.due_at, o.state, o.handled_at, o.snooze_parent_id
+            FROM occurrences o
+            INNER JOIN items i ON i.id = o.item_id
+            LEFT JOIN recurrence_rules r ON r.item_id = i.id
+            WHERE {predicate}
+            ORDER BY o.due_at, o.id;
+            """;
+        return command;
+    }
+
+    private static ScheduledReminder ReadScheduledReminder(SqliteDataReader reader) =>
+        new(ReadItem(reader), new ReminderOccurrence(
+            ParseGuid(reader.GetString(8)),
+            ParseGuid(reader.GetString(9)),
+            ParseDateTimeOffset(reader.GetString(10)),
+            (OccurrenceState)reader.GetInt32(11),
+            reader.IsDBNull(12) ? null : ParseDateTimeOffset(reader.GetString(12)),
+            reader.IsDBNull(13) ? null : ParseGuid(reader.GetString(13))));
+
+    private static ReminderItem ReadItem(SqliteDataReader reader)
+    {
+        RecurrenceRule? recurrence = null;
+        if (!reader.IsDBNull(5))
+        {
+            var kind = (RecurrenceKind)reader.GetInt32(5);
+            var time = TimeOnly.ParseExact(reader.GetString(7), "O", CultureInfo.InvariantCulture);
+            recurrence = kind switch
+            {
+                RecurrenceKind.Daily => RecurrenceRule.Daily(time),
+                RecurrenceKind.Weekdays => RecurrenceRule.Weekdays(time),
+                RecurrenceKind.Weekly => RecurrenceRule.Weekly(
+                    reader.GetString(6).Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(static day => (DayOfWeek)int.Parse(day, CultureInfo.InvariantCulture)), time),
+                _ => throw new InvalidOperationException("Unknown recurrence kind.")
+            };
+        }
+
+        return new ReminderItem(
+            ParseGuid(reader.GetString(0)),
+            reader.GetString(1),
+            (ReminderKind)reader.GetInt32(2),
+            (ReminderImportance)reader.GetInt32(3),
+            ParseDateTimeOffset(reader.GetString(4)),
+            recurrence);
+    }
+
+    private static async Task InsertItemAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
+        ReminderItem item, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction as SqliteTransaction;
+        command.CommandText = "INSERT INTO items(id, title, kind, importance, created_at) VALUES ($id, $title, $kind, $importance, $createdAt);";
+        command.Parameters.AddWithValue("$id", item.Id.ToString("D"));
+        command.Parameters.AddWithValue("$title", item.Title);
+        command.Parameters.AddWithValue("$kind", (int)item.Kind);
+        command.Parameters.AddWithValue("$importance", (int)item.Importance);
+        command.Parameters.AddWithValue("$createdAt", Format(item.CreatedAt));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task InsertRecurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
+        Guid itemId, RecurrenceRule rule, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction as SqliteTransaction;
+        command.CommandText = "INSERT INTO recurrence_rules(item_id, kind, days_of_week, time) VALUES ($itemId, $kind, $days, $time);";
+        command.Parameters.AddWithValue("$itemId", itemId.ToString("D"));
+        command.Parameters.AddWithValue("$kind", (int)rule.Kind);
+        command.Parameters.AddWithValue("$days", FormatDays(rule.DaysOfWeek));
+        command.Parameters.AddWithValue("$time", rule.Time.ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task InsertOccurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
+        ReminderOccurrence occurrence, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction as SqliteTransaction;
+        command.CommandText = """
+            INSERT INTO occurrences(id, item_id, due_at, state, handled_at, snooze_parent_id)
+            VALUES ($id, $itemId, $dueAt, $state, $handledAt, $snoozeParentId);
+            """;
+        command.Parameters.AddWithValue("$id", occurrence.Id.ToString("D"));
+        command.Parameters.AddWithValue("$itemId", occurrence.ItemId.ToString("D"));
+        command.Parameters.AddWithValue("$dueAt", Format(occurrence.DueAt));
+        command.Parameters.AddWithValue("$state", (int)occurrence.State);
+        command.Parameters.AddWithValue("$handledAt", occurrence.HandledAt is null ? DBNull.Value : Format(occurrence.HandledAt.Value));
+        command.Parameters.AddWithValue("$snoozeParentId", occurrence.SnoozeParentId is null ? DBNull.Value : occurrence.SnoozeParentId.Value.ToString("D"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task UpdateOccurrenceStateAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
+        Guid occurrenceId, OccurrenceState state, DateTimeOffset handledAt, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction as SqliteTransaction;
+        command.CommandText = "UPDATE occurrences SET state = $state, handled_at = $handledAt WHERE id = $id;";
+        command.Parameters.AddWithValue("$state", (int)state);
+        command.Parameters.AddWithValue("$handledAt", Format(handledAt));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task InsertActionLogAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        Guid occurrenceId, OccurrenceState state, DateTimeOffset handledAt, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = "INSERT INTO action_log(id, occurrence_id, state, handled_at) VALUES ($id, $occurrenceId, $state, $handledAt);";
+        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("D"));
+        command.Parameters.AddWithValue("$occurrenceId", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$state", (int)state);
+        command.Parameters.AddWithValue("$handledAt", Format(handledAt));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task UpdateItemAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        ReminderItem item, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = "UPDATE items SET title = $title, kind = $kind, importance = $importance, created_at = $createdAt WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", item.Id.ToString("D"));
+        command.Parameters.AddWithValue("$title", item.Title);
+        command.Parameters.AddWithValue("$kind", (int)item.Kind);
+        command.Parameters.AddWithValue("$importance", (int)item.Importance);
+        command.Parameters.AddWithValue("$createdAt", Format(item.CreatedAt));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task UpsertRecurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        ReminderItem item, CancellationToken ct)
+    {
+        await using var delete = connection.CreateCommand();
+        delete.Transaction = (SqliteTransaction)transaction;
+        delete.CommandText = "DELETE FROM recurrence_rules WHERE item_id = $itemId;";
+        delete.Parameters.AddWithValue("$itemId", item.Id.ToString("D"));
+        await delete.ExecuteNonQueryAsync(ct);
+        if (item.Recurrence is not null)
+        {
+            await InsertRecurrenceAsync(connection, transaction, item.Id, item.Recurrence, ct);
+        }
+    }
+
+    private static async Task UpdateOccurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        Guid occurrenceId, ReminderOccurrence occurrence, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            UPDATE occurrences
+            SET id = $newId, item_id = $itemId, due_at = $dueAt, state = $state,
+                handled_at = $handledAt, snooze_parent_id = $snoozeParentId
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$newId", occurrence.Id.ToString("D"));
+        command.Parameters.AddWithValue("$itemId", occurrence.ItemId.ToString("D"));
+        command.Parameters.AddWithValue("$dueAt", Format(occurrence.DueAt));
+        command.Parameters.AddWithValue("$state", (int)occurrence.State);
+        command.Parameters.AddWithValue("$handledAt", occurrence.HandledAt is null ? DBNull.Value : Format(occurrence.HandledAt.Value));
+        command.Parameters.AddWithValue("$snoozeParentId", occurrence.SnoozeParentId is null ? DBNull.Value : occurrence.SnoozeParentId.Value.ToString("D"));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task DeleteOccurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        Guid occurrenceId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = "DELETE FROM occurrences WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task<(Guid ItemId, DateTimeOffset DueAt)?> GetOccurrenceContextAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        Guid occurrenceId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = "SELECT item_id, due_at FROM occurrences WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct)
+            ? (ParseGuid(reader.GetString(0)), ParseDateTimeOffset(reader.GetString(1)))
+            : null;
+    }
+
+    private static async Task DeleteRecurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        Guid itemId, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = "DELETE FROM recurrence_rules WHERE item_id = $id;";
+        command.Parameters.AddWithValue("$id", itemId.ToString("D"));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task DeleteScheduledOccurrencesAtOrAfterAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
+        Guid itemId, DateTimeOffset cutoff, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            DELETE FROM occurrences
+            WHERE item_id = $itemId
+              AND state = $scheduled
+              AND julianday(due_at) >= julianday($cutoff);
+            """;
+        command.Parameters.AddWithValue("$itemId", itemId.ToString("D"));
+        command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
+        command.Parameters.AddWithValue("$cutoff", Format(cutoff));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static string Format(DateTimeOffset value) => value.ToString("O", CultureInfo.InvariantCulture);
+
+    private static string FormatDays(IEnumerable<DayOfWeek> days) => string.Join(',', days.OrderBy(static day => day).Select(static day => ((int)day).ToString(CultureInfo.InvariantCulture)));
+
+    private static Guid ParseGuid(string value) => Guid.Parse(value);
+
+    private static DateTimeOffset ParseDateTimeOffset(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+}
