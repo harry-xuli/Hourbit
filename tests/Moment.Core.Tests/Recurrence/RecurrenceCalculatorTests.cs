@@ -67,4 +67,29 @@ public sealed class RecurrenceCalculatorTests
 
         Assert.Equal(DateTimeOffset.Parse("2026-11-01T01:30:00-04:00"), next);
     }
+
+    [Fact]
+    public void Daily_skips_an_ambiguous_local_time_when_its_earlier_instant_has_already_passed()
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        var rule = RecurrenceRule.Daily(new TimeOnly(1, 30));
+
+        var next = new RecurrenceCalculator().NextAfter(
+            rule, DateTimeOffset.Parse("2026-11-01T01:15:00-05:00"), zone);
+
+        Assert.Equal(DateTimeOffset.Parse("2026-11-02T01:30:00-05:00"), next);
+    }
+
+    [Fact]
+    public void Weekly_with_no_allowed_days_throws_after_searching_370_days()
+    {
+        var zone = TimeZoneInfo.FindSystemTimeZoneById("China Standard Time");
+        var rule = new RecurrenceRule(RecurrenceKind.Weekly, [], new TimeOnly(9, 0));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            new RecurrenceCalculator().NextAfter(
+                rule, DateTimeOffset.Parse("2026-07-29T08:00:00+08:00"), zone));
+
+        Assert.Equal("No occurrence found within 370 days.", exception.Message);
+    }
 }

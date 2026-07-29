@@ -30,7 +30,13 @@ public sealed class RecurrenceCalculator : IRecurrenceCalculator
                 continue;
             }
 
-            return ResolveLocal(candidateLocal, zone);
+            var candidate = ResolveLocal(candidateLocal, zone);
+            if (candidate <= after)
+            {
+                continue;
+            }
+
+            return candidate;
         }
 
         throw new InvalidOperationException("No occurrence found within 370 days.");
