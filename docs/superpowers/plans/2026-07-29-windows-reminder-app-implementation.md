@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Target Windows 11 x64 and `net10.0-windows10.0.22621.0`; do not add cross-platform abstractions that the specification does not require.
+- Target Windows 11 x64. Keep `Moment.Core`, `Moment.Infrastructure`, `Moment.TestSupport`, and their corresponding test projects on `net10.0`; target `Moment.Windows` and `Moment.App` with `net10.0-windows10.0.22621.0`. Do not add cross-platform abstractions that the specification does not require.
 - Use WPF for UI and Windows App SDK `AppNotificationManager` for normal notifications.
 - Keep the app local-only: no account, telemetry, cloud sync, AI service, or network time parser.
 - Persist a reminder occurrence before signaling the scheduler; UI and notification handlers never access SQLite directly.
