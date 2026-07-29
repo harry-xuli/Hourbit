@@ -214,4 +214,31 @@ public sealed class ChineseTimeParserTests
         });
         Assert.Contains(result.Choices, choice => choice.Label.Contains(label, StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void Interprets_vague_evening_twelve_as_future_midnight()
+    {
+        var result = Assert.IsType<ParseResult.Ambiguous>(
+            new ChineseTimeParser().Parse("待会晚上12点提醒我喝水", Now, ChinaTimeZone));
+
+        Assert.Equal(2, result.Choices.Count);
+        Assert.All(result.Choices, choice =>
+        {
+            Assert.Equal("喝水", choice.Draft.Title);
+            Assert.Equal(0, choice.Draft.DueAt.Hour);
+            Assert.True(choice.Draft.DueAt > Now);
+            Assert.Contains("晚上12点", choice.Label, StringComparison.Ordinal);
+        });
+        Assert.Equal(DateTimeOffset.Parse("2026-07-30T00:00:00+08:00"), result.Choices[0].Draft.DueAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-07-31T00:00:00+08:00"), result.Choices[1].Draft.DueAt);
+    }
+
+    [Fact]
+    public void Interprets_direct_evening_twelve_as_midnight()
+    {
+        var result = Assert.IsType<ParseResult.Success>(
+            new ChineseTimeParser().Parse("明天晚上12点提醒我检查", Now, ChinaTimeZone));
+
+        Assert.Equal(DateTimeOffset.Parse("2026-07-30T00:00:00+08:00"), result.Draft.DueAt);
+    }
 }

@@ -32,6 +32,10 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         "(?<phrase>晚上|待会|下周)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private static readonly Regex AmbiguousClockPattern = new(
+        "(?<phrase>待会|下周)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public ParseResult Parse(string text, DateTimeOffset now, TimeZoneInfo zone)
     {
         ArgumentNullException.ThrowIfNull(zone);
@@ -127,10 +131,10 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             return Invalid(originalText, "时间格式无效。");
         }
 
-        var ambiguousClockMatch = AmbiguousPattern.Match(remaining);
+        var ambiguousClockMatch = AmbiguousClockPattern.Match(remaining);
         if (ambiguousClockMatch.Success)
         {
-            var ambiguousTitle = ExtractTitle(AmbiguousPattern.Replace(
+            var ambiguousTitle = ExtractTitle(AmbiguousClockPattern.Replace(
                 ClockPattern.Replace(remaining, string.Empty, 1), string.Empty, 1));
             if (!TryValidateTitle(ambiguousTitle, originalText, out var ambiguousTitleInvalid))
             {
@@ -217,6 +221,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         hour = match.Groups["period"].Value switch
         {
             "下午" or "晚上" when hour is >= 1 and <= 11 => hour + 12,
+            "晚上" when hour == 12 => 0,
             "中午" when hour is >= 1 and <= 11 => hour + 12,
             _ => hour
         };
@@ -406,9 +411,11 @@ public sealed class ChineseTimeParser : IChineseTimeParser
 
     private static string FormatClock(TimeOnly time, string period)
     {
-        var hour = period is "下午" or "晚上" && time.Hour is >= 13 and <= 23
-            ? time.Hour - 12
-            : time.Hour;
+        var hour = period == "晚上" && time.Hour == 0
+            ? 12
+            : period is "下午" or "晚上" && time.Hour is >= 13 and <= 23
+                ? time.Hour - 12
+                : time.Hour;
         var clock = new TimeOnly(hour, time.Minute);
         return $"{period}{FormatTime(clock)}";
     }

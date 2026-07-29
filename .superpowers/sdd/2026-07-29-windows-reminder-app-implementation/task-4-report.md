@@ -23,6 +23,20 @@
 - `dotnet test Moment.slnx` — passed: Moment.Core.Tests 21/21; Moment.Infrastructure.Tests 19/19.
 - `dotnet build Moment.slnx --no-restore` — succeeded with 0 warnings and 0 errors.
 
+## Fix round 3 — evening twelve is midnight
+
+### TDD evidence
+
+1. RED: added exact vague and direct `晚上12点` parser tests before implementation. The focused run failed as expected: vague choices were labelled `晚上12点` while their drafts were noon (12:00), and direct `明天晚上12点` was incorrectly returned as `Ambiguous`.
+2. GREEN: the focused midnight suite passed 2/2 after normalizing `晚上12点` to `00:00` and limiting clock-present ambiguity to vague date tokens (`待会` and `下周`).
+
+### Policy and final verification
+
+- `晚上12点` is a supported clock spelling for midnight. Vague `待会晚上12点` presents the next two strictly-future midnight dates, with labels that retain `晚上12点`; direct `明天晚上12点` schedules that date at `00:00`.
+- `dotnet test tests\\Moment.Core.Tests\\Moment.Core.Tests.csproj --filter "Interprets_vague_evening_twelve_as_future_midnight|Interprets_direct_evening_twelve_as_midnight"` — passed 2/2.
+- Parsing: 34/34; Core: 43/43; solution: Moment.Core.Tests 43/43 and Moment.Infrastructure.Tests 19/19.
+- `dotnet build Moment.slnx --no-restore` — succeeded with 0 warnings and 0 errors.
+
 Smart App Control did not block any command; no retry and no `0x800711C7` external failure occurred.
 
 ## Design decisions and concerns
