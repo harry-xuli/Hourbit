@@ -9,6 +9,9 @@ public class FakeReminderRepository : IReminderRepository
     private readonly Dictionary<Guid, ReminderItem> _items = [];
     private readonly Dictionary<Guid, ReminderOccurrence> _occurrences = [];
 
+    public Task AddAsync(ScheduledReminder reminder, CancellationToken ct = default) =>
+        SaveItemWithOccurrenceAsync(reminder.Item, reminder.Occurrence, ct);
+
     public virtual Task SaveItemWithOccurrenceAsync(ReminderItem item, ReminderOccurrence occurrence, CancellationToken ct)
     {
         lock (_gate)
