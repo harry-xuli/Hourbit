@@ -215,4 +215,75 @@ public sealed class SqliteReminderRepositoryTests
 
         Assert.NotNull(await reopened.GetScheduledReminderAsync(occurrence.Id, CancellationToken.None));
     }
+
+    [Fact]
+    public async Task TryMarkFiredAsync_is_compare_and_set_for_scheduled_occurrences()
+    {
+        using var temp = new TempDirectory();
+        var repository = await SqliteReminderRepository.OpenAsync(Path.Combine(temp.Path, "moment.db"), CancellationToken.None);
+        var due = new DateTimeOffset(2026, 8, 13, 9, 0, 0, TimeSpan.FromHours(8));
+        var item = ReminderItem.Create("SQLite CAS", ReminderKind.Plan, ReminderImportance.Normal, due.AddHours(-1), due);
+        var scheduled = ReminderOccurrence.Schedule(item.Id, due);
+        var completed = new ReminderOccurrence(Guid.NewGuid(), item.Id, due.AddHours(1), OccurrenceState.Completed, due, null);
+        await repository.SaveItemWithOccurrenceAsync(item, scheduled, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(completed, CancellationToken.None);
+
+        Assert.True(await repository.TryMarkFiredAsync(scheduled.Id, due, CancellationToken.None));
+        Assert.False(await repository.TryMarkFiredAsync(scheduled.Id, due.AddMinutes(1), CancellationToken.None));
+        Assert.False(await repository.TryMarkFiredAsync(completed.Id, due, CancellationToken.None));
+        Assert.Equal(OccurrenceState.Fired, (await repository.GetScheduledReminderAsync(scheduled.Id, CancellationToken.None))!.Occurrence.State);
+        Assert.Equal(OccurrenceState.Completed, (await repository.GetScheduledReminderAsync(completed.Id, CancellationToken.None))!.Occurrence.State);
+    }
+
+    [Fact]
+    public async Task OpenAsync_migrates_version_one_database_and_backfills_the_utc_due_key()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var due = new DateTimeOffset(2026, 8, 14, 9, 0, 0, TimeSpan.FromHours(8));
+        var itemId = Guid.NewGuid();
+        var occurrenceId = Guid.NewGuid();
+        await CreateVersionOneDatabaseAsync(path, itemId, occurrenceId, due);
+
+        var repository = await SqliteReminderRepository.OpenAsync(path, CancellationToken.None);
+
+        var scheduled = await repository.GetScheduledReminderAsync(occurrenceId, CancellationToken.None);
+        Assert.Equal(due, scheduled!.Occurrence.DueAt);
+        Assert.Equal(TimeSpan.FromHours(8), scheduled.Occurrence.DueAt.Offset);
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(path, CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT due_at_utc FROM occurrences WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        Assert.Equal(due.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+            await command.ExecuteScalarAsync(CancellationToken.None));
+    }
+
+    private static async Task CreateVersionOneDatabaseAsync(string path, Guid itemId, Guid occurrenceId, DateTimeOffset due)
+    {
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(path, CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE schema_info (version INTEGER NOT NULL);
+            CREATE TABLE items (id TEXT PRIMARY KEY, title TEXT NOT NULL, kind INTEGER NOT NULL, importance INTEGER NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE occurrences (
+                id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                due_at TEXT NOT NULL,
+                state INTEGER NOT NULL,
+                handled_at TEXT NULL,
+                snooze_parent_id TEXT NULL,
+                UNIQUE(item_id, due_at));
+            CREATE TABLE recurrence_rules (item_id TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE, kind INTEGER NOT NULL, days_of_week TEXT NOT NULL, time TEXT NOT NULL);
+            CREATE TABLE action_log (id TEXT PRIMARY KEY, occurrence_id TEXT NOT NULL REFERENCES occurrences(id) ON DELETE CASCADE, state INTEGER NOT NULL, handled_at TEXT NOT NULL);
+            CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO schema_info(version) VALUES (1);
+            INSERT INTO items(id, title, kind, importance, created_at) VALUES ($itemId, 'v1', 2, 0, $createdAt);
+            INSERT INTO occurrences(id, item_id, due_at, state, handled_at, snooze_parent_id) VALUES ($occurrenceId, $itemId, $dueAt, 0, NULL, NULL);
+            """;
+        command.Parameters.AddWithValue("$itemId", itemId.ToString("D"));
+        command.Parameters.AddWithValue("$occurrenceId", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$createdAt", due.AddHours(-1).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$dueAt", due.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
 }

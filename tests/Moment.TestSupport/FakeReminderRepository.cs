@@ -136,6 +136,11 @@ public class FakeReminderRepository : IReminderRepository
 
             if (scope == SeriesScope.ThisAndFuture)
             {
+                if (HasPrimaryKeyConflictAfterFutureDeletion(current, occurrence))
+                {
+                    throw new InvalidOperationException("Occurrence already exists.");
+                }
+
                 var futureItem = item with { Id = Guid.NewGuid() };
                 _items.Add(futureItem.Id, futureItem);
                 foreach (var id in _occurrences
@@ -152,9 +157,22 @@ public class FakeReminderRepository : IReminderRepository
                 return Task.CompletedTask;
             }
 
+            if (occurrence.Id != occurrenceId && _occurrences.ContainsKey(occurrence.Id))
+            {
+                throw new InvalidOperationException("Occurrence already exists.");
+            }
+
             var singleItem = item with { Id = Guid.NewGuid(), Recurrence = null };
             _items.Add(singleItem.Id, singleItem);
-            _occurrences[occurrenceId] = occurrence with { ItemId = singleItem.Id };
+            if (occurrence.Id != occurrenceId)
+            {
+                _occurrences.Remove(occurrenceId);
+                _occurrences.Add(occurrence.Id, occurrence with { ItemId = singleItem.Id });
+            }
+            else
+            {
+                _occurrences[occurrenceId] = occurrence with { ItemId = singleItem.Id };
+            }
         }
 
         return Task.CompletedTask;
@@ -220,5 +238,17 @@ public class FakeReminderRepository : IReminderRepository
         {
             throw new InvalidOperationException("Occurrence already exists.");
         }
+    }
+
+    private bool HasPrimaryKeyConflictAfterFutureDeletion(ReminderOccurrence current, ReminderOccurrence replacement)
+    {
+        if (!_occurrences.TryGetValue(replacement.Id, out var existing))
+        {
+            return false;
+        }
+
+        return existing.ItemId != current.ItemId
+            || existing.State != OccurrenceState.Scheduled
+            || existing.DueAt < current.DueAt;
     }
 }
