@@ -128,6 +128,15 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource SubtleBackgroundBrush}" />
                         </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsSelected" Value="True" />
+                                <Condition Property="IsMouseOver" Value="True" />
+                            </MultiTrigger.Conditions>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                            <Setter TargetName="ItemBorder" Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource SelectionBackgroundBrush}" />
+                        </MultiTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

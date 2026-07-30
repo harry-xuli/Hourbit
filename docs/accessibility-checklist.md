@@ -36,7 +36,7 @@ Quick Add separately passes its 200%-equivalent compact-viewport scrolling test.
 
 - PASS (simulated): Settings and Important Alert resolve window/control/highlight pairs to black/white, black/white, and yellow/black through the production palette.
 - PASS (simulated): Quick Add footer text is white on the injected dark control surface and measures at least 4.5:1.
-- PASS (simulated): Timeline header and footer text are white on the injected dark control surface; a selected row and every visible row text element resolve to the exact yellow/black system highlight pair.
+- PASS (simulated): Timeline header and footer text are white on the injected dark control surface; a selected row and every visible row text element resolve to the exact yellow/black system highlight pair. The pair remains exact while the selected row is also under the pointer.
 - PASS: Required surfaces use matching dynamic system backgrounds, foregrounds, borders, highlight text, and focus brushes.
 - PASS: Focus uses a visible two-pixel outline. Text fields also change border thickness on keyboard focus.
 - PASS: No animations, fades, auto-scrolling, or motion-only feedback were added.
