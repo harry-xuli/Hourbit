@@ -42,6 +42,32 @@ public interface ISingleInstanceCoordinator : IAsyncDisposable
         CancellationToken cancellationToken = default);
 }
 
+public interface IInstancePipeClient : IAsyncDisposable
+{
+    Task ConnectAsync(CancellationToken cancellationToken);
+    Task WriteMessageAsync(string message, CancellationToken cancellationToken);
+    Task<string?> ReadAcknowledgementAsync(CancellationToken cancellationToken);
+}
+
+public interface IInstancePipeClientFactory
+{
+    IInstancePipeClient Create(string pipeName);
+}
+
+public interface IInstanceDeadline : IDisposable
+{
+    CancellationToken Token { get; }
+    bool IsExpired { get; }
+}
+
+public interface IInstanceDeadlineFactory
+{
+    IInstanceDeadline Create(
+        TimeSpan timeout,
+        CancellationToken caller,
+        CancellationToken lifetime);
+}
+
 public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
 {
     public const string ProductionMutexName = @"Local\Moment.ReminderApp";
@@ -50,11 +76,15 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
     public static readonly TimeSpan ProductionSecondaryTimeout = TimeSpan.FromSeconds(2);
 
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
+    private static readonly AsyncLocal<CallbackScope?> CurrentCallback = new();
     private readonly string _mutexName;
     private readonly string _pipeName;
     private readonly TimeSpan _secondaryTimeout;
+    private readonly IInstancePipeClientFactory _pipeClientFactory;
+    private readonly IInstanceDeadlineFactory _deadlineFactory;
     private readonly object _gate = new();
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly List<Task> _callbacks = [];
     private Mutex? _mutex;
     private NamedPipeServerStream? _activeServer;
     private Task? _listenerTask;
@@ -71,7 +101,9 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
     public SingleInstanceCoordinator(
         string mutexName,
         string pipeName,
-        TimeSpan? secondaryTimeout = null)
+        TimeSpan? secondaryTimeout = null,
+        IInstancePipeClientFactory? pipeClientFactory = null,
+        IInstanceDeadlineFactory? deadlineFactory = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(mutexName);
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
@@ -80,6 +112,8 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
         _mutexName = mutexName;
         _pipeName = pipeName;
         _secondaryTimeout = secondaryTimeout ?? ProductionSecondaryTimeout;
+        _pipeClientFactory = pipeClientFactory ?? new NamedPipeClientFactory();
+        _deadlineFactory = deadlineFactory ?? new InstanceDeadlineFactory();
     }
 
     public bool IsPrimary
@@ -88,6 +122,7 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
     }
 
     public event Func<InstanceActivation, Task>? ActivationReceived;
+    public event Action<Exception>? ActivationFailed;
 
     public Task<SingleInstanceResult> StartAsync(
         InstanceActivation activation,
@@ -114,16 +149,22 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
 
     public ValueTask DisposeAsync()
     {
+        Task disposeTask;
         lock (_gate)
         {
-            if (_disposeTask is not null)
-                return new ValueTask(_disposeTask);
-
-            _disposed = true;
-            _lifetime.Cancel();
-            _activeServer?.Dispose();
-            return new ValueTask(_disposeTask = CompleteDisposalAsync());
+            if (_disposeTask is null)
+            {
+                _disposed = true;
+                _lifetime.Cancel();
+                _activeServer?.Dispose();
+                _disposeTask = CompleteDisposalAsync();
+            }
+            disposeTask = _disposeTask;
         }
+        return CurrentCallback.Value is { Active: true } scope &&
+            ReferenceEquals(scope.Owner, this)
+            ? ValueTask.CompletedTask
+            : new ValueTask(disposeTask);
     }
 
     private async Task ListenAsync(CancellationToken cancellationToken)
@@ -153,20 +194,18 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
                 var message = await ReadBoundedLineAsync(server, cancellationToken).ConfigureAwait(false);
                 InstanceActivation? activation = null;
                 var accepted = message is not null && TryParseMessage(message, out activation);
-                if (accepted)
+                TaskCompletionSource? releaseCallback = null;
+                if (accepted && !TryPrepareCallback(activation!, out releaseCallback))
+                    accepted = false;
+                try
                 {
-                    try
-                    {
-                        await DispatchAsync(activation!).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        accepted = false;
-                    }
+                    await WriteLineAsync(server, accepted ? "ack" : "reject", cancellationToken)
+                        .ConfigureAwait(false);
                 }
-
-                await WriteLineAsync(server, accepted ? "ack" : "reject", cancellationToken)
-                    .ConfigureAwait(false);
+                finally
+                {
+                    releaseCallback?.TrySetResult();
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -201,59 +240,96 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
             await handler(activation).ConfigureAwait(false);
     }
 
+    private bool TryPrepareCallback(
+        InstanceActivation activation,
+        out TaskCompletionSource? release)
+    {
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                release = null;
+                return false;
+            }
+            release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _callbacks.Add(DispatchTrackedAsync(activation, release.Task));
+            return true;
+        }
+    }
+
+    private async Task DispatchTrackedAsync(InstanceActivation activation, Task release)
+    {
+        await release.ConfigureAwait(false);
+        var previous = CurrentCallback.Value;
+        var scope = new CallbackScope(this);
+        CurrentCallback.Value = scope;
+        try
+        {
+            await DispatchAsync(activation).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                ActivationFailed?.Invoke(exception);
+            }
+            catch
+            {
+                // The activation exception is observed even if a diagnostic observer fails.
+            }
+        }
+        finally
+        {
+            scope.Active = false;
+            CurrentCallback.Value = previous;
+        }
+    }
+
     private async Task<SingleInstanceResult> SendToPrimaryAsync(
         InstanceActivation activation,
         CancellationToken cancellationToken)
     {
         var message = FormatMessage(activation);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-        using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
-        connectTimeout.CancelAfter(_secondaryTimeout);
-        await using var client = new NamedPipeClientStream(
-            ".",
-            _pipeName,
-            PipeDirection.InOut,
-            PipeOptions.Asynchronous);
+        using var deadline = _deadlineFactory.Create(
+            _secondaryTimeout,
+            cancellationToken,
+            _lifetime.Token);
+        await using var client = _pipeClientFactory.Create(_pipeName);
+        var connected = false;
         try
         {
-            await client.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
+            await client.ConnectAsync(deadline.Token).ConfigureAwait(false);
+            connected = true;
+            await client.WriteMessageAsync(message, deadline.Token).ConfigureAwait(false);
+            var response = await client.ReadAcknowledgementAsync(deadline.Token).ConfigureAwait(false);
+            return response switch
+            {
+                "ack" => SingleInstanceResult.SecondaryAcknowledged,
+                "reject" => SingleInstanceResult.SecondaryRejected,
+                _ => SingleInstanceResult.SecondaryRejected
+            };
         }
-        catch (OperationCanceledException) when (!linked.IsCancellationRequested)
+        catch (OperationCanceledException) when (
+            deadline.IsExpired &&
+            !cancellationToken.IsCancellationRequested &&
+            !_lifetime.IsCancellationRequested)
         {
-            return SingleInstanceResult.SecondaryNoPrimary;
+            return connected
+                ? SingleInstanceResult.SecondaryTimedOut
+                : SingleInstanceResult.SecondaryNoPrimary;
         }
         catch (TimeoutException)
         {
-            return SingleInstanceResult.SecondaryNoPrimary;
+            return connected
+                ? SingleInstanceResult.SecondaryTimedOut
+                : SingleInstanceResult.SecondaryNoPrimary;
         }
         catch (IOException)
         {
-            return SingleInstanceResult.SecondaryNoPrimary;
+            return connected
+                ? SingleInstanceResult.SecondaryTimedOut
+                : SingleInstanceResult.SecondaryNoPrimary;
         }
-
-        await WriteLineAsync(client, message, linked.Token).ConfigureAwait(false);
-        using var acknowledgementTimeout = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
-        acknowledgementTimeout.CancelAfter(_secondaryTimeout);
-        string? response;
-        try
-        {
-            response = await ReadBoundedLineAsync(client, acknowledgementTimeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!linked.IsCancellationRequested)
-        {
-            return SingleInstanceResult.SecondaryTimedOut;
-        }
-        catch (IOException)
-        {
-            return SingleInstanceResult.SecondaryTimedOut;
-        }
-
-        return response switch
-        {
-            "ack" => SingleInstanceResult.SecondaryAcknowledged,
-            "reject" => SingleInstanceResult.SecondaryRejected,
-            _ => SingleInstanceResult.SecondaryRejected
-        };
     }
 
     private async Task CompleteDisposalAsync()
@@ -272,6 +348,11 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
             {
             }
         }
+
+        Task[] callbacks;
+        lock (_gate)
+            callbacks = _callbacks.ToArray();
+        await Task.WhenAll(callbacks).ConfigureAwait(false);
 
         lock (_gate)
         {
@@ -358,5 +439,79 @@ public sealed class SingleInstanceCoordinator : ISingleInstanceCoordinator
         var bytes = StrictUtf8.GetBytes(message + "\n");
         await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private sealed class NamedPipeClientFactory : IInstancePipeClientFactory
+    {
+        public IInstancePipeClient Create(string pipeName) => new InstancePipeClient(pipeName);
+    }
+
+    private sealed class InstancePipeClient : IInstancePipeClient
+    {
+        private readonly NamedPipeClientStream _pipe;
+
+        public InstancePipeClient(string pipeName) =>
+            _pipe = new NamedPipeClientStream(
+                ".",
+                pipeName,
+                PipeDirection.InOut,
+                PipeOptions.Asynchronous);
+
+        public Task ConnectAsync(CancellationToken cancellationToken) =>
+            _pipe.ConnectAsync(cancellationToken);
+
+        public Task WriteMessageAsync(string message, CancellationToken cancellationToken) =>
+            WriteLineAsync(_pipe, message, cancellationToken);
+
+        public Task<string?> ReadAcknowledgementAsync(CancellationToken cancellationToken) =>
+            ReadBoundedLineAsync(_pipe, cancellationToken);
+
+        public ValueTask DisposeAsync() => _pipe.DisposeAsync();
+    }
+
+    private sealed class InstanceDeadlineFactory(TimeProvider? timeProvider = null)
+        : IInstanceDeadlineFactory
+    {
+        private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+        public IInstanceDeadline Create(
+            TimeSpan timeout,
+            CancellationToken caller,
+            CancellationToken lifetime) =>
+            new InstanceDeadline(timeout, caller, lifetime, _timeProvider);
+    }
+
+    private sealed class InstanceDeadline : IInstanceDeadline
+    {
+        private readonly CancellationTokenSource _timeout;
+        private readonly CancellationTokenSource _linked;
+
+        public InstanceDeadline(
+            TimeSpan timeout,
+            CancellationToken caller,
+            CancellationToken lifetime,
+            TimeProvider timeProvider)
+        {
+            _timeout = new CancellationTokenSource(timeout, timeProvider);
+            _linked = CancellationTokenSource.CreateLinkedTokenSource(
+                caller,
+                lifetime,
+                _timeout.Token);
+        }
+
+        public CancellationToken Token => _linked.Token;
+        public bool IsExpired => _timeout.IsCancellationRequested;
+
+        public void Dispose()
+        {
+            _linked.Dispose();
+            _timeout.Dispose();
+        }
+    }
+
+    private sealed class CallbackScope(SingleInstanceCoordinator owner)
+    {
+        public SingleInstanceCoordinator Owner { get; } = owner;
+        public bool Active { get; set; } = true;
     }
 }

@@ -29,20 +29,50 @@ public interface IResumeDelay
     Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken);
 }
 
+public enum LifecycleWindowMode
+{
+    MessageOnly,
+    HiddenTopLevel
+}
+
+public enum NativeLifecycleReason
+{
+    Unlock,
+    PowerResume,
+    TimeChanged,
+    TimeZoneChanged
+}
+
+public interface ILifecycleNativeWindow : IDisposable
+{
+    event EventHandler<NativeLifecycleReason>? Signaled;
+    void Start();
+    void Stop();
+}
+
+public interface ILifecycleNativeWindowFactory
+{
+    ILifecycleNativeWindow Create(LifecycleWindowMode mode);
+}
+
 public sealed class SystemResumeMonitor : ISystemResumeMonitor
 {
     public static readonly TimeSpan DebounceWindow = TimeSpan.FromMilliseconds(500);
+    private static readonly AsyncLocal<RecoveryScope?> CurrentRecovery = new();
 
     private readonly ISystemResumeEventSource _source;
     private readonly Func<ResumeReason, CancellationToken, Task> _recover;
     private readonly IResumeDelay _delay;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _gate = new();
-    private readonly List<Task> _pending = [];
+    private readonly List<Task> _debounces = [];
+    private readonly List<Task> _recoveries = [];
     private CancellationTokenSource? _debounce;
     private Task? _disposeTask;
     private bool _started;
     private bool _disposed;
+
+    public event Action<Exception>? RecoveryFailed;
 
     public SystemResumeMonitor(
         Func<ResumeReason, CancellationToken, Task> recover,
@@ -76,22 +106,28 @@ public sealed class SystemResumeMonitor : ISystemResumeMonitor
 
     public ValueTask DisposeAsync()
     {
+        Task disposeTask;
         lock (_gate)
         {
-            if (_disposeTask is not null)
-                return new ValueTask(_disposeTask);
-
-            _disposed = true;
-            if (_started)
+            if (_disposeTask is null)
             {
-                _source.Resumed -= OnResumed;
-                _source.Stop();
-                _started = false;
+                _disposed = true;
+                if (_started)
+                {
+                    _source.Resumed -= OnResumed;
+                    _source.Stop();
+                    _started = false;
+                }
+                _lifetime.Cancel();
+                _debounce?.Cancel();
+                _disposeTask = CompleteDisposalAsync(_debounces.ToArray());
             }
-            _lifetime.Cancel();
-            _debounce?.Cancel();
-            return new ValueTask(_disposeTask = CompleteDisposalAsync(_pending.ToArray()));
+            disposeTask = _disposeTask;
         }
+        return CurrentRecovery.Value is { Active: true } scope &&
+            ReferenceEquals(scope.Owner, this)
+            ? ValueTask.CompletedTask
+            : new ValueTask(disposeTask);
     }
 
     private void OnResumed(object? sender, ResumeReason reason)
@@ -103,7 +139,7 @@ public sealed class SystemResumeMonitor : ISystemResumeMonitor
                 return;
             previous = _debounce;
             _debounce = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-            _pending.Add(DebounceAsync(reason, _debounce));
+            _debounces.Add(DebounceAsync(reason, _debounce));
         }
         previous?.Cancel();
         previous?.Dispose();
@@ -119,19 +155,66 @@ public sealed class SystemResumeMonitor : ISystemResumeMonitor
                 if (_disposed || !ReferenceEquals(_debounce, debounce))
                     return;
             }
-            await _recover(reason, _lifetime.Token).ConfigureAwait(false);
+            QueueRecovery(reason);
         }
         catch (OperationCanceledException) when (debounce.IsCancellationRequested)
         {
         }
     }
 
-    private async Task CompleteDisposalAsync(Task[] pending)
+    private void QueueRecovery(ResumeReason reason)
     {
-        await Task.WhenAll(pending).ConfigureAwait(false);
+        lock (_gate)
+        {
+            if (!_disposed)
+                _recoveries.Add(RecoverTrackedAsync(reason));
+        }
+    }
+
+    private async Task RecoverTrackedAsync(ResumeReason reason)
+    {
+        await Task.Yield();
+        var previous = CurrentRecovery.Value;
+        var scope = new RecoveryScope(this);
+        CurrentRecovery.Value = scope;
+        try
+        {
+            await _recover(reason, _lifetime.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                RecoveryFailed?.Invoke(exception);
+            }
+            catch
+            {
+                // The recovery exception is observed even if a diagnostic observer fails.
+            }
+        }
+        finally
+        {
+            scope.Active = false;
+            CurrentRecovery.Value = previous;
+        }
+    }
+
+    private async Task CompleteDisposalAsync(Task[] debounces)
+    {
+        await Task.WhenAll(debounces).ConfigureAwait(false);
+        Task[] recoveries;
+        lock (_gate)
+            recoveries = _recoveries.ToArray();
+        await Task.WhenAll(recoveries).ConfigureAwait(false);
         _source.Dispose();
         _debounce?.Dispose();
         _lifetime.Dispose();
+    }
+
+    private sealed class RecoveryScope(SystemResumeMonitor owner)
+    {
+        public SystemResumeMonitor Owner { get; } = owner;
+        public bool Active { get; set; } = true;
     }
 }
 
@@ -149,9 +232,15 @@ public sealed class TimeProviderResumeDelay : IResumeDelay
 /// <summary>Windows event adapter; tests inject <see cref="ISystemResumeEventSource"/>.</summary>
 public sealed class WindowsSystemResumeEventSource : ISystemResumeEventSource
 {
-    private readonly PowerBroadcastWindow _window = new();
+    private readonly ILifecycleNativeWindow _window;
     private bool _started;
     private bool _disposed;
+
+    public WindowsSystemResumeEventSource(ILifecycleNativeWindowFactory? factory = null)
+    {
+        factory ??= new LifecycleNativeWindowFactory();
+        _window = factory.Create(LifecycleWindowMode.HiddenTopLevel);
+    }
 
     public event EventHandler<ResumeReason>? Resumed;
 
@@ -160,9 +249,7 @@ public sealed class WindowsSystemResumeEventSource : ISystemResumeEventSource
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_started)
             return;
-        _window.Unlocked += OnUnlocked;
-        _window.PowerResumed += OnPowerResumed;
-        _window.ClockChanged += OnClockChanged;
+        _window.Signaled += OnSignaled;
         _window.Start();
         _started = true;
     }
@@ -172,9 +259,7 @@ public sealed class WindowsSystemResumeEventSource : ISystemResumeEventSource
         if (!_started)
             return;
         _window.Stop();
-        _window.Unlocked -= OnUnlocked;
-        _window.PowerResumed -= OnPowerResumed;
-        _window.ClockChanged -= OnClockChanged;
+        _window.Signaled -= OnSignaled;
         _started = false;
     }
 
@@ -187,34 +272,45 @@ public sealed class WindowsSystemResumeEventSource : ISystemResumeEventSource
         _window.Dispose();
     }
 
-    private void OnUnlocked(object? sender, EventArgs e) =>
-        Resumed?.Invoke(this, ResumeReason.Unlock);
+    private void OnSignaled(object? sender, NativeLifecycleReason reason) =>
+        Resumed?.Invoke(this, reason switch
+        {
+            NativeLifecycleReason.Unlock => ResumeReason.Unlock,
+            NativeLifecycleReason.PowerResume => ResumeReason.PowerResume,
+            NativeLifecycleReason.TimeChanged => ResumeReason.TimeChanged,
+            NativeLifecycleReason.TimeZoneChanged => ResumeReason.TimeZoneChanged,
+            _ => throw new ArgumentOutOfRangeException(nameof(reason))
+        });
 
-    private void OnPowerResumed(object? sender, EventArgs e) =>
-        Resumed?.Invoke(this, ResumeReason.PowerResume);
+    private sealed class LifecycleNativeWindowFactory : ILifecycleNativeWindowFactory
+    {
+        public ILifecycleNativeWindow Create(LifecycleWindowMode mode)
+        {
+            if (mode != LifecycleWindowMode.HiddenTopLevel)
+                throw new ArgumentOutOfRangeException(nameof(mode));
+            return new PowerBroadcastWindow();
+        }
+    }
 
-    private void OnClockChanged(object? sender, ResumeReason reason) =>
-        Resumed?.Invoke(this, reason);
-
-    private sealed class PowerBroadcastWindow : IDisposable
+    private sealed class PowerBroadcastWindow : ILifecycleNativeWindow
     {
         private const int WmPowerBroadcast = 0x0218;
         private const int WmTimeChange = 0x001E;
+        private const int WmSettingChange = 0x001A;
         private const int WmSessionChange = 0x02B1;
         private const int SessionUnlock = 0x0008;
         private const uint NotifyThisSession = 0;
         private const int ResumeAutomatic = 0x0012;
         private const int ResumeSuspend = 0x0007;
-        private readonly Win32MessageOnlyWindow _window = new("Moment lifecycle events");
+        private readonly Win32MessageOnlyWindow _window =
+            new("Moment lifecycle events", Win32WindowMode.HiddenTopLevel);
         private string _timeZoneId = TimeZoneInfo.Local.Id;
         private bool _started;
         private bool _disposed;
 
         public PowerBroadcastWindow() => _window.MessageReceived += OnMessageReceived;
 
-        public event EventHandler? Unlocked;
-        public event EventHandler? PowerResumed;
-        public event EventHandler<ResumeReason>? ClockChanged;
+        public event EventHandler<NativeLifecycleReason>? Signaled;
 
         public void Start()
         {
@@ -237,19 +333,21 @@ public sealed class WindowsSystemResumeEventSource : ISystemResumeEventSource
         private void OnMessageReceived(int message, IntPtr wParam, IntPtr lParam)
         {
             if (message == WmSessionChange && wParam.ToInt32() == SessionUnlock)
-                Unlocked?.Invoke(this, EventArgs.Empty);
+                Signaled?.Invoke(this, NativeLifecycleReason.Unlock);
             else if (message == WmPowerBroadcast &&
                 wParam.ToInt32() is ResumeAutomatic or ResumeSuspend)
-                PowerResumed?.Invoke(this, EventArgs.Empty);
-            else if (message == WmTimeChange)
+                Signaled?.Invoke(this, NativeLifecycleReason.PowerResume);
+            else if (message is WmTimeChange or WmSettingChange)
             {
                 TimeZoneInfo.ClearCachedData();
                 var currentTimeZoneId = TimeZoneInfo.Local.Id;
-                var reason = string.Equals(currentTimeZoneId, _timeZoneId, StringComparison.Ordinal)
-                    ? ResumeReason.TimeChanged
-                    : ResumeReason.TimeZoneChanged;
+                var timeZoneChanged =
+                    !string.Equals(currentTimeZoneId, _timeZoneId, StringComparison.Ordinal);
                 _timeZoneId = currentTimeZoneId;
-                ClockChanged?.Invoke(this, reason);
+                if (timeZoneChanged)
+                    Signaled?.Invoke(this, NativeLifecycleReason.TimeZoneChanged);
+                else if (message == WmTimeChange)
+                    Signaled?.Invoke(this, NativeLifecycleReason.TimeChanged);
             }
         }
 

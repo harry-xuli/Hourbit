@@ -4,7 +4,13 @@ using System.Runtime.InteropServices;
 
 namespace Moment.Windows.Native;
 
-/// <summary>Owns a Win32 message-only window and its dedicated message-loop thread.</summary>
+internal enum Win32WindowMode
+{
+    MessageOnly,
+    HiddenTopLevel
+}
+
+/// <summary>Owns a Win32 native window and its dedicated message-loop thread.</summary>
 internal sealed class Win32MessageOnlyWindow : IDisposable
 {
     private const uint WmClose = 0x0010;
@@ -12,15 +18,19 @@ internal sealed class Win32MessageOnlyWindow : IDisposable
     private static readonly IntPtr MessageOnlyParent = new(-3);
     private static readonly ConcurrentDictionary<IntPtr, Win32MessageOnlyWindow> Windows = new();
     private static readonly NativeMethods.WindowProcedure Procedure = WindowProcedure;
-    private readonly string _className = $"Moment.MessageOnly.{Guid.NewGuid():N}";
+    private readonly string _className = $"Moment.NativeWindow.{Guid.NewGuid():N}";
+    private readonly Win32WindowMode _mode;
     private readonly TaskCompletionSource<IntPtr> _created =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
     private IntPtr _handle;
     private int _disposed;
 
-    public Win32MessageOnlyWindow(string threadName)
+    public Win32MessageOnlyWindow(
+        string threadName,
+        Win32WindowMode mode = Win32WindowMode.MessageOnly)
     {
+        _mode = mode;
         _thread = new Thread(MessageLoop)
         {
             IsBackground = true,
@@ -84,7 +94,7 @@ internal sealed class Win32MessageOnlyWindow : IDisposable
                 0,
                 0,
                 0,
-                MessageOnlyParent,
+                _mode == Win32WindowMode.MessageOnly ? MessageOnlyParent : IntPtr.Zero,
                 IntPtr.Zero,
                 instance,
                 IntPtr.Zero);
