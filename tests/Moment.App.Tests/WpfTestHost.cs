@@ -5,27 +5,46 @@ internal static class WpfTestHost
     private static readonly Lazy<Task<System.Windows.Threading.Dispatcher>> Dispatcher =
         new(StartDispatcher);
 
-    public static async Task RunAsync(Action action)
+    public static Task RunAsync(Action action) =>
+        RunAsync(() =>
+        {
+            action();
+            return Task.CompletedTask;
+        });
+
+    public static async Task RunAsync(Func<Task> action)
     {
         var dispatcher = await Dispatcher.Value;
         var completion = new TaskCompletionSource<Exception?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        _ = dispatcher.BeginInvoke(new Action(() =>
+        _ = dispatcher.BeginInvoke(new Action(async () =>
         {
+            Exception? failure = null;
             try
             {
-                action();
-                completion.TrySetResult(null);
+                await action();
             }
             catch (Exception exception)
             {
-                completion.TrySetResult(exception);
+                failure = exception;
             }
-            finally
+
+            try
             {
-                foreach (System.Windows.Window window in System.Windows.Application.Current.Windows)
+                var windows = System.Windows.Application.Current.Windows
+                    .Cast<System.Windows.Window>()
+                    .ToArray();
+                foreach (var window in windows)
                     window.Close();
             }
+            catch (Exception exception)
+            {
+                failure = failure is null
+                    ? exception
+                    : new AggregateException(failure, exception);
+            }
+
+            completion.TrySetResult(failure);
         }));
 
         var exception = await completion.Task.WaitAsync(TimeSpan.FromSeconds(15));

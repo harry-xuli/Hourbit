@@ -221,3 +221,49 @@ Fix-round final verification on 2026-07-30:
   `0x800711C7` across all four processes, so this run cannot truthfully be
   reported as a full-suite pass. Before this fix round the same full commands
   passed 248/248; the fix-round behaviors above have fresh focused evidence.
+
+### Verification follow-up after Smart App Control was disabled
+
+The user disabled Smart App Control and confirmed
+`VerifiedAndReputablePolicyState=0` and
+`UsermodeCodeIntegrityPolicyEnforcementStatus=0`. Core 78/78,
+Infrastructure 21/21, and Windows 85/85 passed immediately. Full App then
+revealed a genuine shared-STA test-order failure:
+
+- Isolated `Expanded_details_remain_scrollable...`: 1/1 PASS.
+- Full `QuickAddWindowTests`: two tests passed, then `Expanded_details...`,
+  `Ambiguity_choice...`, and `Simulated_dark_system_palette...` each timed out
+  at the exact 15-second `WpfTestHost.RunAsync(Action)` boundary.
+- The minimal predecessor pair proved `Enter_submits...` poisoned the shared
+  dispatcher: 1 PASS followed by the same 15-second timeout.
+- Root cause: that test passed an `async` lambda to a host that accepted only
+  `Action`, creating `async void`. The host published success and began window
+  cleanup at the first `await`; the unowned continuation could later fault the
+  shared Dispatcher, so later `BeginInvoke` work never ran.
+- Deterministic RED: a host contract test held an asynchronous dispatcher
+  action behind a gate and observed `RunAsync` complete before the action
+  resumed.
+- GREEN: `WpfTestHost` now has a `Func<Task>` overload, awaits the action,
+  captures its exception, snapshots/closes windows, and only then completes.
+  The host regression passed 1/1, the predecessor pair passed 2/2, and all
+  `QuickAddWindowTests` passed 5/5.
+- Once the async test was genuinely awaited it exposed an incorrect assertion:
+  successful Quick Add creation hides the window and preserves input; it does
+  not clear input. The test now verifies Enter creates/hides while retaining
+  text, then re-shows and verifies Escape hides without clearing.
+
+Fresh final commands:
+
+```powershell
+dotnet build Moment.slnx --no-restore
+dotnet test Moment.slnx --no-build --no-restore --blame-hang-timeout 45s
+```
+
+Final results:
+
+- Build: PASS, 0 warnings, 0 errors.
+- Core: 78 passed, 0 failed, 0 skipped.
+- Infrastructure: 21 passed, 0 failed, 0 skipped.
+- Windows: 85 passed, 0 failed, 0 skipped.
+- App: 89 passed, 0 failed, 0 skipped; no hang dump.
+- Total: 273 passed, 0 failed, 0 skipped.

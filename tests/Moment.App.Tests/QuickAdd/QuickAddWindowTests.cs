@@ -132,9 +132,12 @@ public sealed class QuickAddWindowTests
             Assert.True(input.Focus());
 
             Assert.True(await window.TrySubmitFromEnterAsync());
-            Assert.Equal(string.Empty, vm.Text);
+            Assert.False(window.IsVisible);
+            Assert.Equal("明早九点看书", vm.Text);
 
             vm.Text = "不要清空";
+            window.Show();
+            window.Activate();
             var escape = Assert.Single(
                 window.InputBindings.OfType<KeyBinding>(),
                 binding => binding.Key == Key.Escape);
