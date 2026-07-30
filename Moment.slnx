@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Moment.App/Moment.App.csproj" />
     <Project Path="src/Moment.Core/Moment.Core.csproj" />
     <Project Path="src/Moment.Infrastructure/Moment.Infrastructure.csproj" />
     <Project Path="src/Moment.Windows/Moment.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Moment.App.Tests/Moment.App.Tests.csproj" />
     <Project Path="tests/Moment.Core.Tests/Moment.Core.Tests.csproj" />
     <Project Path="tests/Moment.Infrastructure.Tests/Moment.Infrastructure.Tests.csproj" />
     <Project Path="tests/Moment.TestSupport/Moment.TestSupport.csproj" />

@@ -1,0 +1,41 @@
+namespace Moment.App;
+
+public partial class App : System.Windows.Application
+{
+    private CompositionRoot? _root;
+
+    protected override async void OnStartup(System.Windows.StartupEventArgs eventArgs)
+    {
+        base.OnStartup(eventArgs);
+        try
+        {
+            _root = await CompositionRoot.OpenAsync(CancellationToken.None);
+            _root.RuntimeError += OnRuntimeError;
+            var activation = eventArgs.Args.Contains("--quick-add", StringComparer.OrdinalIgnoreCase)
+                ? Moment.Windows.Lifecycle.InstanceActivation.ShowQuickAdd
+                : Moment.Windows.Lifecycle.InstanceActivation.ShowMain;
+            if (!await _root.StartAsync(activation, CancellationToken.None))
+                Shutdown();
+        }
+        catch (Exception exception)
+        {
+            System.Windows.MessageBox.Show(
+                exception.Message, "时刻", System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+            Shutdown(-1);
+        }
+    }
+
+    protected override void OnExit(System.Windows.ExitEventArgs eventArgs)
+    {
+        if (_root is not null)
+        {
+            _root.RuntimeError -= OnRuntimeError;
+            _root.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        base.OnExit(eventArgs);
+    }
+
+    private static void OnRuntimeError(Exception exception) =>
+        System.Diagnostics.Debug.WriteLine(exception);
+}

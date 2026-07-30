@@ -1,0 +1,171 @@
+using System.Collections.ObjectModel;
+using Moment.App.Commands;
+using Moment.Core.Abstractions;
+using Moment.Core.Domain;
+using Moment.Core.Parsing;
+using Moment.Core.Services;
+
+namespace Moment.App.QuickAdd;
+
+public enum QuickAddState { Empty, Success, Ambiguous, Invalid }
+
+public sealed class QuickAddChoiceViewModel(ParseChoice choice)
+{
+    internal ReminderDraft Draft { get; } = choice.Draft;
+    public string Label { get; } = choice.Label;
+}
+
+public sealed class QuickAddViewModel : ObservableObject
+{
+    private readonly IChineseTimeParser _parser;
+    private readonly IReminderService _service;
+    private readonly IClock _clock;
+    private readonly TimeZoneInfo _zone;
+    private string _text = string.Empty;
+    private string? _previewText;
+    private string? _errorMessage;
+    private ReminderDraft? _draft;
+    private QuickAddState _state;
+    private bool _areDetailsVisible;
+
+    public QuickAddViewModel(
+        IChineseTimeParser parser,
+        IReminderService service,
+        IClock clock,
+        TimeZoneInfo zone)
+    {
+        _parser = parser;
+        _service = service;
+        _clock = clock;
+        _zone = zone;
+        SubmitCommand = new AsyncCommand((_, ct) => SubmitAsync(ct));
+        ChooseCommand = new AsyncCommand((choice, _) =>
+            choice is QuickAddChoiceViewModel value ? ChooseAsync(value) : Task.CompletedTask);
+        ToggleDetailsCommand = new AsyncCommand((_, _) =>
+        {
+            AreDetailsVisible = !AreDetailsVisible;
+            return Task.CompletedTask;
+        });
+        HideCommand = new AsyncCommand((_, _) =>
+        {
+            HideRequested?.Invoke(this, EventArgs.Empty);
+            return Task.CompletedTask;
+        });
+    }
+
+    public event EventHandler? HideRequested;
+    public ObservableCollection<QuickAddChoiceViewModel> Choices { get; } = [];
+    public IAsyncCommand SubmitCommand { get; }
+    public IAsyncCommand ChooseCommand { get; }
+    public IAsyncCommand ToggleDetailsCommand { get; }
+    public IAsyncCommand HideCommand { get; }
+    public QuickAddState State
+    {
+        get => _state;
+        private set
+        {
+            if (SetProperty(ref _state, value))
+                OnPropertyChanged(nameof(IsChoicePanelVisible));
+        }
+    }
+    public bool IsChoicePanelVisible => State == QuickAddState.Ambiguous;
+    public string GuidanceText => "请选择具体时间";
+    public string FooterText => "Enter 创建 · Tab 更多选项 · Esc 隐藏";
+    public string? PreviewText
+    {
+        get => _previewText;
+        private set => SetProperty(ref _previewText, value);
+    }
+    public string? ErrorMessage
+    {
+        get => _errorMessage;
+        private set => SetProperty(ref _errorMessage, value);
+    }
+    public bool AreDetailsVisible
+    {
+        get => _areDetailsVisible;
+        private set => SetProperty(ref _areDetailsVisible, value);
+    }
+    public string Text
+    {
+        get => _text;
+        set
+        {
+            if (SetProperty(ref _text, value ?? string.Empty))
+                Parse();
+        }
+    }
+
+    public Task SubmitAsync() => SubmitAsync(CancellationToken.None);
+
+    public async Task SubmitAsync(CancellationToken ct)
+    {
+        if (_draft is null || State != QuickAddState.Success)
+            return;
+        try
+        {
+            ErrorMessage = null;
+            await _service.CreateAsync(_draft, ct);
+            HideRequested?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = exception.Message;
+        }
+    }
+
+    public Task ChooseAsync(QuickAddChoiceViewModel choice)
+    {
+        ArgumentNullException.ThrowIfNull(choice);
+        _draft = choice.Draft;
+        Choices.Clear();
+        PreviewText = FormatPreview(_draft);
+        ErrorMessage = null;
+        State = QuickAddState.Success;
+        return Task.CompletedTask;
+    }
+
+    private void Parse()
+    {
+        _draft = null;
+        PreviewText = null;
+        ErrorMessage = null;
+        Choices.Clear();
+        if (string.IsNullOrWhiteSpace(Text))
+        {
+            State = QuickAddState.Empty;
+            return;
+        }
+
+        switch (_parser.Parse(Text, _clock.Now, _zone))
+        {
+            case ParseResult.Success success:
+                _draft = success.Draft;
+                PreviewText = FormatPreview(success.Draft);
+                State = QuickAddState.Success;
+                break;
+            case ParseResult.Ambiguous ambiguous:
+                foreach (var choice in ambiguous.Choices)
+                    Choices.Add(new QuickAddChoiceViewModel(choice));
+                State = QuickAddState.Ambiguous;
+                break;
+            case ParseResult.Invalid invalid:
+                ErrorMessage = invalid.Message;
+                State = QuickAddState.Invalid;
+                break;
+        }
+    }
+
+    private string FormatPreview(ReminderDraft draft)
+    {
+        var local = TimeZoneInfo.ConvertTime(draft.DueAt, _zone);
+        var recurrence = draft.Recurrence is null ? "单次" : draft.Recurrence.Kind switch
+        {
+            RecurrenceKind.Daily => "每天",
+            RecurrenceKind.Weekdays => "工作日",
+            _ => "每周"
+        };
+        var importance = draft.Importance == ReminderImportance.Important ? "重要提醒" : "普通提醒";
+        return $"{local.Year}年{local.Month}月{local.Day}日 {local:HH:mm} · {recurrence} · {importance}";
+    }
+}

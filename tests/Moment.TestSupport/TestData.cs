@@ -1,6 +1,7 @@
 using System.Globalization;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
+using Moment.Core.Services;
 
 namespace Moment.TestSupport;
 
@@ -24,4 +25,15 @@ public static class TestData
 
     public static ReminderAlert Alert(string title, int dueMinute) =>
         new(Guid.NewGuid(), title, new DateTimeOffset(2026, 8, 1, 9, dueMinute, 0, TimeSpan.FromHours(8)));
+
+    public static TimelineRow Row(
+        string title,
+        string dueAt,
+        OccurrenceState state = OccurrenceState.Scheduled,
+        ReminderKind kind = ReminderKind.Plan,
+        ReminderImportance importance = ReminderImportance.Normal,
+        string? recurrenceText = null) =>
+        new(Guid.NewGuid(), title,
+            DateTimeOffset.Parse(dueAt, CultureInfo.InvariantCulture),
+            kind, importance, state, recurrenceText);
 }
