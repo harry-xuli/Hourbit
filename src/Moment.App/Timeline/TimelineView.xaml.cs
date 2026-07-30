@@ -34,6 +34,12 @@ public partial class TimelineView : UserControl
             viewModel.SelectedItem = item;
             SynchronizeSelection();
         }
+        else if (eventArgs.RemovedItems.Count > 0
+            && _viewModel is { SelectedItem: { } selectedItem } currentViewModel
+            && eventArgs.RemovedItems.Contains(selectedItem))
+        {
+            currentViewModel.SelectedItem = null;
+        }
     }
 
     private void OnLoaded(object sender, RoutedEventArgs eventArgs)

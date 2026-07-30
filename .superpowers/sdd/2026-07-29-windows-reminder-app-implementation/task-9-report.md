@@ -410,3 +410,49 @@ Fresh results after the final lifecycle self-review:
   PASS, 78/78;
 - `dotnet build Moment.slnx -c Release --verbosity minimal`:
   PASS, 0 warnings and 0 errors.
+
+## Fix round 3 — Removal-only timeline deselection
+
+**Base:** `8e48ebda13edaebc0aef14d0d024ececf71dc7d7`
+
+### Root cause and fix
+
+The coordinated selection handler covered events with an added row, but ignored a
+removal-only `SelectionChanged` event. Clearing the selected row therefore removed its visual
+highlight while leaving `TimelineViewModel.SelectedItem` and Edit/Delete/Complete enabled.
+
+When a removal-only event contains the current logical selection, the view now clears
+`SelectedItem`. The existing view-model setter disables all three commands, and the existing
+round-2 projection keeps every group list visually unselected. Programmatic cross-group clearing
+remains protected by the existing reentrancy guard.
+
+### TDD and verification evidence
+
+The added real-WPF test deselects the active row through its actual `ListBox`, then proves:
+
+- the view model has no selected item;
+- all three lists have no selected item;
+- Edit, Delete, and Complete cannot execute;
+- an attempted Complete records no occurrence ID.
+
+Focused RED:
+
+- `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj -c Release --filter FullyQualifiedName~TimelineViewTests --verbosity minimal`
+  → FAIL 1, PASS 5; `SelectedItem` retained the visually removed “已错过” row.
+
+Focused GREEN:
+
+- the identical command → PASS 6/6.
+
+Broader final evidence:
+
+- Core: PASS 78/78;
+- Windows: PASS 78/78;
+- Release solution build: PASS, 0 warnings and 0 errors.
+
+Windows Application Control then blocked the freshly emitted `Moment.Infrastructure.dll` with
+`FileLoadException` `0x800711C7` before the affected assertions could run. The App suite reached
+37/39 with its two SQLite-query tests blocked; Infrastructure reached 6/19 with 13 tests blocked.
+Separate `--no-build` retries reproduced the same policy block. This is the same environment-level
+assembly-load condition already recorded in fix round 1; no Infrastructure source changed in this
+round.

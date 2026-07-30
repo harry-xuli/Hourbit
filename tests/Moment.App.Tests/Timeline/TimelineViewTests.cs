@@ -90,6 +90,30 @@ public sealed class TimelineViewTests
         });
 
     [Fact]
+    public Task Deselecting_the_active_row_clears_the_command_target() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var actions = new ActionServiceStub();
+            var viewModel = Create(TwoGroupQuery(), actions);
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var selectedItem = Assert.IsType<TimelineItemViewModel>(viewModel.SelectedItem);
+            var selectedList = Descendants<ListBox>(view)
+                .Single(list => ReferenceEquals(list.SelectedItem, selectedItem));
+
+            selectedList.SelectedItem = null;
+
+            Assert.Null(viewModel.SelectedItem);
+            Assert.Empty(Descendants<ListBox>(view)
+                .SelectMany(list => list.SelectedItems.Cast<TimelineItemViewModel>()));
+            Assert.False(viewModel.EditCommand.CanExecute(null));
+            Assert.False(viewModel.DeleteCommand.CanExecute(null));
+            Assert.False(viewModel.CompleteCommand.CanExecute(null));
+            viewModel.CompleteCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+            Assert.Empty(actions.CompletedOccurrenceIds);
+        });
+
+    [Fact]
     public Task Complete_command_targets_the_single_selection_projected_from_the_view_model() =>
         WpfTestHost.RunAsync(() =>
         {
