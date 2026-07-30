@@ -38,6 +38,11 @@ public interface INotificationHealthSource
     event Action<NotificationHealth>? HealthChanged;
     Task RefreshHealthAsync(CancellationToken ct);
 }
+public interface INotificationRegistration
+{
+    void Register();
+    bool IsEnabled { get; }
+}
 
 public interface INotificationActivationSource
 {
@@ -59,12 +64,16 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
 {
     public NotificationHealth Health { get; private set; } = NotificationHealth.Available;
     public event Action<NotificationHealth>? HealthChanged;
+    private bool _registered;
+    private readonly INotificationRegistration _registration;
 
-    public WindowsAppNotificationPlatform()
+    public WindowsAppNotificationPlatform(INotificationRegistration? registration = null)
     {
+        _registration = registration ?? new WindowsNotificationRegistration();
         try
         {
-            AppNotificationManager.Default.Register();
+            _registration.Register();
+            _registered = true;
             RefreshHealthAsync(CancellationToken.None).GetAwaiter().GetResult();
         }
         catch (UnauthorizedAccessException)
@@ -80,8 +89,16 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
     public Task RefreshHealthAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        try { SetHealth(AppNotificationManager.Default.Setting == AppNotificationSetting.Enabled ? NotificationHealth.Available : NotificationHealth.PermissionDisabled); }
-        catch { SetHealth(NotificationHealth.RegistrationFailed); }
+        try
+        {
+            if (!_registered)
+            {
+                _registration.Register();
+                _registered = true;
+            }
+            SetHealth(_registration.IsEnabled ? NotificationHealth.Available : NotificationHealth.PermissionDisabled);
+        }
+        catch { _registered = false; SetHealth(NotificationHealth.RegistrationFailed); }
         return Task.CompletedTask;
     }
 
@@ -124,6 +141,12 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
         Process.Start(new ProcessStartInfo("ms-settings:notifications") { UseShellExecute = true });
         return Task.CompletedTask;
     }
+}
+
+internal sealed class WindowsNotificationRegistration : INotificationRegistration
+{
+    public void Register() => AppNotificationManager.Default.Register();
+    public bool IsEnabled => AppNotificationManager.Default.Setting == AppNotificationSetting.Enabled;
 }
 
 public sealed class AppNotificationSink(INotificationPlatform platform, IImportantAlertDelivery importantAlerts, IReminderActionService actions) : IReminderSink

@@ -41,6 +41,21 @@ public sealed class NotificationLifecycleTests
         Assert.Equal([NotificationHealth.PermissionDisabled], observed);
     }
 
+    [Fact]
+    public async Task Registration_failure_stays_failed_until_a_retry_succeeds()
+    {
+        var registration = new Registration(true, true);
+        var platform = new WindowsAppNotificationPlatform(registration);
+        var observed = new List<NotificationHealth>();
+        platform.HealthChanged += observed.Add;
+        await platform.RefreshHealthAsync(default);
+        Assert.Equal(NotificationHealth.RegistrationFailed, platform.Health);
+        registration.Allow = true;
+        await platform.RefreshHealthAsync(default);
+        Assert.Equal(NotificationHealth.Available, platform.Health);
+        Assert.Equal([NotificationHealth.Available], observed);
+    }
+
     private sealed class FakeActivationSource : INotificationActivationSource
     {
         public event Func<string, Task>? Invoked;
@@ -54,5 +69,6 @@ public sealed class NotificationLifecycleTests
     private sealed class NoopAlerts : IImportantAlertDelivery { public Task EnqueueAsync(ReminderAlert alert, CancellationToken ct) => Task.CompletedTask; }
     private sealed class MutablePlatform(NotificationHealth health) : INotificationPlatform, INotificationHealthSource
     { public NotificationHealth Health { get; private set; }=health; public event Action<NotificationHealth>? HealthChanged; public void Set(NotificationHealth value) { Health=value; HealthChanged?.Invoke(value); } public Task RefreshHealthAsync(CancellationToken ct)=>Task.CompletedTask; public Task ShowAsync(NotificationPayload payload,CancellationToken ct)=>Task.CompletedTask; public Task OpenSettingsAsync(CancellationToken ct)=>Task.CompletedTask; }
+    private sealed class Registration(bool enabled, bool fail) : INotificationRegistration { public bool Allow { get; set; } = !fail; public bool IsEnabled => enabled; public void Register(){if(!Allow)throw new InvalidOperationException();} }
     private sealed class RecordingActions : IReminderActionService { public List<string> Calls { get; }=[]; public Task CompleteAsync(Guid id,CancellationToken ct){Calls.Add("complete:"+id);return Task.CompletedTask;} public Task IgnoreAsync(Guid id,CancellationToken ct){Calls.Add("ignore:"+id);return Task.CompletedTask;} public Task<ReminderOccurrence> SnoozeAsync(Guid id,TimeSpan delay,CancellationToken ct)=>Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(),DateTimeOffset.UtcNow)); }
 }

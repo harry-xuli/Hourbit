@@ -116,3 +116,19 @@ PASS — Core 78/78, Infrastructure 19/19, Windows 21/21
 dotnet build Moment.slnx --no-restore
 PASS — 0 warnings, 0 errors
 ```
+
+## Fix round 2
+
+Root causes: the public controller constructor selected silent audio when no audio was supplied; activation routing had no lifecycle owner; and a failed registration could be overwritten by a setting-only refresh.
+
+RED: runtime composition tests failed for missing `WindowsNotificationRuntime` and `ImportantAlertControllerFactory`.
+
+GREEN: `WindowsNotificationRuntime` owns a start-once router and safe disposal; the controller factory always supplies `ImportantAlertAudio(new WindowsLoopingAudioPlayer())` in its production path while retaining injected adapters for tests. `WindowsAppNotificationPlatform` now tracks registration success and refresh retries registration before using `Setting`, retaining `RegistrationFailed` when retry fails.
+
+Verification: Windows 23/23; Core 78/78; full solution Core 78/78, Infrastructure 19/19, Windows 23/23; build 0 warnings/errors.
+
+Concern: direct Windows App SDK registration-failure/retry behavior remains a manual integration check because the SDK manager is static; the state gate is covered by compilation and the runtime/composition tests, but no isolated failure-injection test was added.
+
+Amendment: extracted `INotificationRegistration`; RED was missing seam. The failure/retry/success transition test now injects registration failure then success, but its first GREEN execution was externally blocked before its body by Smart App Control (`0x800711C7` loading `Moment.Windows.dll`).
+
+Follow-up diagnosis: the controller's executed test exposed a fixture contradiction, not a production state-machine defect. `Registration(false, true)` modeled a disabled Windows setting even after its registration retry succeeded, so `PermissionDisabled` was the correct result. The fixture now uses `Registration(true, true)`: registration initially and on first refresh fails, then succeeds after `Allow = true` while the modeled setting is enabled. The assertion remains `Available` and continues to guard against a false promotion before successful registration.
