@@ -21,4 +21,7 @@ public static class TestData
 
         return new(item, occurrence);
     }
+
+    public static ReminderAlert Alert(string title, int dueMinute) =>
+        new(Guid.NewGuid(), title, new DateTimeOffset(2026, 8, 1, 9, dueMinute, 0, TimeSpan.FromHours(8)));
 }
