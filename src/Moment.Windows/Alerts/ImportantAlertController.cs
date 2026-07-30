@@ -171,7 +171,7 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         {
             cancelled = true;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception)
         {
             failure = exception;
         }
@@ -181,7 +181,7 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
             // Teardown must not be skipped just because the controller lifetime was cancelled.
             await _audio.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception)
         {
             failure = failure is null
                 ? exception

@@ -1,10 +1,17 @@
 using Moment.App.Commands;
+using Moment.App.Alerts;
 using Moment.Core.Abstractions;
 using Moment.Windows.Hotkeys;
 using Moment.Windows.Startup;
 using System.IO;
 
 namespace Moment.App.Settings;
+
+public sealed record SettingsSaveResult(bool Succeeded, string? ErrorMessage)
+{
+    public static SettingsSaveResult Success { get; } = new(true, null);
+    public static SettingsSaveResult Failure(string message) => new(false, message);
+}
 
 public sealed class SettingsViewModel : ObservableObject
 {
@@ -19,6 +26,8 @@ public sealed class SettingsViewModel : ObservableObject
     private string? _hotkeyError;
     private string? _warningMessage;
     private bool _missingSoundWarningShown;
+    private AppSettings _persisted =
+        new("Ctrl+Alt+Space", false, 100, null);
 
     public SettingsViewModel(
         IGlobalHotkeyService hotkeys,
@@ -83,32 +92,81 @@ public sealed class SettingsViewModel : ObservableObject
         StartWithWindows = settings.StartWithWindows;
         AlertVolume = settings.AlertVolume;
         CustomAlertSoundPath = settings.CustomAlertSoundPath;
+        _persisted = settings;
 
         if (ResetInvalidCustomSound())
+        {
             await _store.SaveAsync(CurrentSettings(), ct);
+            _persisted = CurrentSettings();
+        }
 
         ApplyStartupSetting();
     }
 
-    public async Task SaveHotkeyAsync(string hotkey, CancellationToken ct = default)
+    public async Task<SettingsSaveResult> SaveHotkeyAsync(
+        string hotkey,
+        CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         if (_hotkeys.Register(hotkey) == HotkeyRegistrationResult.Conflict)
         {
             HotkeyError = "该快捷键已被其他程序占用";
-            return;
+            return SettingsSaveResult.Failure(HotkeyError);
+        }
+
+        var previousHotkey = Hotkey;
+        var desired = new AppSettings(
+            hotkey, StartWithWindows, AlertVolume, CustomAlertSoundPath);
+        try
+        {
+            await _store.SaveAsync(desired, ct);
+        }
+        catch (Exception exception)
+        {
+            _hotkeys.Register(previousHotkey);
+            HotkeyError = exception.Message;
+            return SettingsSaveResult.Failure(exception.Message);
         }
 
         Hotkey = hotkey;
+        _persisted = desired;
         HotkeyError = null;
-        await SaveAsync(ct);
+        return SettingsSaveResult.Success;
     }
 
-    public async Task SaveAsync(CancellationToken ct = default)
+    public async Task<SettingsSaveResult> SaveAsync(
+        CancellationToken ct = default)
     {
         ResetInvalidCustomSound();
-        await _store.SaveAsync(CurrentSettings(), ct);
-        ApplyStartupSetting();
+        var desired = CurrentSettings();
+        var startupChanged = desired.StartWithWindows != _persisted.StartWithWindows;
+        try
+        {
+            if (startupChanged)
+                ApplyStartupSetting();
+        }
+        catch (Exception exception)
+        {
+            StartWithWindows = _persisted.StartWithWindows;
+            return SettingsSaveResult.Failure(exception.Message);
+        }
+
+        try
+        {
+            await _store.SaveAsync(desired, ct);
+        }
+        catch (Exception exception)
+        {
+            if (startupChanged)
+            {
+                StartWithWindows = _persisted.StartWithWindows;
+                ApplyStartupSetting();
+            }
+            return SettingsSaveResult.Failure(exception.Message);
+        }
+
+        _persisted = desired;
+        return SettingsSaveResult.Success;
     }
 
     private bool ResetInvalidCustomSound()
@@ -122,7 +180,16 @@ public sealed class SettingsViewModel : ObservableObject
             StringComparison.OrdinalIgnoreCase);
         var exists = File.Exists(CustomAlertSoundPath);
         if (hasWaveExtension && exists)
-            return false;
+        {
+            try
+            {
+                SupportedPcmWave.ValidateFile(CustomAlertSoundPath);
+                return false;
+            }
+            catch (InvalidDataException)
+            {
+            }
+        }
 
         CustomAlertSoundPath = null;
         if (!_missingSoundWarningShown)
@@ -130,7 +197,7 @@ public sealed class SettingsViewModel : ObservableObject
             _missingSoundWarningShown = true;
             WarningMessage = !exists
                 ? "自定义声音文件不存在，已恢复为内置声音"
-                : "请选择有效的 WAV 声音文件，已恢复为内置声音";
+                : "请选择未压缩 PCM 8 位或 16 位 WAV 声音文件，已恢复为内置声音";
         }
         return true;
     }

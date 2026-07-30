@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Input;
 using Moment.App.Timeline;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
@@ -15,6 +16,30 @@ public sealed class TimelineViewTests
     private static readonly string[] ExpectedGroups = ["已错过", "接下来", "已完成"];
 
     [Fact]
+    public Task Simulated_dark_system_palette_reaches_timeline_surfaces() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var view = new TimelineView();
+            ApplyDarkPalette(view);
+            var window = new Window
+            {
+                Content = view,
+                Width = 900,
+                Height = 600,
+                ShowInTaskbar = false
+            };
+            window.Show();
+            window.UpdateLayout();
+
+            AssertBrush(Colors.Black, view.Background);
+            AssertBrush(Colors.White, view.Foreground);
+            var header = Assert.IsType<Border>(
+                view.FindName("TimelineHeader"));
+            AssertBrush(Colors.DarkSlateGray, header.Background);
+            window.Close();
+        });
+
+    [Fact]
     public Task Empty_timeline_renders_all_fixed_group_headers_in_required_order() =>
         WpfTestHost.RunAsync(() =>
         {
@@ -25,6 +50,33 @@ public sealed class TimelineViewTests
             var groupList = Assert.IsType<ItemsControl>(view.FindName("GroupList"));
             Assert.Equal(3, groupList.Items.Count);
             Assert.Equal(ExpectedGroups, VisibleGroupHeaders(view));
+        });
+
+    [Fact]
+    public Task Timeline_focus_moves_from_new_action_to_a_row_and_Enter_is_edit_command() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var viewModel = CreateTraversalViewModel();
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var create = Assert.IsType<Button>(
+                view.FindName("NewReminderButton"));
+            Assert.True(create.Focus());
+
+            Assert.True(create.MoveFocus(
+                new TraversalRequest(FocusNavigationDirection.Next)));
+            var focused = Assert.IsAssignableFrom<DependencyObject>(
+                Keyboard.FocusedElement);
+            var list = focused as ListBox ?? Ancestor<ListBox>(focused);
+            Assert.True(list is not null,
+                $"Focused element was {focused.GetType().FullName}.");
+            Assert.NotNull(list.SelectedItem);
+
+            var enter = Assert.Single(
+                view.InputBindings.OfType<KeyBinding>(),
+                binding => binding.Key == Key.Enter);
+            Assert.Same(viewModel.EditCommand, enter.Command);
+            Assert.True(enter.Command.CanExecute(enter.CommandParameter));
         });
 
     [Fact]
@@ -174,6 +226,18 @@ public sealed class TimelineViewTests
         }
     }
 
+    private static T? Ancestor<T>(DependencyObject? element)
+        where T : DependencyObject
+    {
+        while (element is not null)
+        {
+            if (element is T match)
+                return match;
+            element = VisualTreeHelper.GetParent(element);
+        }
+        return null;
+    }
+
     private static QueryStub TwoGroupQuery() =>
         new(
             TestData.Row("已错过事项", "2026-07-29T08:00:00+08:00",
@@ -188,11 +252,61 @@ public sealed class TimelineViewTests
             TimeZoneInfo.CreateCustomTimeZone(
                 "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
 
+    private static TimelineViewModel CreateTraversalViewModel()
+    {
+        var now = new DateTimeOffset(
+            2026, 7, 29, 9, 0, 0, TimeSpan.FromHours(8));
+        var query = new QueryStub(
+            new TimelineRow(
+                Guid.NewGuid(), "已错过事项", now.AddHours(-1),
+                ReminderKind.Plan, ReminderImportance.Normal,
+                OccurrenceState.Missed, null),
+            new TimelineRow(
+                Guid.NewGuid(), "接下来事项", now.AddHours(1),
+                ReminderKind.Plan, ReminderImportance.Normal,
+                OccurrenceState.Scheduled, null));
+        return new TimelineViewModel(
+            query, new LocalClock(now), new ReminderServiceStub(),
+            new ActionServiceStub(), new DialogStub(),
+            TimeZoneInfo.CreateCustomTimeZone(
+                "UTC+08-traversal", TimeSpan.FromHours(8),
+                "UTC+08", "UTC+08"));
+    }
+
+    private static void ApplyDarkPalette(FrameworkElement element)
+    {
+        element.Resources[SystemColors.WindowBrushKey] =
+            new SolidColorBrush(Colors.Black);
+        element.Resources[SystemColors.WindowTextBrushKey] =
+            new SolidColorBrush(Colors.White);
+        element.Resources[SystemColors.ControlBrushKey] =
+            new SolidColorBrush(Colors.DarkSlateGray);
+        element.Resources[SystemColors.ControlTextBrushKey] =
+            new SolidColorBrush(Colors.White);
+        element.Resources[SystemColors.ActiveBorderBrushKey] =
+            new SolidColorBrush(Colors.Yellow);
+        element.Resources[SystemColors.HighlightBrushKey] =
+            new SolidColorBrush(Colors.Yellow);
+        element.Resources[SystemColors.HighlightTextBrushKey] =
+            new SolidColorBrush(Colors.Black);
+    }
+
+    private static void AssertBrush(Color expected, Brush actual) =>
+        Assert.Equal(expected, Assert.IsType<SolidColorBrush>(actual).Color);
+
     private sealed class QueryStub(params TimelineRow[] rows) : ITimelineQuery
     {
         public Task<IReadOnlyList<TimelineRow>> GetTimelineAsync(
             DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<TimelineRow>>(rows);
+    }
+
+    private sealed class LocalClock(DateTimeOffset now) : IClock
+    {
+        public DateTimeOffset Now => now;
+        public Task DelayUntilAsync(
+            DateTimeOffset dueAt,
+            CancellationToken ct) => Task.CompletedTask;
     }
 
     private sealed class ReminderServiceStub : IReminderService

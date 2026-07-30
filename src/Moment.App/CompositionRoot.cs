@@ -34,6 +34,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     private readonly IClock _clock;
     private readonly AppNotificationSink _notificationSink;
     private readonly ImportantAlertWindowPresenter _importantAlertPresenter;
+    private readonly WindowPlacementService _windowPlacement;
     private readonly string _dataFolder;
     private SettingsView? _settingsWindow;
     private bool _started;
@@ -52,6 +53,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         IClock clock,
         AppNotificationSink notificationSink,
         ImportantAlertWindowPresenter importantAlertPresenter,
+        WindowPlacementService windowPlacement,
         string dataFolder,
         SettingsViewModel settings,
         TimelineViewModel timeline,
@@ -71,6 +73,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         _clock = clock;
         _notificationSink = notificationSink;
         _importantAlertPresenter = importantAlertPresenter;
+        _windowPlacement = windowPlacement;
         _dataFolder = dataFolder;
         Settings = settings;
         Timeline = timeline;
@@ -103,9 +106,10 @@ public sealed class CompositionRoot : IAsyncDisposable
         var schedulerSignal = new SchedulerSignalProxy();
         var recurrence = new RecurrenceCalculator();
         var actions = new ReminderActionService(repository, recurrence, schedulerSignal, clock, zone);
+        var windowPlacement = new WindowPlacementService();
         var importantAlertPresenter = new ImportantAlertWindowPresenter(
             System.Windows.Application.Current.Dispatcher,
-            new WindowPlacementService(),
+            windowPlacement,
             () => CreateAppAlertAudio(() => settings.AlertVolume),
             () => settings.CustomAlertSoundPath);
         var importantAlerts = ImportantAlertControllerFactory.CreatePresenterManaged(
@@ -158,6 +162,7 @@ public sealed class CompositionRoot : IAsyncDisposable
             repository, scheduler, importantAlerts, notificationRuntime,
             resumeMonitor, hotkey, singleInstance, tray, reminders, clock,
             notificationSink, importantAlertPresenter,
+            windowPlacement,
             Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory,
             settings, timeline, quickAdd, mainWindow, quickWindow);
         return root;
@@ -312,6 +317,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         };
         _settingsWindow = view;
         view.Show();
+        _windowPlacement.Place(view);
         view.Activate();
     }
 

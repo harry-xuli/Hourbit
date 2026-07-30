@@ -31,10 +31,10 @@ The Task 7 deferred concern was valid: `PendingAlert.Completion` could previousl
 
 `SettingsViewModel` depends on `IGlobalHotkeyService`, `ISettingsStore`, and the existing `IStartupRegistrationService`. It never accesses SQLite. `SqliteSettingsStore` stores independent keys transactionally and leaves unknown/future keys untouched.
 
-The required `AppSettings` contract has exactly four fields. “普通提醒/重要提醒默认级别” is therefore implemented as two explicit, interactive behavior rows:
+The required `AppSettings` contract has exactly four fields. Ordinary and important reminder behavior is described by two explicit, interactive test rows:
 
-- 普通提醒: Windows notification default plus “发送测试通知”.
-- 重要提醒: topmost looping-alert default plus “测试重要提醒”.
+- 普通提醒: Windows notification behavior plus “发送测试通知”.
+- 重要提醒: topmost looping-alert behavior plus “测试重要提醒”.
 
 They are not presented as editable persisted defaults. Reminder importance remains selected per reminder in the existing editors, matching the approved product model.
 
@@ -142,5 +142,82 @@ Results:
 1. Windows High Contrast and physical 125/150/200% display settings were not changed. Evidence is deterministic WPF simulation; a manual OS-level release pass remains.
 2. The tray-to-Settings and real scheduled-important-alert paths were not targetable through Computer Use. Automated WPF/controller/composition evidence covers them, but a human end-to-end smoke remains.
 3. Physical audible looping through the user's speaker device was not independently confirmed.
-4. “备份与恢复” opens the local backup folder. Backup creation/restore behavior belongs to planned Task 11.
+4. “打开备份文件夹” opens the local backup folder. Backup creation/restore behavior belongs to planned Task 11.
 5. The release-page link is optional and was not included; the current version is shown.
+
+## Fix round 1 evidence
+
+This section supersedes earlier focused counts and any earlier wording that
+described the two reminder behavior rows as editable or persisted defaults.
+`AppSettings` remains the approved exact four-field record.
+
+1. Human ruling: the reminder rows now say “提醒行为与测试”; text and test names
+   describe ordinary/important delivery behavior without claiming a persisted
+   default-level setting.
+2. Human ruling: the button label and automation name are exactly
+   “打开备份文件夹”. An injected folder opener test first exposed that the name
+   had accidentally been attached to the data-folder button, then verified the
+   corrected action receives `<data folder>\backups`. No Task 11 backup/restore
+   implementation was added.
+3. Hotkey replacement first failed a stateful test with two registrations
+   instead of the required restore call. `GlobalHotkeyService` now restores the
+   prior native registration on conflict. Settings saves return an explicit
+   `SettingsSaveResult`; a hotkey store failure re-registers the old gesture,
+   startup registry failure leaves the store unchanged, and a settings-store
+   failure compensates the registry change before reporting failure. The view
+   displays success only for a successful result.
+4. A controlled audio-start test holds `StartDefaultLoopAsync`, invokes an
+   action, and proves completion remains pending until start settles, followed
+   by stop and dispose. The window cancels/awaits the single start task before
+   cleanup. The test also exposed premature CTS disposal and now covers the
+   corrected lifecycle.
+5. `ImportantAlertAudio.StopAsync` now detaches and disposes the active stream
+   even when player stop throws, aggregating stop/dispose failures.
+   `ImportantAlertController` treats non-lifetime `OperationCanceledException`
+   as a settled request failure, still stops audio, and continues with the next
+   queued alert.
+6. WAV handling is deliberately bounded to uncompressed PCM 8-bit/16-bit.
+   Validation runs before every playback and before custom-path persistence.
+   Tests cover PCM 16 silence, PCM 24/32 rejection, IEEE float and compressed
+   rejection, malformed chunks, and zero-volume behavior. Unsupported formats
+   are never passed through silently.
+7. `section=timeline` is now a valid navigation activation with a null
+   occurrence, matching the normal test notification. Focused router evidence
+   was RED (no navigation) then GREEN (timeline navigation).
+8. Timeline, Quick Add, Settings, Main, and Important Alert use matching
+   dynamic system window/control/border/highlight brushes. A dark-palette test
+   was RED on the fixed Quick Add footer (`#F6F8FA`) and GREEN after the change;
+   all four required surfaces have simulated palette assertions.
+9. Deterministic traversal covers all 13 Settings controls and all six Alert
+   actions. Quick Add covers Tab, Enter, and Escape. Timeline traversal was RED
+   because focus stopped on the non-actionable outer `ItemsControl`; setting it
+   non-focusable moves focus into the selected reminder list, with Enter bound
+   to Edit.
+10. Placement now accepts injectable target-monitor physical work area and DPI,
+    converts with the target DPI, and clamps minimum/maximum/current size.
+    Mixed-DPI centering and a 500×400 constrained work area are covered.
+    Settings and Important Alert share the same production placement service.
+
+During focused reruns, Windows Smart App Control intermittently returned
+`0x800711C7` for freshly rebuilt test assemblies or `Moment.TestSupport.dll`.
+These infrastructure blocks were kept separate from assertion results and
+retried; they are not reported as passing tests.
+
+Fix-round final verification on 2026-07-30:
+
+- `dotnet build Moment.slnx --no-restore`: PASS, 0 warnings, 0 errors.
+- Transactional Settings compensation: 3/3 focused PASS.
+- Alert start-race, full action traversal, Enter, and Escape: 4/4 focused PASS.
+- WAV validation, mixed-DPI/constrained placement, and four-surface palette
+  groups: 14/14 focused PASS.
+- Timeline traversal/Enter: 1/1 focused PASS.
+- Backup-folder label/action: 1/1 focused PASS.
+- Notification timeline activation: focused RED then 3/3 router PASS.
+- Hotkey service: 15/15 focused PASS.
+- Controller non-lifetime cancellation/queue continuation and active-stream
+  cleanup each passed their focused regression.
+- Full Core, Infrastructure, Windows, and App commands were executed after the
+  successful build. Smart App Control blocked `Moment.TestSupport.dll` with
+  `0x800711C7` across all four processes, so this run cannot truthfully be
+  reported as a full-suite pass. Before this fix round the same full commands
+  passed 248/248; the fix-round behaviors above have fresh focused evidence.

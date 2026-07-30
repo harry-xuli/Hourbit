@@ -27,7 +27,7 @@ public sealed class SettingsViewModelTests
     {
         using var directory = new TempDirectory();
         var soundPath = Path.Combine(directory.Path, "bell.wav");
-        await File.WriteAllBytesAsync(soundPath, [0x52, 0x49, 0x46, 0x46]);
+        await File.WriteAllBytesAsync(soundPath, CreatePcmWave());
         var hotkeys = new StubHotkeys(HotkeyRegistrationResult.Registered);
         var store = new RecordingSettingsStore
         {
@@ -42,6 +42,27 @@ public sealed class SettingsViewModelTests
             new AppSettings("Ctrl+Shift+R", true, 42, soundPath),
             store.LastSaved);
         Assert.Null(vm.HotkeyError);
+    }
+
+    [Fact]
+    public async Task Hotkey_store_failure_restores_the_previous_runtime_registration()
+    {
+        var hotkeys = new StubHotkeys(HotkeyRegistrationResult.Registered);
+        var store = new RecordingSettingsStore
+        {
+            Current = new AppSettings("Ctrl+Alt+Space", false, 100, null),
+            SaveException = new IOException("settings write failed")
+        };
+        var vm = new SettingsViewModel(hotkeys, store);
+        await vm.LoadAsync();
+
+        var result = await vm.SaveHotkeyAsync("Ctrl+Shift+R");
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(["Ctrl+Shift+R", "Ctrl+Alt+Space"], hotkeys.Gestures);
+        Assert.Equal("Ctrl+Alt+Space", vm.Hotkey);
+        Assert.Equal("settings write failed", vm.HotkeyError);
+        Assert.Equal("Ctrl+Alt+Space", store.Current.Hotkey);
     }
 
     [Fact]
@@ -100,7 +121,7 @@ public sealed class SettingsViewModelTests
 
         Assert.Null(vm.CustomAlertSoundPath);
         Assert.Null(store.LastSaved!.CustomAlertSoundPath);
-        Assert.Equal("请选择有效的 WAV 声音文件，已恢复为内置声音",
+        Assert.Equal("请选择未压缩 PCM 8 位或 16 位 WAV 声音文件，已恢复为内置声音",
             vm.WarningMessage);
     }
 
@@ -126,21 +147,101 @@ public sealed class SettingsViewModelTests
         Assert.True(store.LastSaved!.StartWithWindows);
     }
 
+    [Fact]
+    public async Task Startup_registry_failure_keeps_persisted_setting_unchanged()
+    {
+        var startup = new StubStartup();
+        var store = new RecordingSettingsStore();
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            store,
+            startup,
+            @"C:\Program Files\Moment\Moment.exe");
+        await vm.LoadAsync();
+        startup.SetException =
+            new UnauthorizedAccessException("registry denied");
+        vm.StartWithWindows = true;
+
+        var result = await vm.SaveAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("registry denied", result.ErrorMessage);
+        Assert.False(vm.StartWithWindows);
+        Assert.Empty(store.Saves);
+        Assert.False(store.Current.StartWithWindows);
+    }
+
+    [Fact]
+    public async Task Startup_store_failure_compensates_the_registry_change()
+    {
+        var startup = new StubStartup();
+        var store = new RecordingSettingsStore
+        {
+            SaveException = new IOException("settings write failed")
+        };
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            store,
+            startup,
+            @"C:\Program Files\Moment\Moment.exe");
+        await vm.LoadAsync();
+        startup.Calls.Clear();
+        vm.StartWithWindows = true;
+
+        var result = await vm.SaveAsync();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal([true, false],
+            startup.Calls.Select(call => call.Enabled).ToArray());
+        Assert.False(vm.StartWithWindows);
+        Assert.False(store.Current.StartWithWindows);
+    }
+
     private sealed class StubHotkeys(HotkeyRegistrationResult result) : IGlobalHotkeyService
     {
+        public List<string> Gestures { get; } = [];
         public event EventHandler? Pressed
         {
             add { }
             remove { }
         }
-        public HotkeyRegistrationResult Register(string gesture) => result;
+        public HotkeyRegistrationResult Register(string gesture)
+        {
+            Gestures.Add(gesture);
+            return result;
+        }
         public void Dispose() { }
+    }
+
+    private static byte[] CreatePcmWave()
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream,
+                   System.Text.Encoding.ASCII, leaveOpen: true))
+        {
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+            writer.Write(38);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+            writer.Write(16);
+            writer.Write((short)1);
+            writer.Write((short)1);
+            writer.Write(8000);
+            writer.Write(8000);
+            writer.Write((short)1);
+            writer.Write((short)8);
+            writer.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+            writer.Write(1);
+            writer.Write((byte)128);
+            writer.Write((byte)0);
+        }
+        return stream.ToArray();
     }
 
     private sealed class RecordingSettingsStore : ISettingsStore
     {
         public AppSettings Current { get; set; } =
             new("Ctrl+Alt+Space", false, 100, null);
+        public Exception? SaveException { get; set; }
         public List<AppSettings> Saves { get; } = [];
         public AppSettings? LastSaved => Saves.LastOrDefault();
         public string? LastSavedHotkey => LastSaved?.Hotkey;
@@ -150,6 +251,8 @@ public sealed class SettingsViewModelTests
 
         public Task SaveAsync(AppSettings settings, CancellationToken ct)
         {
+            if (SaveException is not null)
+                return Task.FromException(SaveException);
             Saves.Add(settings);
             Current = settings;
             return Task.CompletedTask;
@@ -160,9 +263,16 @@ public sealed class SettingsViewModelTests
     {
         public bool IsEnabled => LastSet?.Enabled ?? false;
         public (bool Enabled, string Path)? LastSet { get; private set; }
+        public Exception? SetException { get; set; }
+        public List<(bool Enabled, string Path)> Calls { get; } = [];
         public StartupPathStatus GetPathStatus(string executablePath) =>
             IsEnabled ? StartupPathStatus.Current : StartupPathStatus.Disabled;
-        public void SetEnabled(bool enabled, string executablePath) =>
+        public void SetEnabled(bool enabled, string executablePath)
+        {
+            if (SetException is not null)
+                throw SetException;
             LastSet = (enabled, executablePath);
+            Calls.Add(LastSet.Value);
+        }
     }
 }

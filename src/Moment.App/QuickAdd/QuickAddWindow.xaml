@@ -8,7 +8,8 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         WindowStartupLocation="Manual"
-        Background="{StaticResource WindowBackgroundBrush}"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
         PreviewKeyDown="OnPreviewKeyDown">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
@@ -41,7 +42,7 @@
 
         <Border Grid.Row="1"
                 Margin="22,0,22,12"
-                BorderBrush="{StaticResource BorderBrush}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1"
                 CornerRadius="5"
                 Visibility="{Binding IsChoicePanelVisible, Converter={StaticResource BooleanToVisibility}}">
@@ -72,7 +73,7 @@
                 Margin="22,0,22,12"
                 Padding="16,14"
                 MinHeight="60"
-                BorderBrush="{StaticResource BorderBrush}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1"
                 CornerRadius="5">
             <Border.Style>
@@ -98,8 +99,8 @@
         <Border Grid.Row="3"
                 Margin="22,0,22,12"
                 Padding="14,10"
-                Background="#FFF7F6"
-                BorderBrush="#F3C9C3"
+                Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1"
                 CornerRadius="5">
             <Border.Style>
@@ -121,8 +122,8 @@
         <Border Grid.Row="3"
                 Margin="22,0,22,12"
                 Padding="16,14"
-                Background="{StaticResource SubtleBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+                Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1"
                 CornerRadius="5"
                 Visibility="{Binding AreDetailsVisible, Converter={StaticResource BooleanToVisibility}}">
@@ -203,9 +204,10 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="4"
-                Background="{StaticResource SubtleBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+        <Border x:Name="QuickAddFooter"
+                Grid.Row="4"
+                Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="0,1,0,0"
                 Padding="22,15">
             <TextBlock Text="{Binding FooterText}"

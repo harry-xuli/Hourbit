@@ -356,9 +356,10 @@ public sealed class NotificationActivationRouter(INotificationActivationSource s
                 return false;
         }
 
-        if (values.Count == 1 && values.TryGetValue("section", out var missed) && missed == "missed")
+        if (values.Count == 1 && values.TryGetValue("section", out var sectionOnly) &&
+            sectionOnly is "missed" or "timeline")
         {
-            navigation = new NotificationNavigation("missed", null);
+            navigation = new NotificationNavigation(sectionOnly, null);
             return true;
         }
 

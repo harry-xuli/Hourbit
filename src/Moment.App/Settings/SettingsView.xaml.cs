@@ -11,7 +11,8 @@ public sealed record SettingsViewActions(
     IImportantAlertAudio PreviewAudio,
     Func<CancellationToken, Task> SendTestNotification,
     Func<CancellationToken, Task> ShowTestImportantAlert,
-    string DataFolder);
+    string DataFolder,
+    Action<string>? OpenFolder = null);
 
 public partial class SettingsView : Window
 {
@@ -45,7 +46,7 @@ public partial class SettingsView : Window
     {
         if (ViewModel is null)
             return;
-        await RunAsync(
+        await RunSaveAsync(
             ct => ViewModel.SaveHotkeyAsync(HotkeyBox.Text, ct),
             "快捷键已保存");
     }
@@ -54,7 +55,7 @@ public partial class SettingsView : Window
     {
         if (ViewModel is null)
             return;
-        await RunAsync(ct => ViewModel.SaveAsync(ct), "设置已保存");
+        await RunSaveAsync(ct => ViewModel.SaveAsync(ct), "设置已保存");
     }
 
     private void OnPickSound(object sender, RoutedEventArgs e)
@@ -149,6 +150,23 @@ public partial class SettingsView : Window
         }
     }
 
+    private async Task RunSaveAsync(
+        Func<CancellationToken, Task<SettingsSaveResult>> action,
+        string successMessage)
+    {
+        try
+        {
+            var result = await action(CancellationToken.None);
+            ActionStatusText.Text = result.Succeeded
+                ? successMessage
+                : result.ErrorMessage;
+        }
+        catch (Exception exception)
+        {
+            ActionStatusText.Text = exception.Message;
+        }
+    }
+
     private void OpenFolder(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -156,6 +174,12 @@ public partial class SettingsView : Window
         try
         {
             Directory.CreateDirectory(path);
+            if (_actions?.OpenFolder is { } openFolder)
+            {
+                openFolder(path);
+                return;
+            }
+
             Process.Start(new ProcessStartInfo("explorer.exe", path)
             {
                 UseShellExecute = true

@@ -65,7 +65,7 @@
                           automation:AutomationProperties.Name="开机启动" />
             </GroupBox>
 
-            <GroupBox Header="提醒级别" Margin="0,18,0,0" Padding="18">
+            <GroupBox Header="提醒行为与测试" Margin="0,18,0,0" Padding="18">
                 <StackPanel>
                     <Border BorderBrush="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
                             BorderThickness="1" Padding="14" Margin="0,0,0,10">
@@ -78,7 +78,7 @@
                                 <TextBlock Text="▣  普通提醒"
                                            FontWeight="SemiBold"
                                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                <TextBlock Text="默认发送到 Windows 通知中心；专注模式可能延迟显示。"
+                                <TextBlock Text="普通提醒发送到 Windows 通知中心；专注模式可能延迟显示。"
                                            Margin="0,6,16,0"
                                            TextWrapping="Wrap"
                                            Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
@@ -108,7 +108,7 @@
                                 <TextBlock Text="⚠  重要提醒"
                                            FontWeight="SemiBold"
                                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                                <TextBlock Text="默认显示置顶窗口并循环播放声音，直到明确处理。"
+                                <TextBlock Text="重要提醒显示置顶窗口并循环播放声音，直到明确处理。"
                                            Margin="0,6,16,0"
                                            TextWrapping="Wrap"
                                            Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
@@ -216,13 +216,14 @@
                             <TextBlock Text="打开数据文件夹" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource SecondaryButton}"
+                    <Button x:Name="OpenBackupFolderButton"
+                            Style="{StaticResource SecondaryButton}"
                             TabIndex="12"
                             Click="OnOpenBackupFolder"
                             automation:AutomationProperties.Name="打开备份文件夹">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="↺" Margin="0,0,8,0" />
-                            <TextBlock Text="备份与恢复" />
+                            <TextBlock Text="打开备份文件夹" />
                         </StackPanel>
                     </Button>
                 </StackPanel>

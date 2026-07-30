@@ -14,10 +14,10 @@ Verified on 2026-07-30 for the Windows 11 x64 WPF build.
 
 | Surface | Result | Evidence |
 | --- | --- | --- |
-| Timeline | PASS | Normal production launch exposed named timeline/group/list elements through UI Automation. Existing timeline UI tests verify stable groups, selection, and command targets. |
-| Quick Add | PASS | `First_Tab_expands_details_then_subsequent_focus_traversal_moves_to_next_field`; ambiguity choices are reachable by normal focus traversal; Escape behavior is covered by view-model tests. |
-| Important Alert | PASS | Six visible action buttons have non-empty automation names. Complete, Ignore, and Snooze 5/10/30/60 are reachable by Tab; Enter activates the focused button; Escape and title-bar close map to Snooze 10. |
-| Settings | PASS | Focus traversal is `HotkeyBox` → `SaveHotkeyButton` → `StartupCheckBox`, followed by the two reminder-level test actions and remaining controls. All interactive controls have visible text and automation names. |
+| Timeline | PASS | `NewReminderButton` moves to the selected reminder list; the non-actionable outer `ItemsControl` is not a tab stop. The Enter binding is deterministically verified as `EditCommand`. |
+| Quick Add | PASS | First Tab expands details and focuses title; later traversal reaches detail fields or ambiguity choices. The production Enter path submits only from the sentence input, and the Escape binding hides without clearing text. |
+| Important Alert | PASS | `MoveFocus` verifies all six named actions in visible order. The production key handler is tested for Enter on the focused action and Escape → Snooze 10; title-bar close also maps to Snooze 10. |
+| Settings | PASS | `MoveFocus` verifies all 13 interactive controls in visible order, including the two behavior test actions, sound controls, data/backup folder actions, and Save. |
 
 There are no icon-only application controls in the new Settings or Important Alert windows. Every symbol is paired with a visible Chinese text label. Status and reminder importance use symbol plus text; color is supplementary.
 
@@ -34,9 +34,9 @@ Quick Add separately passes its 200%-equivalent compact-viewport scrolling test.
 
 ## High contrast and reduced motion
 
-- PASS (simulated): Settings background/text resolve to black/white, primary actions to yellow/black, and secondary actions to black/white.
-- PASS (simulated): Important Alert uses the same system-color contrast pairs for its window and all actions.
-- PASS: Shared TextBlock, TextBox, primary Button, and secondary Button styles use dynamic Windows system brushes, so Settings, Quick Add, Important Alert, and shared timeline text respond to system palette resources.
+- PASS (simulated): Settings and Important Alert resolve window/control/highlight pairs to black/white, black/white, and yellow/black.
+- PASS (simulated): Timeline and Quick Add window backgrounds resolve to black/white, while headers, footers, warning panels, and borders use the injected control/active-border palette.
+- PASS: Required surfaces use matching dynamic system backgrounds, foregrounds, borders, highlight text, and focus brushes.
 - PASS: Focus uses a visible two-pixel outline. Text fields also change border thickness on keyboard focus.
 - PASS: No animations, fades, auto-scrolling, or motion-only feedback were added.
 

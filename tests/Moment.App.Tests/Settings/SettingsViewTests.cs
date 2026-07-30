@@ -3,16 +3,18 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.IO;
 using Moment.App.Settings;
 using Moment.Core.Abstractions;
 using Moment.Windows.Hotkeys;
+using Moment.Windows.Alerts;
 
 namespace Moment.App.Tests.Settings;
 
 public sealed class SettingsViewTests
 {
     [Fact]
-    public Task Primary_settings_controls_follow_visible_keyboard_order() =>
+    public Task Every_settings_action_follows_visible_keyboard_order() =>
         WpfTestHost.RunAsync(() =>
         {
             var view = CreateView();
@@ -20,22 +22,44 @@ public sealed class SettingsViewTests
             view.Activate();
             view.UpdateLayout();
             var hotkey = Assert.IsType<TextBox>(view.FindName("HotkeyBox"));
-            var saveHotkey = Assert.IsType<Button>(
-                view.FindName("SaveHotkeyButton"));
-            var startup = Assert.IsType<CheckBox>(
-                view.FindName("StartupCheckBox"));
             Assert.True(hotkey.Focus());
 
-            Assert.True(hotkey.MoveFocus(
-                new TraversalRequest(FocusNavigationDirection.Next)));
-            Assert.Same(saveHotkey, Keyboard.FocusedElement);
-            Assert.True(saveHotkey.MoveFocus(
-                new TraversalRequest(FocusNavigationDirection.Next)));
-            Assert.Same(startup, Keyboard.FocusedElement);
+            var expected = new[]
+            {
+                "全局快捷键",
+                "测试并保存快捷键",
+                "开机启动",
+                "发送测试通知",
+                "测试重要提醒",
+                "自定义 WAV 声音路径",
+                "选择 WAV 声音文件",
+                "播放声音预览",
+                "停止声音预览",
+                "提醒音量 0 到 100",
+                "打开数据文件夹",
+                "打开备份文件夹",
+                "保存设置"
+            };
+            var actual = new List<string>();
+            foreach (var _ in expected)
+            {
+                var focused = Assert.IsAssignableFrom<UIElement>(
+                    Keyboard.FocusedElement);
+                actual.Add(System.Windows.Automation.AutomationProperties
+                    .GetName(focused));
+                if (actual.Count < expected.Length)
+                {
+                    Assert.True(focused.MoveFocus(
+                        new TraversalRequest(
+                            FocusNavigationDirection.Next)));
+                }
+            }
+
+            Assert.Equal(expected, actual);
         });
 
     [Fact]
-    public Task Normal_and_important_default_levels_have_distinct_keyboard_actions() =>
+    public Task Normal_and_important_behavior_tests_have_distinct_keyboard_actions() =>
         WpfTestHost.RunAsync(() =>
         {
             var view = CreateView();
@@ -52,6 +76,39 @@ public sealed class SettingsViewTests
                 System.Windows.Automation.AutomationProperties.GetName(normal));
             Assert.Equal("测试重要提醒",
                 System.Windows.Automation.AutomationProperties.GetName(important));
+            var backup = Assert.IsType<Button>(
+                view.FindName("OpenBackupFolderButton"));
+            Assert.Equal("打开备份文件夹",
+                System.Windows.Automation.AutomationProperties.GetName(backup));
+            Assert.Contains(Descendants<TextBlock>(backup),
+                text => text.Text == "打开备份文件夹");
+        });
+
+    [Fact]
+    public Task Open_backup_folder_label_invokes_the_backups_subfolder_action() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            string? opened = null;
+            var dataFolder = AppContext.BaseDirectory;
+            var view = new SettingsView(
+                new SettingsViewModel(
+                    new StubHotkeys(), new ViewSettingsStore()),
+                new SettingsViewActions(
+                    new NoopAudio(),
+                    _ => Task.CompletedTask,
+                    _ => Task.CompletedTask,
+                    dataFolder,
+                    path => opened = path));
+            view.Show();
+            view.UpdateLayout();
+            var backup = Assert.IsType<Button>(
+                view.FindName("OpenBackupFolderButton"));
+
+            backup.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+            Assert.Equal(
+                Path.Combine(dataFolder, "backups"),
+                opened);
         });
 
     [Fact]
@@ -153,6 +210,17 @@ public sealed class SettingsViewTests
             Task.CompletedTask;
     }
 
+    private sealed class NoopAudio : IImportantAlertAudio
+    {
+        public Task StartCustomLoopAsync(
+            string audioPath,
+            CancellationToken ct) => Task.CompletedTask;
+        public Task StartDefaultLoopAsync(CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task StopAsync(CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
     private static void ApplyHighContrastPalette(FrameworkElement element)
     {
         element.Resources[SystemColors.WindowBrushKey] =
@@ -173,4 +241,19 @@ public sealed class SettingsViewTests
 
     private static void AssertBrush(Color expected, Brush actual) =>
         Assert.Equal(expected, Assert.IsType<SolidColorBrush>(actual).Color);
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        for (var index = 0;
+             index < VisualTreeHelper.GetChildrenCount(root);
+             index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is T match)
+                yield return match;
+            foreach (var descendant in Descendants<T>(child))
+                yield return descendant;
+        }
+    }
 }

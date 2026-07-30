@@ -73,7 +73,8 @@
     </Style>
 
     <Style x:Key="DangerButton" TargetType="{x:Type Button}">
-        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Foreground"
+                Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
         <Setter Property="Background" Value="{StaticResource MissedBrush}" />
         <Setter Property="BorderBrush" Value="{StaticResource MissedBrush}" />
     </Style>

@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Moment.App.QuickAdd;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
@@ -95,6 +96,70 @@ public sealed class QuickAddWindowTests
             window.Close();
         });
 
+    [Fact]
+    public Task Simulated_dark_system_palette_reaches_quick_add_surfaces() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var window = new QuickAddWindow
+            {
+                DataContext = CreateWithoutTestSupport()
+            };
+            ApplyDarkPalette(window);
+            window.Show();
+            window.UpdateLayout();
+
+            AssertBrush(Colors.Black, window.Background);
+            AssertBrush(Colors.White, window.Foreground);
+            var footer = Assert.IsType<Border>(
+                window.FindName("QuickAddFooter"));
+            AssertBrush(Colors.DarkSlateGray, footer.Background);
+            window.Close();
+        });
+
+    [Fact]
+    public async Task Enter_submits_from_input_and_Escape_binding_hides_without_clearing()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var vm = CreateWithoutTestSupport();
+            vm.Text = "明早九点看书";
+            var window = new QuickAddWindow { DataContext = vm };
+            window.Show();
+            window.Activate();
+            window.UpdateLayout();
+            var input = Assert.IsType<TextBox>(
+                window.FindName("InputBox"));
+            Assert.True(input.Focus());
+
+            Assert.True(await window.TrySubmitFromEnterAsync());
+            Assert.Equal(string.Empty, vm.Text);
+
+            vm.Text = "不要清空";
+            var escape = Assert.Single(
+                window.InputBindings.OfType<KeyBinding>(),
+                binding => binding.Key == Key.Escape);
+            escape.Command.Execute(escape.CommandParameter);
+
+            Assert.False(window.IsVisible);
+            Assert.Equal("不要清空", vm.Text);
+            window.Close();
+        });
+    }
+
+    private static QuickAddViewModel CreateWithoutTestSupport()
+    {
+        var due = new DateTimeOffset(
+            2026, 7, 30, 9, 0, 0, TimeSpan.FromHours(8));
+        var draft = new ReminderDraft(
+            "看书", due, ReminderKind.Plan, ReminderImportance.Normal, null);
+        return new QuickAddViewModel(
+            new StubParser(new ParseResult.Success(draft)),
+            new ReminderServiceStub(),
+            new LocalClock(due.AddDays(-1)),
+            TimeZoneInfo.CreateCustomTimeZone(
+                "UTC+08-hc", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
+    }
+
     private static QuickAddViewModel Create(ParseResult result) =>
         new(new StubParser(result), new ReminderServiceStub(),
             new FakeClock("2026-07-29T09:00:00+08:00"),
@@ -115,4 +180,33 @@ public sealed class QuickAddWindowTests
         public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
     }
+
+    private sealed class LocalClock(DateTimeOffset now) : IClock
+    {
+        public DateTimeOffset Now => now;
+        public Task DelayUntilAsync(
+            DateTimeOffset dueAt,
+            CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private static void ApplyDarkPalette(FrameworkElement element)
+    {
+        element.Resources[SystemColors.WindowBrushKey] =
+            new SolidColorBrush(Colors.Black);
+        element.Resources[SystemColors.WindowTextBrushKey] =
+            new SolidColorBrush(Colors.White);
+        element.Resources[SystemColors.ControlBrushKey] =
+            new SolidColorBrush(Colors.DarkSlateGray);
+        element.Resources[SystemColors.ControlTextBrushKey] =
+            new SolidColorBrush(Colors.White);
+        element.Resources[SystemColors.ActiveBorderBrushKey] =
+            new SolidColorBrush(Colors.Yellow);
+        element.Resources[SystemColors.HighlightBrushKey] =
+            new SolidColorBrush(Colors.Yellow);
+        element.Resources[SystemColors.HighlightTextBrushKey] =
+            new SolidColorBrush(Colors.Black);
+    }
+
+    private static void AssertBrush(Color expected, Brush actual) =>
+        Assert.Equal(expected, Assert.IsType<SolidColorBrush>(actual).Color);
 }

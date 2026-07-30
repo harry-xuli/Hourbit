@@ -27,6 +27,7 @@ public sealed class GlobalHotkeyService : IGlobalHotkeyService
 {
     private readonly IHotkeyWindow _window;
     private bool _attempted;
+    private (uint Modifiers, uint VirtualKey)? _registeredGesture;
     private bool _disposed;
 
     public GlobalHotkeyService(IHotkeyWindow? window = null)
@@ -41,13 +42,25 @@ public sealed class GlobalHotkeyService : IGlobalHotkeyService
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         var (modifiers, virtualKey) = HotkeyGestureParser.Parse(gesture);
+        var previous = _registeredGesture;
         if (_attempted)
             _window.Unregister();
 
         _attempted = true;
-        return _window.Register(modifiers, virtualKey)
-            ? HotkeyRegistrationResult.Registered
-            : HotkeyRegistrationResult.Conflict;
+        if (_window.Register(modifiers, virtualKey))
+        {
+            _registeredGesture = (modifiers, virtualKey);
+            return HotkeyRegistrationResult.Registered;
+        }
+
+        _registeredGesture = null;
+        if (previous is { } old &&
+            _window.Register(old.Modifiers, old.VirtualKey))
+        {
+            _registeredGesture = old;
+        }
+
+        return HotkeyRegistrationResult.Conflict;
     }
 
     public void Dispose()

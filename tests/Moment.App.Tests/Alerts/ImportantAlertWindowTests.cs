@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Threading;
 using System.Windows.Media;
 using System.Reflection;
+using System.Windows.Input;
 using Moment.App.Alerts;
 using Moment.App.Shell;
 using Moment.Core.Domain;
@@ -84,6 +85,105 @@ public sealed class ImportantAlertWindowTests
         });
 
         Assert.Equal(expected, await actionTask!);
+        Assert.Equal(["start", "stop", "dispose"], audio.Calls);
+    }
+
+    [Fact]
+    public Task Every_alert_action_follows_visible_keyboard_order() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var window = new ImportantAlertWindow(
+                CreateAlert(), new RecordingAudio(),
+                new WindowPlacementService(() => new Rect(0, 0, 900, 700)));
+            window.Show();
+            window.UpdateLayout();
+            var first = Assert.IsType<System.Windows.Controls.Button>(
+                window.FindName("Snooze5Button"));
+            Assert.True(first.Focus());
+            var expected = new[]
+            {
+                "5 分钟后提醒",
+                "10 分钟后提醒",
+                "30 分钟后提醒",
+                "60 分钟后提醒",
+                "忽略提醒",
+                "完成提醒"
+            };
+            var actual = new List<string>();
+
+            foreach (var _ in expected)
+            {
+                var focused = Assert.IsAssignableFrom<UIElement>(
+                    Keyboard.FocusedElement);
+                actual.Add(System.Windows.Automation.AutomationProperties
+                    .GetName(focused));
+                if (actual.Count < expected.Length)
+                {
+                    Assert.True(focused.MoveFocus(
+                        new TraversalRequest(
+                            FocusNavigationDirection.Next)));
+                }
+            }
+
+            Assert.Equal(expected, actual);
+            window.Close();
+        });
+
+    [Theory]
+    [InlineData(Key.Enter, "IgnoreButton", ImportantAlertAction.Ignore)]
+    [InlineData(Key.Escape, "IgnoreButton", ImportantAlertAction.Snooze10)]
+    public async Task Enter_activates_focused_action_and_Escape_snoozes_ten(
+        Key key,
+        string focusedButton,
+        ImportantAlertAction expected)
+    {
+        Task<ImportantAlertAction>? completion = null;
+        await WpfTestHost.RunAsync(() =>
+        {
+            var window = new ImportantAlertWindow(
+                CreateAlert(), new RecordingAudio(),
+                new WindowPlacementService(() => new Rect(0, 0, 900, 700)));
+            window.Show();
+            window.Dispatcher.Invoke(
+                () => { }, DispatcherPriority.ApplicationIdle);
+            var button = Assert.IsType<System.Windows.Controls.Button>(
+                window.FindName(focusedButton));
+            Assert.True(button.Focus());
+            completion = window.Completion;
+
+            Assert.True(window.TryHandleKey(key));
+        });
+
+        Assert.Equal(expected, await completion!);
+    }
+
+    [Fact]
+    public async Task Action_waits_for_in_progress_audio_start_before_stop_and_completion()
+    {
+        var audio = new ControlledStartAudio();
+        Task<ImportantAlertAction>? actionTask = null;
+
+        await WpfTestHost.RunAsync(() =>
+        {
+            var window = new ImportantAlertWindow(
+                CreateAlert(), audio,
+                new WindowPlacementService(() => new Rect(0, 0, 900, 700)));
+            window.Show();
+            window.Dispatcher.Invoke(
+                () => { }, DispatcherPriority.ApplicationIdle);
+            Assert.True(audio.Started.Task.IsCompleted);
+            actionTask = window.Completion;
+
+            var complete = Assert.IsType<System.Windows.Controls.Button>(
+                window.FindName("CompleteButton"));
+            complete.RaiseEvent(new RoutedEventArgs(
+                System.Windows.Controls.Button.ClickEvent));
+            Assert.False(actionTask.IsCompleted);
+            Assert.Equal(["start"], audio.Calls);
+            audio.ReleaseStart();
+        });
+
+        Assert.Equal(ImportantAlertAction.Complete, await actionTask!);
         Assert.Equal(["start", "stop", "dispose"], audio.Calls);
     }
 
@@ -175,6 +275,39 @@ public sealed class ImportantAlertWindowTests
             Calls.Add("dispose");
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class ControlledStartAudio : IImportantAlertAudio, IAsyncDisposable
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<string> Calls { get; } = [];
+
+        public Task StartCustomLoopAsync(string audioPath, CancellationToken ct) =>
+            StartDefaultLoopAsync(ct);
+
+        public async Task StartDefaultLoopAsync(CancellationToken ct)
+        {
+            Calls.Add("start");
+            Started.TrySetResult();
+            await _release.Task;
+        }
+
+        public Task StopAsync(CancellationToken ct)
+        {
+            Calls.Add("stop");
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Calls.Add("dispose");
+            return ValueTask.CompletedTask;
+        }
+
+        public void ReleaseStart() => _release.TrySetResult();
     }
 
     private static void ApplyHighContrastPalette(FrameworkElement element)

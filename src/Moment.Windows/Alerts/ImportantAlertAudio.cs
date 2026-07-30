@@ -105,9 +105,31 @@ public sealed class ImportantAlertAudio : IImportantAlertAudio, IAsyncDisposable
 
     public async Task StopAsync(CancellationToken ct)
     {
-        await _player.StopAsync(ct).ConfigureAwait(false);
-        _activeWave?.Dispose();
+        Exception? failure = null;
+        try
+        {
+            await _player.StopAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        var activeWave = _activeWave;
         _activeWave = null;
+        try
+        {
+            activeWave?.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failure = failure is null
+                ? exception
+                : new AggregateException(failure, exception);
+        }
+
+        if (failure is not null)
+            throw failure;
     }
 
     public ValueTask DisposeAsync() => new(StopAsync(CancellationToken.None));

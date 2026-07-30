@@ -156,6 +156,38 @@ public sealed class ImportantAlertControllerTests
         Assert.Equal("audio cleanup failed", error.Message);
     }
 
+    [Fact]
+    public async Task Non_lifetime_cancellation_settles_the_alert_and_queue_continues()
+    {
+        var presenter = new CancelFirstPresenter();
+        var audio = new RecordingAudio(failCustom: false);
+        var controller = new ImportantAlertController(
+            presenter, new RecordingActions(), audio);
+        try
+        {
+            var first = controller.EnqueueAsync(
+                Alert("A", 1), CancellationToken.None);
+            var second = controller.EnqueueAsync(
+                Alert("B", 2), CancellationToken.None);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => first.WaitAsync(TimeSpan.FromSeconds(1)));
+            await second.WaitAsync(TimeSpan.FromSeconds(1));
+
+            Assert.Equal(["A", "B"], presenter.Titles);
+            Assert.Equal(2, audio.Calls.Count(call => call == "stop"));
+        }
+        finally
+        {
+            await controller.DisposeAsync();
+        }
+    }
+
+    private static ReminderAlert Alert(string title, int dueMinute) =>
+        new(Guid.NewGuid(), title,
+            new DateTimeOffset(2026, 7, 30, 9, dueMinute, 0,
+                TimeSpan.FromHours(8)));
+
     private sealed class RecordingPresenter(ImportantAlertAction action) : IImportantAlertPresenter
     {
         private int _active;
@@ -176,6 +208,21 @@ public sealed class ImportantAlertControllerTests
     {
         public Task<ImportantAlertAction> ShowAsync(ReminderAlert alert, CancellationToken ct) =>
             Task.FromException<ImportantAlertAction>(new InvalidOperationException("window failed"));
+    }
+
+    private sealed class CancelFirstPresenter : IImportantAlertPresenter
+    {
+        public List<string> Titles { get; } = [];
+        public Task<ImportantAlertAction> ShowAsync(
+            ReminderAlert alert,
+            CancellationToken ct)
+        {
+            Titles.Add(alert.Title);
+            return Titles.Count == 1
+                ? Task.FromException<ImportantAlertAction>(
+                    new OperationCanceledException("presenter cancelled"))
+                : Task.FromResult(ImportantAlertAction.Ignore);
+        }
     }
 
     private sealed class BlockingPresenter : IImportantAlertPresenter

@@ -70,12 +70,22 @@ public partial class QuickAddWindow : System.Windows.Window, IQuickAddWindow
         }
 
         if (eventArgs.Key == System.Windows.Input.Key.Enter
-            && InputBox.IsKeyboardFocusWithin
-            && DataContext is QuickAddViewModel viewModel)
+            && await TrySubmitFromEnterAsync())
         {
             eventArgs.Handled = true;
-            await viewModel.SubmitCommand.ExecuteAsync(null);
         }
+    }
+
+    internal async Task<bool> TrySubmitFromEnterAsync()
+    {
+        if (!InputBox.IsKeyboardFocusWithin ||
+            DataContext is not QuickAddViewModel viewModel)
+        {
+            return false;
+        }
+
+        await viewModel.SubmitCommand.ExecuteAsync(null);
+        return true;
     }
 
     private void PlaceOnCurrentMonitor()

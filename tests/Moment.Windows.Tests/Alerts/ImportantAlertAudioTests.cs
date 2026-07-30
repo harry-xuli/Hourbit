@@ -37,6 +37,22 @@ public sealed class ImportantAlertAudioTests
         Assert.Equal("RIFF", player.Header);
     }
 
+    [Fact]
+    public async Task Stop_failure_still_disposes_the_active_wave_stream()
+    {
+        var stream = new TrackingStream(
+            Encoding.ASCII.GetBytes("RIFF-app-wave"));
+        var audio = new ImportantAlertAudio(
+            new StopFailingPlayer(), () => stream);
+        await audio.StartDefaultLoopAsync(CancellationToken.None);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => audio.StopAsync(CancellationToken.None));
+
+        Assert.Equal("stop failed", error.Message);
+        Assert.True(stream.WasDisposed);
+    }
+
     private sealed class FailingFirstPlayer : ILoopingAudioPlayer
     {
         public int StartAttempts { get; private set; }
@@ -73,5 +89,23 @@ public sealed class ImportantAlertAudioTests
             Header = Encoding.ASCII.GetString(header);
         }
         public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class StopFailingPlayer : ILoopingAudioPlayer
+    {
+        public Task StartLoopAsync(Stream wave, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task StopAsync(CancellationToken ct) =>
+            Task.FromException(new InvalidOperationException("stop failed"));
+    }
+
+    private sealed class TrackingStream(byte[] buffer) : MemoryStream(buffer)
+    {
+        public bool WasDisposed { get; private set; }
+        protected override void Dispose(bool disposing)
+        {
+            WasDisposed = true;
+            base.Dispose(disposing);
+        }
     }
 }

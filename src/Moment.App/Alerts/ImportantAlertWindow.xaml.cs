@@ -16,6 +16,8 @@ public partial class ImportantAlertWindow : Window
     private readonly CancellationTokenRegistration _cancellationRegistration;
     private readonly TaskCompletionSource<ImportantAlertAction> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource _audioStartCancellation = new();
+    private Task _audioStart = Task.CompletedTask;
     private int _finishing;
     private bool _allowClose;
 
@@ -44,20 +46,22 @@ public partial class ImportantAlertWindow : Window
     {
         ContentRendered -= OnShown;
         _placement.Place(this);
+        _audioStart = StartAudioAsync(_audioStartCancellation.Token);
         try
         {
-            if (string.IsNullOrWhiteSpace(_alert.CustomAudioPath))
-                await _audio.StartDefaultLoopAsync(CancellationToken.None);
-            else
-                await _audio.StartCustomLoopAsync(
-                    _alert.CustomAudioPath, CancellationToken.None);
+            await _audioStart;
+        }
+        catch (OperationCanceledException)
+            when (_audioStartCancellation.IsCancellationRequested)
+        {
         }
         catch (Exception exception)
         {
             AudioWarningText.Text = "提醒声音无法播放：" + exception.Message;
             AudioWarningPanel.Visibility = Visibility.Visible;
         }
-        CompleteButton.Focus();
+        if (Volatile.Read(ref _finishing) == 0)
+            CompleteButton.Focus();
     }
 
     private void OnActionClick(object sender, RoutedEventArgs e)
@@ -76,10 +80,23 @@ public partial class ImportantAlertWindow : Window
 
     private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key != Key.Escape)
-            return;
-        e.Handled = true;
-        _ = FinishAsync(ImportantAlertAction.Snooze10);
+        e.Handled = TryHandleKey(e.Key);
+    }
+
+    internal bool TryHandleKey(Key key)
+    {
+        ImportantAlertAction? action = key switch
+        {
+            Key.Escape => ImportantAlertAction.Snooze10,
+            Key.Enter when Keyboard.FocusedElement is
+                System.Windows.Controls.Button
+                { Tag: ImportantAlertAction focusedAction } => focusedAction,
+            _ => null
+        };
+        if (action is null)
+            return false;
+        _ = FinishAsync(action.Value);
+        return true;
     }
 
     private async Task FinishAsync(ImportantAlertAction action)
@@ -89,6 +106,7 @@ public partial class ImportantAlertWindow : Window
 
         try
         {
+            await FinishAudioStartAsync();
             await CleanupAudioAsync();
             _allowClose = true;
             _completion.TrySetResult(action);
@@ -112,6 +130,7 @@ public partial class ImportantAlertWindow : Window
             return;
         try
         {
+            await FinishAudioStartAsync();
             await CleanupAudioAsync();
         }
         finally
@@ -120,6 +139,28 @@ public partial class ImportantAlertWindow : Window
             _completion.TrySetCanceled(ct);
             QueueClose();
             _cancellationRegistration.Dispose();
+        }
+    }
+
+    private Task StartAudioAsync(CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(_alert.CustomAudioPath)
+            ? _audio.StartDefaultLoopAsync(ct)
+            : _audio.StartCustomLoopAsync(_alert.CustomAudioPath, ct);
+
+    private async Task FinishAudioStartAsync()
+    {
+        _audioStartCancellation.Cancel();
+        try
+        {
+            await _audioStart;
+        }
+        catch (OperationCanceledException)
+            when (_audioStartCancellation.IsCancellationRequested)
+        {
+        }
+        catch
+        {
+            // OnShown already exposes startup failures non-modally.
         }
     }
 

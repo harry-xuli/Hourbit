@@ -71,10 +71,30 @@ public sealed class GlobalHotkeyServiceTests
         Assert.Equal(1, window.UnregisterCalls);
     }
 
+    [Fact]
+    public void Conflicting_replacement_restores_the_previous_native_registration()
+    {
+        var window = new HotkeyWindow();
+        window.RegistrationResults.Enqueue(true);
+        window.RegistrationResults.Enqueue(false);
+        window.RegistrationResults.Enqueue(true);
+        using var service = new GlobalHotkeyService(window);
+
+        Assert.Equal(HotkeyRegistrationResult.Registered,
+            service.Register("Ctrl+Alt+Space"));
+        Assert.Equal(HotkeyRegistrationResult.Conflict,
+            service.Register("Ctrl+Shift+R"));
+
+        Assert.Equal(3, window.RegisterCalls);
+        Assert.Equal(1, window.UnregisterCalls);
+        Assert.Equal((0x0003u, 0x20u), window.LastGesture);
+    }
+
     private sealed class HotkeyWindow : IHotkeyWindow
     {
         public event EventHandler? HotkeyPressed;
         public bool RegistrationSucceeds { get; set; }
+        public Queue<bool> RegistrationResults { get; } = new();
         public int RegisterCalls { get; private set; }
         public int UnregisterCalls { get; private set; }
         public (uint, uint) LastGesture { get; private set; }
@@ -83,7 +103,9 @@ public sealed class GlobalHotkeyServiceTests
         {
             RegisterCalls++;
             LastGesture = (modifiers, virtualKey);
-            return RegistrationSucceeds;
+            return RegistrationResults.Count > 0
+                ? RegistrationResults.Dequeue()
+                : RegistrationSucceeds;
         }
 
         public void Unregister() => UnregisterCalls++;

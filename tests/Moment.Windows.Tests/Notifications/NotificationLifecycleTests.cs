@@ -133,6 +133,24 @@ public sealed class NotificationLifecycleTests
         Assert.Empty(actions.Calls);
     }
 
+    [Fact]
+    public async Task Test_notification_timeline_activation_routes_without_an_occurrence()
+    {
+        var source = new FakeActivationSource();
+        var actions = new RecordingActions();
+        var navigation = new RecordingNavigation();
+        await using var router =
+            new NotificationActivationRouter(source, actions, navigation);
+        router.Start();
+
+        await source.RaiseAsync("section=timeline");
+
+        Assert.Equal(
+            [new NotificationNavigation("timeline", null)],
+            navigation.Navigations);
+        Assert.Empty(actions.Calls);
+    }
+
     [Theory]
     [InlineData("section=missed&section=missed")]
     [InlineData("section=missed&unknown")]

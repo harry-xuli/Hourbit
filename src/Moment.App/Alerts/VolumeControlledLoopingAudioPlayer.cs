@@ -13,51 +13,27 @@ public sealed class VolumeControlledLoopingAudioPlayer(
         using var copy = new MemoryStream();
         await wave.CopyToAsync(copy, ct);
         var bytes = copy.ToArray();
-        ApplyPcmVolume(bytes, Math.Clamp(volume(), 0, 100));
+        var format = SupportedPcmWave.Validate(bytes);
+        ApplyPcmVolume(bytes, format, Math.Clamp(volume(), 0, 100));
         using var adjusted = new MemoryStream(bytes, writable: false);
         await inner.StartLoopAsync(adjusted, ct);
     }
 
     public Task StopAsync(CancellationToken ct) => inner.StopAsync(ct);
 
-    private static void ApplyPcmVolume(byte[] wave, int percentage)
+    private static void ApplyPcmVolume(
+        byte[] wave,
+        SupportedPcmWave.Format format,
+        int percentage)
     {
-        if (percentage == 100 || wave.Length < 44 ||
-            !Matches(wave, 0, "RIFF") || !Matches(wave, 8, "WAVE"))
-            return;
-
-        short format = 0;
-        short bitsPerSample = 0;
-        var dataOffset = -1;
-        var dataLength = 0;
-        for (var offset = 12; offset + 8 <= wave.Length;)
-        {
-            var length = BitConverter.ToInt32(wave, offset + 4);
-            if (length < 0 || offset + 8L + length > wave.Length)
-                return;
-
-            if (Matches(wave, offset, "fmt ") && length >= 16)
-            {
-                format = BitConverter.ToInt16(wave, offset + 8);
-                bitsPerSample = BitConverter.ToInt16(wave, offset + 22);
-            }
-            else if (Matches(wave, offset, "data"))
-            {
-                dataOffset = offset + 8;
-                dataLength = length;
-            }
-
-            offset += 8 + length + (length & 1);
-        }
-
-        if (format != 1 || dataOffset < 0)
+        if (percentage == 100)
             return;
 
         var factor = percentage / 100d;
-        if (bitsPerSample == 8)
+        if (format.BitsPerSample == 8)
         {
-            for (var index = dataOffset;
-                 index < dataOffset + dataLength;
+            for (var index = format.DataOffset;
+                 index < format.DataOffset + format.DataLength;
                  index++)
             {
                 wave[index] = (byte)Math.Clamp(
@@ -68,10 +44,10 @@ public sealed class VolumeControlledLoopingAudioPlayer(
                     byte.MaxValue);
             }
         }
-        else if (bitsPerSample == 16)
+        else
         {
-            for (var index = dataOffset;
-                 index + 1 < dataOffset + dataLength;
+            for (var index = format.DataOffset;
+                 index + 1 < format.DataOffset + format.DataLength;
                  index += 2)
             {
                 var sample = BitConverter.ToInt16(wave, index);
@@ -86,6 +62,84 @@ public sealed class VolumeControlledLoopingAudioPlayer(
             }
         }
     }
+}
+
+public static class SupportedPcmWave
+{
+    internal sealed record Format(
+        short BitsPerSample,
+        int DataOffset,
+        int DataLength);
+
+    public static void ValidateFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Validate(File.ReadAllBytes(path));
+    }
+
+    internal static Format Validate(byte[] wave)
+    {
+        if (wave.Length < 44 ||
+            !Matches(wave, 0, "RIFF") ||
+            !Matches(wave, 8, "WAVE"))
+        {
+            throw Unsupported();
+        }
+
+        var riffLength = BitConverter.ToUInt32(wave, 4);
+        if (riffLength + 8L > wave.Length)
+            throw new InvalidDataException("WAV 文件块长度无效。");
+
+        short audioFormat = 0;
+        short channels = 0;
+        short bitsPerSample = 0;
+        short blockAlign = 0;
+        var dataOffset = -1;
+        var dataLength = 0;
+        for (var offset = 12; offset + 8 <= wave.Length;)
+        {
+            var length = BitConverter.ToUInt32(wave, offset + 4);
+            var chunkEnd = offset + 8L + length;
+            if (chunkEnd > wave.Length)
+                throw new InvalidDataException("WAV 文件块长度无效。");
+
+            if (Matches(wave, offset, "fmt "))
+            {
+                if (length < 16)
+                    throw new InvalidDataException("WAV fmt 块无效。");
+                audioFormat = BitConverter.ToInt16(wave, offset + 8);
+                channels = BitConverter.ToInt16(wave, offset + 10);
+                blockAlign = BitConverter.ToInt16(wave, offset + 20);
+                bitsPerSample = BitConverter.ToInt16(wave, offset + 22);
+            }
+            else if (Matches(wave, offset, "data"))
+            {
+                dataOffset = offset + 8;
+                dataLength = checked((int)length);
+            }
+
+            var next = chunkEnd + (length & 1);
+            if (next > wave.Length)
+                throw new InvalidDataException("WAV 文件块填充无效。");
+            offset = checked((int)next);
+        }
+
+        var bytesPerSample = bitsPerSample / 8;
+        if (audioFormat != 1 ||
+            bitsPerSample is not (8 or 16) ||
+            channels <= 0 ||
+            blockAlign != channels * bytesPerSample ||
+            dataOffset < 0 ||
+            dataLength % blockAlign != 0)
+        {
+            throw Unsupported();
+        }
+
+        return new Format(bitsPerSample, dataOffset, dataLength);
+    }
+
+    private static InvalidDataException Unsupported() =>
+        new("仅支持未压缩 PCM 8 位或 16 位 WAV 声音文件。");
 
     private static bool Matches(byte[] value, int offset, string expected) =>
         offset >= 0 &&
