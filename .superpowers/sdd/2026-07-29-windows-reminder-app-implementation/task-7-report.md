@@ -138,3 +138,34 @@ Follow-up diagnosis: the controller's executed test exposed a fixture contradict
 Root causes: navigation parsed a fixed argument order; runtime lifecycle used racy independent atomics; and show failures did not clear the registration gate. RED: reversed timeline fields produced no navigation. GREEN: strict structural map parsing routes either field order, runtime lifecycle is lock-protected, and show failures clear `_registered` before `RegistrationFailed`.
 
 Verification: Windows 24/24, Core 78/78, full solution Core 78/78 + Infrastructure 19/19 + Windows 24/24, build 0 warnings/errors.
+
+## Fix round 4
+
+Root causes:
+
+- Navigation used `Where` before `ToDictionary`: bare/empty segments were silently discarded, allowing malformed payloads such as a trailing `&` to route, while duplicate keys escaped as `ArgumentException`.
+- Runtime disposal set its disposed flag before unsubscription completed. A concurrent later `DisposeAsync` therefore returned immediately instead of awaiting the first caller's cleanup.
+- The Windows seam covered registration and setting only; `Show` still called the static SDK manager. The constructor also special-cased unauthorized registration as `PermissionDisabled`, contrary to the registration gate used by refresh and show failures.
+
+RED evidence:
+
+- Focused navigation/lifecycle run: 5 failed, 14 passed. Duplicate navigation keys threw, bare/trailing segments routed, and the second dispose caller completed while the controllable source still blocked `Unregister`.
+- Registration/show seam test build: `CS0246` for the intentionally wished-for `IWindowsNotificationClient`.
+
+GREEN:
+
+- Navigation now parses every segment without throwing and accepts only exact missed or timeline schemas; action parsing remains independent.
+- Runtime start/dispose state is monitor-protected, and all dispose callers await one shared completion task outside the monitor.
+- `IWindowsNotificationClient` injects register, setting, and show behavior. Any register or show failure clears the gate and maps to `RegistrationFailed`; only a successful registration plus disabled setting maps to `PermissionDisabled`. `SetHealth` continues to suppress duplicate events.
+- One initial post-change run was blocked before test bodies by the previously observed Smart App Control `0x800711C7`; the subsequent unchanged rebuilt suites executed successfully.
+
+Verification:
+
+```text
+focused NotificationLifecycleTests + WindowsRuntimeTests: 22/22
+Moment.Windows.Tests: 41/41
+Moment.Core.Tests: 78/78
+Moment.slnx tests: Core 78/78, Infrastructure 19/19, Windows 41/41
+Moment.slnx build: 0 warnings, 0 errors
+git diff --check: PASS
+```

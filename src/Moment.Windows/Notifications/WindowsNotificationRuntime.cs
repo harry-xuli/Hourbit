@@ -8,7 +8,7 @@ public sealed class WindowsNotificationRuntime : IAsyncDisposable
     private readonly NotificationActivationRouter _router;
     private readonly object _gate = new();
     private bool _started;
-    private bool _disposed;
+    private TaskCompletionSource? _disposeCompletion;
 
     public WindowsNotificationRuntime(INotificationActivationSource source, IReminderActionService actions, INotificationNavigator navigator) =>
         _router = new NotificationActivationRouter(source, actions, navigator);
@@ -18,13 +18,49 @@ public sealed class WindowsNotificationRuntime : IAsyncDisposable
 
     public void Start()
     {
-        lock (_gate) { ObjectDisposedException.ThrowIf(_disposed, this); if (_started) return; _router.Start(); _started = true; }
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposeCompletion is not null, this);
+            if (_started) return;
+            _router.Start();
+            _started = true;
+        }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
+        TaskCompletionSource completion;
         var disposeRouter = false;
-        lock (_gate) { if (_disposed) return; _disposed = true; disposeRouter = _started; _started = false; }
-        if (disposeRouter) await _router.DisposeAsync();
+        lock (_gate)
+        {
+            if (_disposeCompletion is not null)
+                return new ValueTask(_disposeCompletion.Task);
+
+            completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposeCompletion = completion;
+            disposeRouter = _started;
+            _started = false;
+        }
+
+        if (disposeRouter)
+            _ = CompleteDisposalAsync(completion);
+        else
+            completion.SetResult();
+
+        return new ValueTask(completion.Task);
+    }
+
+    private async Task CompleteDisposalAsync(TaskCompletionSource completion)
+    {
+        await Task.Yield();
+        try
+        {
+            await _router.DisposeAsync().ConfigureAwait(false);
+            completion.SetResult();
+        }
+        catch (Exception exception)
+        {
+            completion.SetException(exception);
+        }
     }
 }

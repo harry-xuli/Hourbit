@@ -38,10 +38,11 @@ public interface INotificationHealthSource
     event Action<NotificationHealth>? HealthChanged;
     Task RefreshHealthAsync(CancellationToken ct);
 }
-public interface INotificationRegistration
+public interface IWindowsNotificationClient
 {
     void Register();
     bool IsEnabled { get; }
+    void Show(NotificationPayload payload);
 }
 
 public interface INotificationActivationSource
@@ -65,25 +66,12 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
     public NotificationHealth Health { get; private set; } = NotificationHealth.Available;
     public event Action<NotificationHealth>? HealthChanged;
     private bool _registered;
-    private readonly INotificationRegistration _registration;
+    private readonly IWindowsNotificationClient _client;
 
-    public WindowsAppNotificationPlatform(INotificationRegistration? registration = null)
+    public WindowsAppNotificationPlatform(IWindowsNotificationClient? client = null)
     {
-        _registration = registration ?? new WindowsNotificationRegistration();
-        try
-        {
-            _registration.Register();
-            _registered = true;
-            RefreshHealthAsync(CancellationToken.None).GetAwaiter().GetResult();
-        }
-        catch (UnauthorizedAccessException)
-        {
-            Health = NotificationHealth.PermissionDisabled;
-        }
-        catch
-        {
-            Health = NotificationHealth.RegistrationFailed;
-        }
+        _client = client ?? new WindowsAppNotificationClient();
+        RefreshHealthAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
 
     public Task RefreshHealthAsync(CancellationToken ct)
@@ -93,10 +81,10 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
         {
             if (!_registered)
             {
-                _registration.Register();
+                _client.Register();
                 _registered = true;
             }
-            SetHealth(_registration.IsEnabled ? NotificationHealth.Available : NotificationHealth.PermissionDisabled);
+            SetHealth(_client.IsEnabled ? NotificationHealth.Available : NotificationHealth.PermissionDisabled);
         }
         catch { _registered = false; SetHealth(NotificationHealth.RegistrationFailed); }
         return Task.CompletedTask;
@@ -119,15 +107,8 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
 
         try
         {
-            var notification = new AppNotification(payload.ToXml()) { Tag = payload.Tag, Group = payload.Group };
-            AppNotificationManager.Default.Show(notification);
+            _client.Show(payload);
             return Task.CompletedTask;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            _registered = false;
-            SetHealth(NotificationHealth.RegistrationFailed);
-            throw;
         }
         catch
         {
@@ -145,10 +126,15 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
     }
 }
 
-internal sealed class WindowsNotificationRegistration : INotificationRegistration
+internal sealed class WindowsAppNotificationClient : IWindowsNotificationClient
 {
     public void Register() => AppNotificationManager.Default.Register();
     public bool IsEnabled => AppNotificationManager.Default.Setting == AppNotificationSetting.Enabled;
+    public void Show(NotificationPayload payload)
+    {
+        var notification = new AppNotification(payload.ToXml()) { Tag = payload.Tag, Group = payload.Group };
+        AppNotificationManager.Default.Show(notification);
+    }
 }
 
 public sealed class AppNotificationSink(INotificationPlatform platform, IImportantAlertDelivery importantAlerts, IReminderActionService actions) : IReminderSink
@@ -237,11 +223,42 @@ public sealed class NotificationActivationRouter(INotificationActivationSource s
             else await actions.SnoozeAsync(action.OccurrenceId, TimeSpan.FromMinutes(10), CancellationToken.None);
             return;
         }
-        var values = arguments.Split('&').Select(part => part.Split('=', 2)).Where(pair => pair.Length == 2).ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
+
+        if (TryParseNavigation(arguments, out var navigation))
+            await navigator.NavigateAsync(navigation, CancellationToken.None);
+    }
+
+    private static bool TryParseNavigation(string? arguments, out NotificationNavigation navigation)
+    {
+        navigation = default!;
+        if (string.IsNullOrEmpty(arguments)) return false;
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var segment in arguments.Split('&', StringSplitOptions.None))
+        {
+            var separator = segment.IndexOf('=');
+            if (separator <= 0 || separator != segment.LastIndexOf('=') || separator == segment.Length - 1)
+                return false;
+            if (!values.TryAdd(segment[..separator], segment[(separator + 1)..]))
+                return false;
+        }
+
         if (values.Count == 1 && values.TryGetValue("section", out var missed) && missed == "missed")
-            await navigator.NavigateAsync(new NotificationNavigation("missed", null), CancellationToken.None);
-        else if (values.Count == 2 && values.TryGetValue("section", out var section) && section == "timeline" && values.TryGetValue("occurrenceId", out var occurrence) && Guid.TryParseExact(occurrence, "D", out var id))
-            await navigator.NavigateAsync(new NotificationNavigation("timeline", id), CancellationToken.None);
+        {
+            navigation = new NotificationNavigation("missed", null);
+            return true;
+        }
+
+        if (values.Count == 2 &&
+            values.TryGetValue("section", out var section) && section == "timeline" &&
+            values.TryGetValue("occurrenceId", out var occurrence) &&
+            Guid.TryParseExact(occurrence, "D", out var occurrenceId))
+        {
+            navigation = new NotificationNavigation("timeline", occurrenceId);
+            return true;
+        }
+
+        return false;
     }
 }
 
