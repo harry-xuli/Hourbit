@@ -40,6 +40,8 @@ public sealed class WindowsNotificationRuntime : IAsyncDisposable
             _disposeCompletion = completion;
             disposeRouter = _started;
             _started = false;
+            if (disposeRouter)
+                _router.StopAccepting();
         }
 
         if (disposeRouter)
@@ -52,7 +54,6 @@ public sealed class WindowsNotificationRuntime : IAsyncDisposable
 
     private async Task CompleteDisposalAsync(TaskCompletionSource completion)
     {
-        await Task.Yield();
         try
         {
             await _router.DisposeAsync().ConfigureAwait(false);

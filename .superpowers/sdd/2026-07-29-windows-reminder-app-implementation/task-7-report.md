@@ -169,3 +169,45 @@ Moment.slnx tests: Core 78/78, Infrastructure 19/19, Windows 41/41
 Moment.slnx build: 0 warnings, 0 errors
 git diff --check: PASS
 ```
+
+## Fix round 5
+
+Root cause:
+
+- `WindowsNotificationRuntime.DisposeAsync` recorded disposal under its own lock, then yielded before asking the router to unsubscribe. During that gap the router still admitted callbacks.
+- `NotificationActivationRouter.HandleAsync` had no lifecycle admission gate or in-flight count. A delegate captured by an activation source before event removal therefore remained callable during or after disposal and could still reach action/navigation services.
+- Router disposal represented only event removal and source unregistration. It neither waited for a callback already executing before disposal nor gave concurrent router disposal callers one shared drain completion.
+
+Linearizable policy:
+
+- Router disposal closes admission atomically. A callback that enters the lifecycle gate first is considered pre-stop, may complete, and is drained before disposal completes.
+- A callback that reaches the gate after stop is ignored, including a delegate captured before unsubscription and invoked after disposal has completed.
+- Event removal, source unregistration, action/navigation awaits, and the in-flight drain all occur without holding the lifecycle monitor.
+
+RED evidence:
+
+```text
+focused captured/deferred activation tests: 0/4 passed
+- captured activation after disposal began invoked CompleteAsync
+- captured activation after disposal completed invoked CompleteAsync
+- an activation already blocked in CompleteAsync did not delay router disposal
+- concurrent router dispose callers completed instead of sharing that drain
+```
+
+GREEN:
+
+- The runtime closes router admission while it still owns the runtime lifecycle lock, then performs cleanup outside that lock. The artificial `Task.Yield` was removed.
+- The router now tracks start/stop state, in-flight callbacks, a shared drain, and one shared disposal completion. Captured post-stop callbacks no-op; admitted pre-stop callbacks release the drain in `finally`.
+- Existing concurrent Start/Dispose and Dispose/Dispose behavior remains covered.
+
+Verification:
+
+```text
+new captured/deferred activation tests: 4/4
+focused NotificationLifecycleTests + WindowsRuntimeTests: 26/26
+Moment.Windows.Tests: 45/45
+Moment.Core.Tests: 78/78
+Moment.slnx tests: Core 78/78, Infrastructure 19/19, Windows 45/45
+Moment.slnx build: 0 warnings, 0 errors
+git diff --check: PASS
+```

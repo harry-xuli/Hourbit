@@ -210,22 +210,135 @@ public sealed class AppNotificationSink(INotificationPlatform platform, IImporta
     }
 }
 
+/// <summary>
+/// Routes activations under a linearizable lifecycle policy: a callback admitted before the
+/// disposal gate closes may finish, and disposal drains it; callbacks reaching the gate after
+/// it closes are ignored, including delegates captured by the source before unsubscription.
+/// </summary>
 public sealed class NotificationActivationRouter(INotificationActivationSource source, IReminderActionService actions, INotificationNavigator navigator) : IAsyncDisposable
 {
-    public void Start() { source.Register(); source.Invoked += HandleAsync; }
-    public ValueTask DisposeAsync() { source.Invoked -= HandleAsync; source.Unregister(); return ValueTask.CompletedTask; }
-    private async Task HandleAsync(string arguments)
+    private readonly object _lifecycleGate = new();
+    private bool _started;
+    private int _inFlight;
+    private bool _cleanupStarted;
+    private bool _unregisterOnDispose;
+    private Task _drain = Task.CompletedTask;
+    private TaskCompletionSource? _drainCompletion;
+    private TaskCompletionSource? _disposeCompletion;
+
+    public void Start()
     {
-        if (NotificationArguments.TryParse(arguments, out var action))
+        lock (_lifecycleGate)
         {
-            if (action.Action == NotificationAction.Complete) await actions.CompleteAsync(action.OccurrenceId, CancellationToken.None);
-            else if (action.Action == NotificationAction.Ignore) await actions.IgnoreAsync(action.OccurrenceId, CancellationToken.None);
-            else await actions.SnoozeAsync(action.OccurrenceId, TimeSpan.FromMinutes(10), CancellationToken.None);
-            return;
+            ObjectDisposedException.ThrowIf(_disposeCompletion is not null, this);
+            if (_started) return;
+            source.Register();
+            source.Invoked += HandleAsync;
+            _started = true;
+        }
+    }
+
+    internal void StopAccepting()
+    {
+        lock (_lifecycleGate)
+        {
+            StopAcceptingNoLock();
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        TaskCompletionSource completion;
+        Task drain;
+        bool unregister;
+        lock (_lifecycleGate)
+        {
+            StopAcceptingNoLock();
+            completion = _disposeCompletion!;
+            if (_cleanupStarted)
+                return new ValueTask(completion.Task);
+
+            _cleanupStarted = true;
+            drain = _drain;
+            unregister = _unregisterOnDispose;
         }
 
-        if (TryParseNavigation(arguments, out var navigation))
-            await navigator.NavigateAsync(navigation, CancellationToken.None);
+        _ = CompleteDisposalAsync(completion, drain, unregister);
+        return new ValueTask(completion.Task);
+    }
+
+    private async Task HandleAsync(string arguments)
+    {
+        lock (_lifecycleGate)
+        {
+            if (!_started) return;
+            _inFlight++;
+        }
+
+        try
+        {
+            if (NotificationArguments.TryParse(arguments, out var action))
+            {
+                if (action.Action == NotificationAction.Complete) await actions.CompleteAsync(action.OccurrenceId, CancellationToken.None);
+                else if (action.Action == NotificationAction.Ignore) await actions.IgnoreAsync(action.OccurrenceId, CancellationToken.None);
+                else await actions.SnoozeAsync(action.OccurrenceId, TimeSpan.FromMinutes(10), CancellationToken.None);
+                return;
+            }
+
+            if (TryParseNavigation(arguments, out var navigation))
+                await navigator.NavigateAsync(navigation, CancellationToken.None);
+        }
+        finally
+        {
+            TaskCompletionSource? drained = null;
+            lock (_lifecycleGate)
+            {
+                _inFlight--;
+                if (_inFlight == 0)
+                {
+                    drained = _drainCompletion;
+                    _drainCompletion = null;
+                }
+            }
+            drained?.TrySetResult();
+        }
+    }
+
+    private void StopAcceptingNoLock()
+    {
+        if (_disposeCompletion is not null) return;
+
+        _disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _unregisterOnDispose = _started;
+        _started = false;
+        if (_inFlight > 0)
+        {
+            _drainCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _drain = _drainCompletion.Task;
+        }
+    }
+
+    private async Task CompleteDisposalAsync(TaskCompletionSource completion, Task drain, bool unregister)
+    {
+        Exception? cleanupException = null;
+        if (unregister)
+        {
+            try
+            {
+                source.Invoked -= HandleAsync;
+                source.Unregister();
+            }
+            catch (Exception exception)
+            {
+                cleanupException = exception;
+            }
+        }
+
+        await drain.ConfigureAwait(false);
+        if (cleanupException is null)
+            completion.TrySetResult();
+        else
+            completion.TrySetException(cleanupException);
     }
 
     private static bool TryParseNavigation(string? arguments, out NotificationNavigation navigation)

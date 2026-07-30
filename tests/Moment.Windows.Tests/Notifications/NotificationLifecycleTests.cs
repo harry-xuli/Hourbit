@@ -29,6 +29,93 @@ public sealed class NotificationLifecycleTests
         Assert.Equal(1, source.UnregisterCount);
     }
 
+    [Fact]
+    public async Task Captured_activation_invoked_after_router_disposal_begins_is_ignored()
+    {
+        var source = new FakeActivationSource(blockUnregister: true);
+        var actions = new RecordingActions();
+        var navigation = new RecordingNavigation();
+        var router = new NotificationActivationRouter(source, actions, navigation);
+        router.Start();
+        var captured = source.CaptureSubscribedHandler();
+
+        var disposal = Task.Run(async () => await router.DisposeAsync());
+        Assert.True(source.UnregisterEntered.Wait(TimeSpan.FromSeconds(5)));
+
+        try
+        {
+            await captured("action=complete&occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d");
+            await captured("section=missed");
+
+            Assert.Empty(actions.Calls);
+            Assert.Empty(navigation.Navigations);
+        }
+        finally
+        {
+            source.ReleaseUnregister();
+            await disposal;
+        }
+    }
+
+    [Fact]
+    public async Task Activation_already_executing_before_router_disposal_delays_completion()
+    {
+        var source = new FakeActivationSource();
+        var actions = new BlockingActions();
+        var router = new NotificationActivationRouter(source, actions, new RecordingNavigation());
+        router.Start();
+        var captured = source.CaptureSubscribedHandler();
+        var activation = captured("action=complete&occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d");
+        await actions.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var disposal = router.DisposeAsync().AsTask();
+
+        Assert.False(disposal.IsCompleted);
+        actions.Release();
+        await Task.WhenAll(activation, disposal);
+        Assert.Equal(1, actions.CompleteCount);
+        Assert.Equal(1, source.UnregisterCount);
+    }
+
+    [Fact]
+    public async Task Concurrent_router_dispose_callers_share_in_flight_activation_drain()
+    {
+        var source = new FakeActivationSource();
+        var actions = new BlockingActions();
+        var router = new NotificationActivationRouter(source, actions, new RecordingNavigation());
+        router.Start();
+        var captured = source.CaptureSubscribedHandler();
+        var activation = captured("action=complete&occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d");
+        await actions.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var firstDisposal = router.DisposeAsync().AsTask();
+        var secondDisposal = router.DisposeAsync().AsTask();
+
+        Assert.False(firstDisposal.IsCompleted);
+        Assert.False(secondDisposal.IsCompleted);
+        actions.Release();
+        await Task.WhenAll(activation, firstDisposal, secondDisposal);
+        Assert.Equal(1, source.UnregisterCount);
+    }
+
+    [Fact]
+    public async Task Captured_activation_invoked_after_router_disposal_completes_is_ignored()
+    {
+        var source = new FakeActivationSource();
+        var actions = new RecordingActions();
+        var navigation = new RecordingNavigation();
+        var router = new NotificationActivationRouter(source, actions, navigation);
+        router.Start();
+        var captured = source.CaptureSubscribedHandler();
+        await router.DisposeAsync();
+
+        await captured("action=complete&occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d");
+        await captured("section=missed");
+
+        Assert.Empty(actions.Calls);
+        Assert.Empty(navigation.Navigations);
+    }
+
     [Theory]
     [InlineData("section=timeline&occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d")]
     [InlineData("occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d&section=timeline")]
@@ -153,14 +240,25 @@ public sealed class NotificationLifecycleTests
         Assert.Equal(2, client.RegisterCount);
     }
 
-    private sealed class FakeActivationSource : INotificationActivationSource
+    private sealed class FakeActivationSource(bool blockUnregister = false) : INotificationActivationSource
     {
-        public event Func<string, Task>? Invoked;
+        private readonly ManualResetEventSlim _unregisterRelease = new(!blockUnregister);
+        private Func<string, Task>? _invoked;
+        public event Func<string, Task>? Invoked { add => _invoked += value; remove => _invoked -= value; }
+        public ManualResetEventSlim UnregisterEntered { get; } = new(false);
         public int RegisterCount { get; private set; }
         public int UnregisterCount { get; private set; }
         public void Register() => RegisterCount++;
-        public void Unregister() => UnregisterCount++;
-        public async Task RaiseAsync(string value) { if (Invoked is { } invoked) foreach (Func<string, Task> handler in invoked.GetInvocationList()) await handler(value); }
+        public void Unregister()
+        {
+            UnregisterCount++;
+            UnregisterEntered.Set();
+            _unregisterRelease.Wait();
+        }
+        public Func<string, Task> CaptureSubscribedHandler() =>
+            _invoked ?? throw new InvalidOperationException("No activation handler is subscribed.");
+        public void ReleaseUnregister() => _unregisterRelease.Set();
+        public async Task RaiseAsync(string value) { if (_invoked is { } invoked) foreach (Func<string, Task> handler in invoked.GetInvocationList()) await handler(value); }
     }
     private sealed class RecordingNavigation : INotificationNavigator
     {
@@ -171,6 +269,22 @@ public sealed class NotificationLifecycleTests
             Navigations.Add(navigation);
             return Task.CompletedTask;
         }
+    }
+    private sealed class BlockingActions : IReminderActionService
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int CompleteCount { get; private set; }
+        public async Task CompleteAsync(Guid id, CancellationToken ct)
+        {
+            CompleteCount++;
+            Entered.TrySetResult();
+            await _release.Task.WaitAsync(ct);
+        }
+        public Task IgnoreAsync(Guid id, CancellationToken ct) => Task.CompletedTask;
+        public Task<ReminderOccurrence> SnoozeAsync(Guid id, TimeSpan delay, CancellationToken ct) =>
+            Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), DateTimeOffset.UtcNow));
+        public void Release() => _release.TrySetResult();
     }
     private sealed class NoopAlerts : IImportantAlertDelivery { public Task EnqueueAsync(ReminderAlert alert, CancellationToken ct) => Task.CompletedTask; }
     private sealed class MutablePlatform(NotificationHealth health) : INotificationPlatform, INotificationHealthSource
