@@ -6,6 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <WindowsPackageType>None</WindowsPackageType>
     <StartupObject>Moment.App.Program</StartupObject>
+    <ReleasePageUrl Condition="'$(ReleasePageUrl)' == ''"></ReleasePageUrl>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Moment.Core\Moment.Core.csproj" />
@@ -14,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\default-alert.wav" />
+    <AssemblyMetadata Include="ReleasePageUrl" Value="$(ReleasePageUrl)" />
   </ItemGroup>
 </Project>

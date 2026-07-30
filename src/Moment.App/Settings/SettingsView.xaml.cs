@@ -12,7 +12,10 @@ public sealed record SettingsViewActions(
     Func<CancellationToken, Task> SendTestNotification,
     Func<CancellationToken, Task> ShowTestImportantAlert,
     string DataFolder,
-    Action<string>? OpenFolder = null);
+    Action<string>? OpenFolder = null,
+    Func<string?>? SelectBackupExportPath = null,
+    Func<string?>? SelectBackupRestorePath = null,
+    Func<string, bool>? ConfirmRestore = null);
 
 public partial class SettingsView : Window
 {
@@ -119,6 +122,60 @@ public partial class SettingsView : Window
             ? null
             : Path.Combine(_actions.DataFolder, "backups"));
 
+    private async void OnCreateBackup(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null)
+            return;
+        await RunAsync(
+            async ct => _ = await ViewModel.CreateBackupAsync(ct),
+            "备份已创建");
+    }
+
+    private async void OnExportBackup(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null)
+            return;
+        var path = _actions?.SelectBackupExportPath?.Invoke()
+                   ?? SelectBackupExportPath();
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        await RunAsync(
+            ct => ViewModel.ExportBackupAsync(path, ct),
+            "备份已导出");
+    }
+
+    private async void OnRestoreBackup(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null)
+            return;
+        var path = _actions?.SelectBackupRestorePath?.Invoke()
+                   ?? SelectBackupRestorePath();
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        var confirmed = _actions?.ConfirmRestore?.Invoke(path)
+                        ?? ConfirmRestore(path);
+        if (!confirmed)
+            return;
+        await RunAsync(
+            ct => ViewModel.RestoreBackupAsync(path, ct),
+            "备份已恢复");
+    }
+
+    private void OnCheckForUpdates(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null)
+            return;
+        try
+        {
+            ViewModel.OpenReleasePage();
+            ActionStatusText.Text = "已在浏览器中打开发布页面";
+        }
+        catch (Exception exception)
+        {
+            ActionStatusText.Text = exception.Message;
+        }
+    }
+
     private async void OnClosed(object? sender, EventArgs e)
     {
         if (_actions is null)
@@ -190,4 +247,39 @@ public partial class SettingsView : Window
             ActionStatusText.Text = exception.Message;
         }
     }
+
+    private string? SelectBackupExportPath()
+    {
+        var picker = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "导出备份",
+            Filter = "时刻备份 (*.moment-backup)|*.moment-backup",
+            AddExtension = true,
+            DefaultExt = ".moment-backup",
+            FileName = $"moment-export-{DateTimeOffset.UtcNow:yyyyMMdd'T'HHmmss'Z'}.moment-backup"
+        };
+        return picker.ShowDialog(this) == true ? picker.FileName : null;
+    }
+
+    private string? SelectBackupRestorePath()
+    {
+        var picker = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "从备份恢复",
+            Filter = "时刻备份 (*.moment-backup)|*.moment-backup",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        return picker.ShowDialog(this) == true ? picker.FileName : null;
+    }
+
+    private bool ConfirmRestore(string path) =>
+        System.Windows.MessageBox.Show(
+            this,
+            $"恢复将用所选备份替换当前提醒数据。\n\n{path}\n\n是否继续？",
+            "确认恢复备份",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No) ==
+        System.Windows.MessageBoxResult.Yes;
 }

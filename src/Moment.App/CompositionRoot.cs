@@ -10,6 +10,7 @@ using Moment.Core.Recurrence;
 using Moment.Core.Scheduling;
 using Moment.Core.Services;
 using Moment.Infrastructure.Data;
+using Moment.Infrastructure.Backup;
 using Moment.Windows.Alerts;
 using Moment.Windows.Hotkeys;
 using Moment.Windows.Lifecycle;
@@ -94,14 +95,42 @@ public sealed class CompositionRoot : IAsyncDisposable
         var clock = new SystemClock();
         var zone = TimeZoneInfo.Local;
         var databasePath = DatabasePathResolver.Resolve(AppContext.BaseDirectory);
+        var dataFolder =
+            Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory;
+        var backupDirectory = Path.Combine(dataFolder, "backups");
+        var recovery = await new DatabaseRecoveryService(
+            databasePath,
+            backupDirectory,
+            () => clock.Now.ToUniversalTime())
+            .OpenWithRecoveryAsync(ct);
+        if (recovery.Status == DatabaseRecoveryStatus.RequiresUserDecision)
+        {
+            throw new InvalidDataException(
+                "提醒数据库已损坏，且没有可自动恢复的有效备份。"
+                + $"损坏数据已原样保存在：{recovery.CorruptDatabasePath}");
+        }
+
         var repository = await SqliteReminderRepository.OpenAsync(databasePath, ct);
         var settingsStore = new SqliteSettingsStore(databasePath);
         var hotkey = new GlobalHotkeyService();
         var executablePath = Environment.ProcessPath
             ?? Assembly.GetExecutingAssembly().Location;
+        var restoreLifecycle = new ConfigurableBackupRestoreLifecycle();
+        var backupService = new BackupService(
+            databasePath,
+            backupDirectory,
+            restoreLifecycle,
+            () => clock.Now.ToUniversalTime(),
+            zone);
         var settings = new SettingsViewModel(
-            hotkey, settingsStore, new StartupRegistrationService(), executablePath);
+            hotkey,
+            settingsStore,
+            new StartupRegistrationService(),
+            executablePath,
+            backupService,
+            ReleasePageService.FromAssembly(Assembly.GetExecutingAssembly()));
         await settings.LoadAsync(ct);
+        await TryCreateDailyBackupAsync(backupService, settings, ct);
 
         var schedulerSignal = new SchedulerSignalProxy();
         var recurrence = new RecurrenceCalculator();
@@ -129,6 +158,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         var timelineQuery = new SqliteTimelineQuery(databasePath);
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, dialogs, zone);
+        restoreLifecycle.Configure(scheduler, timeline);
         quickAdd = ComposeQuickAdd(parser, reminders, clock, zone, timeline);
         var mainWindow = new MainWindow { DataContext = timeline };
         var navigator = new WindowNotificationNavigator(mainWindow);
@@ -163,7 +193,7 @@ public sealed class CompositionRoot : IAsyncDisposable
             resumeMonitor, hotkey, singleInstance, tray, reminders, clock,
             notificationSink, importantAlertPresenter,
             windowPlacement,
-            Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory,
+            dataFolder,
             settings, timeline, quickAdd, mainWindow, quickWindow);
         return root;
     }
@@ -182,6 +212,25 @@ public sealed class CompositionRoot : IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(timeline.ErrorMessage))
                 throw new InvalidOperationException(timeline.ErrorMessage);
         });
+
+    internal static async Task TryCreateDailyBackupAsync(
+        IBackupService backupService,
+        SettingsViewModel settings,
+        CancellationToken ct)
+    {
+        try
+        {
+            _ = await backupService.CreateDailyBackupAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            settings.ReportAutomaticBackupFailure(exception);
+        }
+    }
 
     public async Task<bool> StartAsync(InstanceActivation activation, CancellationToken ct)
     {
@@ -337,6 +386,45 @@ public sealed class CompositionRoot : IAsyncDisposable
     {
         public ISchedulerSignal? Target { get; set; }
         public void Refresh() => Target?.Refresh();
+    }
+
+    private sealed class ConfigurableBackupRestoreLifecycle :
+        IBackupRestoreLifecycle
+    {
+        private ReminderScheduler? _scheduler;
+        private TimelineViewModel? _timeline;
+
+        internal void Configure(
+            ReminderScheduler scheduler,
+            TimelineViewModel timeline)
+        {
+            _scheduler = scheduler;
+            _timeline = timeline;
+        }
+
+        public Task StopAsync(CancellationToken ct) =>
+            Scheduler.StopAsync(ct);
+
+        public Task StartAsync(CancellationToken ct) =>
+            Scheduler.StartAsync(ct);
+
+        public async Task RefreshAsync(CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            Scheduler.Refresh();
+            await Timeline.LoadAsync();
+            ct.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(Timeline.ErrorMessage))
+                throw new InvalidOperationException(Timeline.ErrorMessage);
+        }
+
+        private ReminderScheduler Scheduler =>
+            _scheduler ?? throw new InvalidOperationException(
+                "Backup restore lifecycle is not initialized.");
+
+        private TimelineViewModel Timeline =>
+            _timeline ?? throw new InvalidOperationException(
+                "Backup restore lifecycle is not initialized.");
     }
 
     private sealed class WindowNotificationNavigator(MainWindow window) : INotificationNavigator

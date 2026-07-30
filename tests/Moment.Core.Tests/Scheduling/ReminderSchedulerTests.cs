@@ -129,6 +129,26 @@ public sealed class ReminderSchedulerTests
     }
 
     [Fact]
+    public async Task Stop_then_start_reuses_the_scheduler_and_delivers_due_work()
+    {
+        var clock = new FakeClock("2026-07-29T09:00:00+08:00");
+        var repository = new FakeReminderRepository();
+        var sink = new RecordingReminderSink();
+        using var scheduler = new ReminderScheduler(repository, sink, clock);
+        await scheduler.StartAsync(CancellationToken.None);
+
+        await scheduler.StopAsync(CancellationToken.None);
+        await repository.AddAsync(
+            TestData.Scheduled("after restore", clock.Now.ToString("O")));
+        Assert.Empty(sink.Deliveries);
+
+        await scheduler.StartAsync(CancellationToken.None);
+        await sink.WaitForCountAsync(1);
+
+        Assert.Equal("after restore", Assert.Single(sink.Deliveries).Item.Title);
+    }
+
+    [Fact]
     public async Task Sink_failure_is_reported_without_stopping_later_delivery_or_faulting_disposal()
     {
         var clock = new FakeClock("2026-07-29T09:00:00+08:00");

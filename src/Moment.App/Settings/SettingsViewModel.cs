@@ -3,6 +3,7 @@ using Moment.App.Alerts;
 using Moment.Core.Abstractions;
 using Moment.Windows.Hotkeys;
 using Moment.Windows.Startup;
+using Moment.Infrastructure.Backup;
 using System.IO;
 
 namespace Moment.App.Settings;
@@ -19,6 +20,8 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly ISettingsStore _store;
     private readonly IStartupRegistrationService? _startup;
     private readonly string? _executablePath;
+    private readonly IBackupService? _backupService;
+    private readonly IReleasePageService? _releasePage;
     private string _hotkey = "Ctrl+Alt+Space";
     private bool _startWithWindows;
     private int _alertVolume = 100;
@@ -32,20 +35,24 @@ public sealed class SettingsViewModel : ObservableObject
     public SettingsViewModel(
         IGlobalHotkeyService hotkeys,
         ISettingsStore store)
-        : this(hotkeys, store, null, null)
+        : this(hotkeys, store, null, null, null, null)
     {
     }
 
     public SettingsViewModel(
         IGlobalHotkeyService hotkeys,
         ISettingsStore store,
-        IStartupRegistrationService? startup,
-        string? executablePath)
+        IStartupRegistrationService? startup = null,
+        string? executablePath = null,
+        IBackupService? backupService = null,
+        IReleasePageService? releasePage = null)
     {
         _hotkeys = hotkeys ?? throw new ArgumentNullException(nameof(hotkeys));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _startup = startup;
         _executablePath = executablePath;
+        _backupService = backupService;
+        _releasePage = releasePage;
     }
 
     public string Hotkey
@@ -84,6 +91,8 @@ public sealed class SettingsViewModel : ObservableObject
         get => _warningMessage;
         private set => SetProperty(ref _warningMessage, value);
     }
+
+    public bool HasReleasePage => _releasePage?.Url is not null;
 
     public async Task LoadAsync(CancellationToken ct = default)
     {
@@ -168,6 +177,36 @@ public sealed class SettingsViewModel : ObservableObject
         return SettingsSaveResult.Success;
     }
 
+    public Task<string> CreateBackupAsync(CancellationToken ct = default) =>
+        GetBackupService().CreateDailyBackupAsync(ct);
+
+    public Task ExportBackupAsync(
+        string destinationPath,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        return GetBackupService().ExportAsync(destinationPath, ct);
+    }
+
+    public Task RestoreBackupAsync(
+        string backupPath,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
+        return GetBackupService().RestoreAsync(backupPath, ct);
+    }
+
+    public void OpenReleasePage() =>
+        (_releasePage ??
+         throw new InvalidOperationException("Release page is not configured."))
+        .Open();
+
+    internal void ReportAutomaticBackupFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        WarningMessage = $"自动备份失败：{exception.Message}";
+    }
+
     private bool ResetInvalidCustomSound()
     {
         if (CustomAlertSoundPath is null)
@@ -203,6 +242,10 @@ public sealed class SettingsViewModel : ObservableObject
 
     private AppSettings CurrentSettings() =>
         new(Hotkey, StartWithWindows, AlertVolume, CustomAlertSoundPath);
+
+    private IBackupService GetBackupService() =>
+        _backupService ??
+        throw new InvalidOperationException("Backup service is not configured.");
 
     private void ApplyStartupSetting()
     {

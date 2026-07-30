@@ -9,6 +9,7 @@ using Moment.App.Styles;
 using Moment.Core.Abstractions;
 using Moment.Windows.Hotkeys;
 using Moment.Windows.Alerts;
+using Moment.TestSupport;
 
 namespace Moment.App.Tests.Settings;
 
@@ -39,6 +40,9 @@ public sealed class SettingsViewTests
                 "提醒音量 0 到 100",
                 "打开数据文件夹",
                 "打开备份文件夹",
+                "立即创建备份",
+                "导出备份",
+                "从备份恢复",
                 "保存设置"
             };
             var actual = new List<string>();
@@ -110,6 +114,67 @@ public sealed class SettingsViewTests
             Assert.Equal(
                 Path.Combine(dataFolder, "backups"),
                 opened);
+        });
+
+    [Fact]
+    public Task Restore_requires_a_selected_file_and_explicit_confirmation() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            using var temp = new TempDirectory();
+            var backupPath = Path.Combine(temp.Path, "chosen.moment-backup");
+            File.WriteAllBytes(backupPath, [1]);
+            var backup = new RecordingBackupService();
+            var confirmations = 0;
+            var view = new SettingsView(
+                new SettingsViewModel(
+                    new StubHotkeys(),
+                    new ViewSettingsStore(),
+                    backupService: backup),
+                new SettingsViewActions(
+                    new NoopAudio(),
+                    _ => Task.CompletedTask,
+                    _ => Task.CompletedTask,
+                    temp.Path,
+                    SelectBackupRestorePath: () => backupPath,
+                    ConfirmRestore: path =>
+                    {
+                        confirmations++;
+                        Assert.Equal(backupPath, path);
+                        return false;
+                    }));
+            view.Show();
+            view.UpdateLayout();
+
+            Assert.IsType<Button>(view.FindName("RestoreBackupButton"))
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            view.Dispatcher.Invoke(
+                () => { }, DispatcherPriority.ApplicationIdle);
+
+            Assert.Equal(1, confirmations);
+            Assert.Empty(backup.RestoredPaths);
+        });
+
+    [Fact]
+    public Task Release_page_button_is_hidden_without_valid_https_metadata() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var view = new SettingsView(
+                new SettingsViewModel(
+                    new StubHotkeys(),
+                    new ViewSettingsStore(),
+                    releasePage: new ReleasePageService("http://example.test/releases")),
+                new SettingsViewActions(
+                    new NoopAudio(),
+                    _ => Task.CompletedTask,
+                    _ => Task.CompletedTask,
+                    AppContext.BaseDirectory));
+            view.Show();
+            view.UpdateLayout();
+
+            var update = Assert.IsType<Button>(
+                view.FindName("CheckForUpdatesButton"));
+
+            Assert.Equal(Visibility.Collapsed, update.Visibility);
         });
 
     [Fact]
@@ -221,6 +286,20 @@ public sealed class SettingsViewTests
             Task.CompletedTask;
         public Task StopAsync(CancellationToken ct) =>
             Task.CompletedTask;
+    }
+
+    private sealed class RecordingBackupService : Moment.Infrastructure.Backup.IBackupService
+    {
+        public List<string> RestoredPaths { get; } = [];
+        public Task<string> CreateDailyBackupAsync(CancellationToken ct) =>
+            Task.FromResult("created");
+        public Task ExportAsync(string destinationPath, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task RestoreAsync(string backupPath, CancellationToken ct)
+        {
+            RestoredPaths.Add(backupPath);
+            return Task.CompletedTask;
+        }
     }
 
     private static void ApplyHighContrastPalette(FrameworkElement element)

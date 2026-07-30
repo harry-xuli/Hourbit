@@ -205,7 +205,7 @@
             </GroupBox>
 
             <GroupBox Header="本地数据" Margin="0,18,0,0" Padding="18">
-                <StackPanel Orientation="Horizontal">
+                <WrapPanel>
                     <Button Style="{StaticResource SecondaryButton}"
                             Margin="0,0,10,0"
                             TabIndex="11"
@@ -218,6 +218,7 @@
                     </Button>
                     <Button x:Name="OpenBackupFolderButton"
                             Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,10,0"
                             TabIndex="12"
                             Click="OnOpenBackupFolder"
                             automation:AutomationProperties.Name="打开备份文件夹">
@@ -226,7 +227,30 @@
                             <TextBlock Text="打开备份文件夹" />
                         </StackPanel>
                     </Button>
-                </StackPanel>
+                    <Button x:Name="CreateBackupButton"
+                            Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,10,0"
+                            TabIndex="13"
+                            Click="OnCreateBackup"
+                            automation:AutomationProperties.Name="立即创建备份">
+                        <TextBlock Text="立即创建备份" />
+                    </Button>
+                    <Button x:Name="ExportBackupButton"
+                            Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,10,0"
+                            TabIndex="14"
+                            Click="OnExportBackup"
+                            automation:AutomationProperties.Name="导出备份">
+                        <TextBlock Text="导出备份" />
+                    </Button>
+                    <Button x:Name="RestoreBackupButton"
+                            Style="{StaticResource SecondaryButton}"
+                            TabIndex="15"
+                            Click="OnRestoreBackup"
+                            automation:AutomationProperties.Name="从备份恢复">
+                        <TextBlock Text="从备份恢复" />
+                    </Button>
+                </WrapPanel>
             </GroupBox>
 
             <Border Margin="0,18,0,0"
@@ -252,19 +276,40 @@
                 <TextBlock x:Name="VersionText"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
-                <Button x:Name="SaveSettingsButton"
-                        Grid.Column="1"
+                <StackPanel Grid.Column="1"
+                            Orientation="Horizontal">
+                    <Button x:Name="CheckForUpdatesButton"
+                            Margin="0,0,10,0"
+                            TabIndex="16"
+                            Click="OnCheckForUpdates"
+                            automation:AutomationProperties.Name="检查更新">
+                        <Button.Style>
+                            <Style TargetType="Button"
+                                   BasedOn="{StaticResource SecondaryButton}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasReleasePage}"
+                                                 Value="True">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <TextBlock Text="检查更新" />
+                    </Button>
+                    <Button x:Name="SaveSettingsButton"
                         MinWidth="128"
-                        TabIndex="13"
+                        TabIndex="17"
                         Click="OnSaveSettings"
                         automation:AutomationProperties.Name="保存设置">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="✓" Margin="0,0,8,0"
-                                   Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
-                        <TextBlock Text="保存设置"
-                                   Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
-                    </StackPanel>
-                </Button>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="✓" Margin="0,0,8,0"
+                                       Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                            <TextBlock Text="保存设置"
+                                       Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
             </Grid>
         </StackPanel>
     </ScrollViewer>

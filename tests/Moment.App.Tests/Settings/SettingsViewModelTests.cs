@@ -3,12 +3,66 @@ using Moment.Core.Abstractions;
 using Moment.TestSupport;
 using Moment.Windows.Hotkeys;
 using Moment.Windows.Startup;
+using Moment.Infrastructure.Backup;
 using System.IO;
 
 namespace Moment.App.Tests.Settings;
 
 public sealed class SettingsViewModelTests
 {
+    [Fact]
+    public async Task Backup_actions_delegate_only_explicit_paths_to_the_backup_service()
+    {
+        var backup = new RecordingBackupService();
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            new RecordingSettingsStore(),
+            backupService: backup);
+
+        var created = await vm.CreateBackupAsync();
+        await vm.ExportBackupAsync(@"C:\chosen\export.moment-backup");
+        await vm.RestoreBackupAsync(@"C:\chosen\restore.moment-backup");
+
+        Assert.Equal(@"C:\data\backups\moment-20260729T010203000Z.moment-backup", created);
+        Assert.Equal(
+            [@"C:\chosen\export.moment-backup"],
+            backup.ExportedPaths);
+        Assert.Equal(
+            [@"C:\chosen\restore.moment-backup"],
+            backup.RestoredPaths);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("http://example.test/releases", false)]
+    [InlineData("not a URI", false)]
+    [InlineData("https://example.test/releases", true)]
+    public void Update_link_is_available_only_for_absolute_https_metadata(
+        string? metadata,
+        bool expected)
+    {
+        var opened = new List<Uri>();
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            new RecordingSettingsStore(),
+            releasePage: new ReleasePageService(metadata, opened.Add));
+
+        Assert.Equal(expected, vm.HasReleasePage);
+        if (expected)
+        {
+            vm.OpenReleasePage();
+            Assert.Equal(
+                new Uri("https://example.test/releases"),
+                Assert.Single(opened));
+        }
+        else
+        {
+            Assert.Throws<InvalidOperationException>(vm.OpenReleasePage);
+            Assert.Empty(opened);
+        }
+    }
+
     [Fact]
     public async Task Conflicting_hotkey_is_not_saved_and_exposes_help_text()
     {
@@ -321,6 +375,25 @@ public sealed class SettingsViewModelTests
                 throw SetException;
             LastSet = (enabled, executablePath);
             Calls.Add(LastSet.Value);
+        }
+    }
+
+    private sealed class RecordingBackupService : IBackupService
+    {
+        public List<string> ExportedPaths { get; } = [];
+        public List<string> RestoredPaths { get; } = [];
+        public Task<string> CreateDailyBackupAsync(CancellationToken ct) =>
+            Task.FromResult(
+                @"C:\data\backups\moment-20260729T010203000Z.moment-backup");
+        public Task ExportAsync(string destinationPath, CancellationToken ct)
+        {
+            ExportedPaths.Add(destinationPath);
+            return Task.CompletedTask;
+        }
+        public Task RestoreAsync(string backupPath, CancellationToken ct)
+        {
+            RestoredPaths.Add(backupPath);
+            return Task.CompletedTask;
         }
     }
 }

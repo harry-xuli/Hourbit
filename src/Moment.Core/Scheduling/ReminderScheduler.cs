@@ -48,9 +48,44 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
                 return Task.CompletedTask;
             }
 
-            _runCancellation = CancellationTokenSource.CreateLinkedTokenSource(_disposeCancellation.Token, ct);
-            _loop = Task.Run(() => RunAsync(_runCancellation.Token), CancellationToken.None);
+            var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                _disposeCancellation.Token, ct);
+            _runCancellation = runCancellation;
+            _loop = Task.Run(
+                () => RunAsync(runCancellation.Token),
+                CancellationToken.None);
             return Task.CompletedTask;
+        }
+    }
+
+    public async Task StopAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        Task? loop;
+        CancellationTokenSource? runCancellation;
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            loop = _loop;
+            runCancellation = _runCancellation;
+            _loop = null;
+            _runCancellation = null;
+        }
+
+        if (loop is null)
+            return;
+
+        runCancellation!.Cancel();
+        try
+        {
+            await loop.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (runCancellation.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            runCancellation.Dispose();
         }
     }
 
