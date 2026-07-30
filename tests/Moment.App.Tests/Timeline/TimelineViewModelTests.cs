@@ -91,6 +91,27 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task Edited_values_reach_reminder_service_without_being_replaced_by_original_row()
+    {
+        var service = new RecordingReminderService();
+        var editedDraft = new ReminderDraft(
+            "项目复盘", DateTimeOffset.Parse("2026-08-03T14:45:00+08:00"),
+            ReminderKind.Plan, ReminderImportance.Important,
+            RecurrenceRule.Daily(new TimeOnly(14, 45)));
+        var dialogs = new Dialogs { EditedDraft = editedDraft };
+        var vm = Create(new FakeTimelineQuery(TestData.Row(
+            "会议", "2026-07-29T10:30:00+08:00")), service, dialogs);
+        await vm.LoadAsync();
+        vm.SelectedItem = vm.Items[0];
+
+        await vm.EditCommand.ExecuteAsync(null);
+
+        var edit = Assert.Single(service.Edited);
+        Assert.Equal(editedDraft, edit.Draft);
+        Assert.Equal(SeriesScope.OccurrenceOnly, edit.Scope);
+    }
+
+    [Fact]
     public async Task Recurring_delete_cancelled_at_scope_does_not_call_reminder_service()
     {
         var service = new RecordingReminderService();
@@ -104,6 +125,38 @@ public sealed class TimelineViewModelTests
         await vm.DeleteCommand.ExecuteAsync(null);
 
         Assert.Empty(service.Deleted);
+    }
+
+    [Fact]
+    public async Task Non_recurring_delete_cancelled_at_confirmation_does_not_call_reminder_service()
+    {
+        var service = new RecordingReminderService();
+        var dialogs = new Dialogs { ConfirmDelete = false };
+        var vm = Create(new FakeTimelineQuery(TestData.Row(
+            "会议", "2026-07-29T10:30:00+08:00")), service, dialogs);
+        await vm.LoadAsync();
+        vm.SelectedItem = vm.Items[0];
+
+        await vm.DeleteCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, dialogs.DeleteConfirmationCalls);
+        Assert.Empty(service.Deleted);
+    }
+
+    [Fact]
+    public async Task Non_recurring_delete_confirmed_calls_reminder_service_once()
+    {
+        var service = new RecordingReminderService();
+        var dialogs = new Dialogs { ConfirmDelete = true };
+        var vm = Create(new FakeTimelineQuery(TestData.Row(
+            "会议", "2026-07-29T10:30:00+08:00")), service, dialogs);
+        await vm.LoadAsync();
+        vm.SelectedItem = vm.Items[0];
+
+        await vm.DeleteCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, dialogs.DeleteConfirmationCalls);
+        Assert.Single(service.Deleted);
     }
 
     [Fact]
@@ -193,13 +246,13 @@ public sealed class TimelineViewModelTests
 
     private sealed class RecordingReminderService : IReminderService
     {
-        public List<(Guid Id, SeriesScope Scope)> Edited { get; } = [];
+        public List<(Guid Id, ReminderDraft Draft, SeriesScope Scope)> Edited { get; } = [];
         public List<(Guid Id, SeriesScope Scope)> Deleted { get; } = [];
         public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct) =>
             Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), draft.DueAt));
         public Task EditAsync(Guid occurrenceId, ReminderDraft draft, SeriesScope scope, CancellationToken ct)
         {
-            Edited.Add((occurrenceId, scope));
+            Edited.Add((occurrenceId, draft, scope));
             return Task.CompletedTask;
         }
         public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct)
@@ -213,16 +266,24 @@ public sealed class TimelineViewModelTests
     {
         public SeriesScope? EditScope { get; set; } = SeriesScope.OccurrenceOnly;
         public SeriesScope? DeleteScope { get; set; } = SeriesScope.OccurrenceOnly;
+        public bool ConfirmDelete { get; set; } = true;
+        public ReminderDraft? EditedDraft { get; set; }
+        public int DeleteConfirmationCalls { get; private set; }
         public int EditFormCalls { get; private set; }
         public Exception? QuickAddFailure { get; set; }
         public Task<SeriesScope?> SelectEditScopeAsync(TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult(EditScope);
         public Task<SeriesScope?> SelectDeleteScopeAsync(TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult(DeleteScope);
+        public Task<bool> ConfirmDeleteAsync(TimelineItemViewModel item, CancellationToken ct)
+        {
+            DeleteConfirmationCalls++;
+            return Task.FromResult(ConfirmDelete);
+        }
         public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct)
         {
             EditFormCalls++;
-            return Task.FromResult<ReminderDraft?>(new(
+            return Task.FromResult<ReminderDraft?>(EditedDraft ?? new(
                 item.Title, item.DueAt, item.Kind, item.Importance, null));
         }
         public void OpenQuickAdd()

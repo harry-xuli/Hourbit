@@ -47,6 +47,37 @@ public partial class QuickAddWindow : System.Windows.Window, IQuickAddWindow
 
     private void OnHideRequested(object? sender, EventArgs eventArgs) => Hide();
 
+    internal bool TryExpandDetailsFromTab()
+    {
+        if (!InputBox.IsKeyboardFocusWithin
+            || DataContext is not QuickAddViewModel viewModel
+            || !viewModel.ShowDetails())
+        {
+            return false;
+        }
+
+        UpdateLayout();
+        DetailTitleBox.Focus();
+        return true;
+    }
+
+    private async void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs eventArgs)
+    {
+        if (eventArgs.Key == System.Windows.Input.Key.Tab && TryExpandDetailsFromTab())
+        {
+            eventArgs.Handled = true;
+            return;
+        }
+
+        if (eventArgs.Key == System.Windows.Input.Key.Enter
+            && InputBox.IsKeyboardFocusWithin
+            && DataContext is QuickAddViewModel viewModel)
+        {
+            eventArgs.Handled = true;
+            await viewModel.SubmitCommand.ExecuteAsync(null);
+        }
+    }
+
     private void PlaceOnCurrentMonitor()
     {
         var handle = new WindowInteropHelper(this).Handle;

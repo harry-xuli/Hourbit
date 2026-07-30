@@ -3,7 +3,7 @@ using Moment.Core.Parsing;
 
 namespace Moment.App.Timeline;
 
-public sealed class TimelineDialogService(Action openQuickAdd) : ITimelineDialogService
+public sealed class TimelineDialogService(Action openQuickAdd, TimeZoneInfo zone) : ITimelineDialogService
 {
     public Task<SeriesScope?> SelectEditScopeAsync(TimelineItemViewModel item, CancellationToken ct)
     {
@@ -37,45 +37,28 @@ public sealed class TimelineDialogService(Action openQuickAdd) : ITimelineDialog
         });
     }
 
-    public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct)
+    public Task<bool> ConfirmDeleteAsync(TimelineItemViewModel item, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var result = System.Windows.MessageBox.Show(
-            $"{item.Title}\n{item.DueAt:yyyy年M月d日 HH:mm}",
-            "编辑提醒",
-            System.Windows.MessageBoxButton.OKCancel,
-            System.Windows.MessageBoxImage.None);
-        var draft = result == System.Windows.MessageBoxResult.OK
-            ? new ReminderDraft(item.Title, item.DueAt, item.Kind, item.Importance,
-                ParseRecurrence(item))
-            : null;
-        return Task.FromResult<ReminderDraft?>(draft);
+            $"确定删除“{item.Title}”吗？",
+            "删除提醒",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning);
+        return Task.FromResult(result == System.Windows.MessageBoxResult.Yes);
+    }
+
+    public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var viewModel = new EditReminderViewModel(item, zone);
+        var window = new EditReminderWindow { DataContext = viewModel };
+        if (System.Windows.Application.Current?.MainWindow is { IsVisible: true } owner)
+            window.Owner = owner;
+        window.ShowDialog();
+        return Task.FromResult(window.Draft);
     }
 
     public void OpenQuickAdd() => openQuickAdd();
 
-    private static RecurrenceRule? ParseRecurrence(TimelineItemViewModel item)
-    {
-        if (!item.IsRecurring)
-            return null;
-        var time = TimeOnly.FromDateTime(item.DueAt.DateTime);
-        if (item.RecurrenceText == "每天")
-            return RecurrenceRule.Daily(time);
-        if (item.RecurrenceText?.StartsWith("工作日", StringComparison.Ordinal) == true)
-            return RecurrenceRule.Weekdays(time);
-
-        var days = new Dictionary<string, DayOfWeek>(StringComparer.Ordinal)
-        {
-            ["周一"] = DayOfWeek.Monday,
-            ["周二"] = DayOfWeek.Tuesday,
-            ["周三"] = DayOfWeek.Wednesday,
-            ["周四"] = DayOfWeek.Thursday,
-            ["周五"] = DayOfWeek.Friday,
-            ["周六"] = DayOfWeek.Saturday,
-            ["周日"] = DayOfWeek.Sunday
-        }.Where(pair => item.RecurrenceText?.Contains(pair.Key, StringComparison.Ordinal) == true)
-            .Select(pair => pair.Value)
-            .ToArray();
-        return days.Length == 0 ? null : RecurrenceRule.Weekly(days, time);
-    }
 }

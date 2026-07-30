@@ -8,16 +8,19 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         WindowStartupLocation="Manual"
-        Background="{StaticResource WindowBackgroundBrush}">
+        Background="{StaticResource WindowBackgroundBrush}"
+        PreviewKeyDown="OnPreviewKeyDown">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
     </Window.Resources>
     <Window.InputBindings>
-        <KeyBinding Key="Enter" Command="{Binding SubmitCommand}" />
-        <KeyBinding Key="Tab" Command="{Binding ToggleDetailsCommand}" />
         <KeyBinding Key="Escape" Command="{Binding HideCommand}" />
     </Window.InputBindings>
 
+    <ScrollViewer x:Name="QuickAddScrollViewer"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -117,13 +120,87 @@
 
         <Border Grid.Row="3"
                 Margin="22,0,22,12"
-                Padding="14,10"
+                Padding="16,14"
                 Background="{StaticResource SubtleBackgroundBrush}"
                 BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1"
                 CornerRadius="5"
                 Visibility="{Binding AreDetailsVisible, Converter={StaticResource BooleanToVisibility}}">
-            <TextBlock Text="{Binding PreviewText}" Foreground="{StaticResource SecondaryTextBrush}" />
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="内容" VerticalAlignment="Center" />
+                    <TextBox x:Name="DetailTitleBox"
+                             Grid.Column="1"
+                             Text="{Binding Details.Title, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="详细提醒内容" />
+                </Grid>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="132" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="日期时间" VerticalAlignment="Center" />
+                    <TextBox x:Name="DetailDateBox"
+                             Grid.Column="1"
+                             Text="{Binding Details.DateText, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="详细日期" />
+                    <TextBox Grid.Column="3"
+                             Text="{Binding Details.TimeText, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="详细时间" />
+                </Grid>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="类型" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" MinHeight="40"
+                              ItemsSource="{Binding Details.Kinds}"
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Value"
+                              SelectedValue="{Binding Details.SelectedKind}"
+                              automation:AutomationProperties.Name="详细提醒类型" />
+                    <TextBlock Grid.Column="3" Text="重要性" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="4" MinHeight="40"
+                              ItemsSource="{Binding Details.Importances}"
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Value"
+                              SelectedValue="{Binding Details.SelectedImportance}"
+                              automation:AutomationProperties.Name="详细重要性" />
+                </Grid>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="重复" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" MinHeight="40"
+                              ItemsSource="{Binding Details.Recurrences}"
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Value"
+                              SelectedValue="{Binding Details.SelectedRecurrence}"
+                              automation:AutomationProperties.Name="详细重复方式" />
+                    <TextBlock Grid.Column="3" Text="每周日期"
+                               VerticalAlignment="Center"
+                               Visibility="{Binding Details.IsWeekly, Converter={StaticResource BooleanToVisibility}}" />
+                    <TextBox Grid.Column="4"
+                             Text="{Binding Details.WeeklyDaysText, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="详细每周日期"
+                             Visibility="{Binding Details.IsWeekly, Converter={StaticResource BooleanToVisibility}}" />
+                </Grid>
+            </StackPanel>
         </Border>
 
         <Border Grid.Row="4"
@@ -136,4 +213,5 @@
                        HorizontalAlignment="Center" />
         </Border>
     </Grid>
+    </ScrollViewer>
 </Window>

@@ -11,6 +11,7 @@ public interface ITimelineDialogService
 {
     Task<SeriesScope?> SelectEditScopeAsync(TimelineItemViewModel item, CancellationToken ct);
     Task<SeriesScope?> SelectDeleteScopeAsync(TimelineItemViewModel item, CancellationToken ct);
+    Task<bool> ConfirmDeleteAsync(TimelineItemViewModel item, CancellationToken ct);
     Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct);
     void OpenQuickAdd();
 }
@@ -157,9 +158,17 @@ public sealed class TimelineViewModel : ObservableObject
         var item = SelectedItem;
         if (item is null)
             return;
-        var scope = item.IsRecurring
-            ? await _dialogs.SelectDeleteScopeAsync(item, ct)
-            : SeriesScope.OccurrenceOnly;
+        SeriesScope? scope;
+        if (item.IsRecurring)
+        {
+            scope = await _dialogs.SelectDeleteScopeAsync(item, ct);
+        }
+        else
+        {
+            if (!await _dialogs.ConfirmDeleteAsync(item, ct))
+                return;
+            scope = SeriesScope.OccurrenceOnly;
+        }
         if (scope is null)
             return;
         await _reminders.DeleteAsync(item.OccurrenceId, scope.Value, ct);

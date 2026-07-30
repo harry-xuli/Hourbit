@@ -119,7 +119,228 @@ non-zero main-window handle `6949102`.
 - The captured Quick Add image records the success/preview state rather than the ambiguity panel;
   the ambiguity gate and choice transition are covered by deterministic tests.
 - Row symbols use native text glyphs instead of custom raster artwork.
-- The Task 9 edit dialog is deliberately minimal: it confirms the current draft and scope rather
-  than providing a complete field editor. The tray Settings command is also a shell placeholder.
-  Rich edit/settings surfaces should be treated as later product work, not silently inferred into
-  this task.
+- The tray Settings command remains a shell placeholder. A rich settings surface should be
+  treated as later product work, not silently inferred into this task.
+
+## Fix round 1 — Reviewed presentation and interaction findings
+
+**Base:** `be6a5ee53e43f4ca78e16ba29156a63e4f6edaff`
+
+### Finding 1 — Target-framework interpretation
+
+No architecture split was made. The controlling global constraint says:
+
+> “Keep Moment.Core, Moment.Infrastructure, Moment.TestSupport, and their corresponding test
+> projects on net10.0; target Moment.Windows and Moment.App with
+> net10.0-windows10.0.22621.0.”
+
+“Their corresponding test projects” refers to the three plain-.NET projects named immediately
+before it; it does not say that the WPF App test project must be cross-platform. The fix round now
+contains actual WPF construction, focus traversal, rendering, and virtualization tests. Moving
+those tests to plain `net10.0` would remove the WindowsDesktop runtime they intentionally exercise,
+while introducing a new presentation assembly would not test the WPF behavior under review.
+
+Effective MSBuild property evidence:
+
+- `dotnet msbuild tests\Moment.App.Tests\Moment.App.Tests.csproj -getProperty:TargetFramework`
+  → `net10.0-windows10.0.22621.0`
+- `dotnet msbuild tests\Moment.Core.Tests\Moment.Core.Tests.csproj -getProperty:TargetFramework`
+  → `net10.0`
+- `dotnet msbuild tests\Moment.Infrastructure.Tests\Moment.Infrastructure.Tests.csproj -getProperty:TargetFramework`
+  → `net10.0`
+- `dotnet msbuild tests\Moment.TestSupport\Moment.TestSupport.csproj -getProperty:TargetFramework`
+  → `net10.0`
+
+This keeps the tested WPF boundary Windows-targeted and preserves every project explicitly named
+by the constraint on plain `net10.0`.
+
+### Finding 2 — Non-recurring delete confirmation
+
+`ITimelineDialogService` now has a distinct `ConfirmDeleteAsync` gate. A non-recurring row cannot
+reach `IReminderService.DeleteAsync` until the user confirms; recurring rows retain the existing
+scope chooser.
+
+Covering test: `tests/Moment.App.Tests/Timeline/TimelineViewModelTests.cs`
+
+- RED:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj --filter FullyQualifiedName~Non_recurring_delete --verbosity minimal`
+  → FAIL 2/2. Both tests observed zero confirmation calls under the old direct-delete branch.
+- GREEN: the identical command → PASS 2/2.
+
+The cancellation test also asserts zero reminder-service calls; the confirmation test asserts
+exactly one deletion.
+
+### Finding 3 — Editable, validated reminder form
+
+The former informational message box was replaced by `EditReminderWindow` and
+`EditReminderViewModel`. The form edits:
+
+- title;
+- local date and time;
+- reminder kind;
+- importance;
+- recurrence mode;
+- weekly day selection when applicable.
+
+It validates blank titles, exact `yyyy-MM-dd` and `HH:mm` values, invalid local DST times, and
+weekly recurrence without a recognized day. Ambiguous local times follow the same earliest-UTC
+policy used by the timeline query. Localized option labels are used in the actual WPF controls.
+
+Covering tests:
+
+- `tests/Moment.App.Tests/Timeline/EditReminderViewModelTests.cs`
+- `tests/Moment.App.Tests/Timeline/TimelineViewModelTests.cs`
+
+Evidence:
+
+- RED:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj --filter "FullyQualifiedName~EditReminderViewModelTests|FullyQualifiedName~Edited_values_reach" --verbosity minimal`
+  → expected `CS0246` because `EditReminderViewModel` did not exist.
+- The first post-implementation attempt exposed only a test-fixture signature error
+  (`TestData.Draft` was called with unsupported arguments); the fixture was corrected without
+  changing product behavior.
+- GREEN: the same focused filter → PASS 6/6.
+
+The propagation assertion compares the complete modified `ReminderDraft` received by
+`IReminderService.EditAsync`, preventing the original row from silently replacing edited values.
+
+### Finding 4 — Real Quick Add details and keyboard traversal
+
+Quick Add now exposes an editable validated field model rather than repeating the one-line preview.
+The expanded surface contains title, date, time, kind, importance, recurrence, and weekly days.
+Submitting while expanded persists those edited values.
+
+The window-level Tab and Enter bindings were removed. Preview-key handling now:
+
+- handles the first Tab only when the sentence input owns focus and valid details are collapsed;
+- expands details and focuses the title field;
+- returns false after expansion, allowing normal WPF focus traversal;
+- lets ambiguity candidate buttons use standard keyboard behavior;
+- handles Enter only from the sentence input, so a focused ambiguity button remains actionable.
+
+One shared background STA dispatcher and one WPF `Application` instance host all actual-window
+tests. The initial per-test host failed on the second window test with
+`InvalidOperationException: 不能在同一 AppDomain 中创建多个 System.Windows.Application 实例`;
+the stack traced directly to `WpfTestHost` constructing one App per test. The shared host fixes the
+test infrastructure at that source.
+
+Covering tests:
+
+- `tests/Moment.App.Tests/QuickAdd/QuickAddViewModelTests.cs`
+- `tests/Moment.App.Tests/QuickAdd/QuickAddWindowTests.cs`
+- `tests/Moment.App.Tests/WpfTestHost.cs`
+
+Evidence:
+
+- RED:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj --filter "FullyQualifiedName~Expanded_fields|FullyQualifiedName~QuickAddWindowTests" --verbosity minimal`
+  → expected compile failures for missing `QuickAddViewModel.Details` and
+  `QuickAddWindow.TryExpandDetailsFromTab`.
+- After the shared-host correction, one assertion showed actual WPF traversal first reaches the
+  containing `ItemsControl`; the test was corrected to require the candidate button within a
+  bounded normal traversal rather than assuming it was the immediately next focus element.
+- GREEN: the same focused filter → PASS 3/3.
+- Reduced logical viewport RED:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj -c Release --filter FullyQualifiedName~Expanded_details_remain_scrollable --verbosity minimal`
+  → FAIL 1/1 because no details `ScrollViewer` existed.
+- Reduced logical viewport GREEN: the same command → PASS 1/1. A 360-DIP-high viewport,
+  representative of the logical space pressure at 200% scaling, retains a positive scroll range
+  after expansion.
+
+### Finding 5 — Awaited post-create timeline refresh
+
+`QuickAddViewModel` now accepts an awaited `afterCreated` callback. Production composition wires
+that callback to `TimelineViewModel.LoadAsync`; persistence completes first, refresh completes
+second, and only then is `HideRequested` raised. A refresh error is copied into Quick Add's
+observable error state and leaves the window open.
+
+`CompositionRoot.ComposeQuickAdd` is the production wiring seam exercised by the focused test, so
+the test cannot pass merely by recreating a similar callback in test code.
+
+Covering test:
+`tests/Moment.App.Tests/Composition/QuickAddTimelineCompositionTests.cs`
+
+- RED:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj --filter FullyQualifiedName~QuickAddTimelineCompositionTests --verbosity minimal`
+  → expected `CS0117` because `CompositionRoot.ComposeQuickAdd` did not exist.
+- Two Debug GREEN attempts were blocked before discovery by Windows application control:
+  `FileLoadException`, `0x800711C7`, on the newly emitted App test DLL. No assertion ran.
+- Clean Release-output GREEN:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj -c Release --filter FullyQualifiedName~QuickAddTimelineCompositionTests --verbosity minimal`
+  → PASS 2/2.
+
+The success test holds the refresh query open and proves the submit task and hide event remain
+pending. The failure test proves persistence occurred, both view models expose
+`时间轴刷新失败`, and the window did not hide.
+
+Self-review extended that failure test to retry after recovery. RED failed because the recording
+service contained two identical drafts; GREEN passed 1/1 after Quick Add began remembering that
+persistence had already succeeded and retrying only the refresh. This prevents a user from
+creating a duplicate by pressing Enter after a transient refresh failure.
+
+### Finding 6 — Fixed groups rendered by the view
+
+`TimelineView` now binds its outer `GroupList` directly to the view model's three fixed groups.
+Every group always renders its accessible header. Each group owns a bounded recycling
+`VirtualizingStackPanel` row list, and selection is forwarded to the shared timeline view model.
+
+Covering test: `tests/Moment.App.Tests/Timeline/TimelineViewTests.cs`
+
+- After correcting a test namespace import, RED:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj -c Release --filter FullyQualifiedName~TimelineViewTests --verbosity minimal`
+  → FAIL 2/2. Empty data had no `GroupList`; partial data exposed only the populated “已完成”
+  group.
+- GREEN: the identical command → PASS 2/2.
+
+The actual WPF tests verify:
+
+- empty and partial data both render `已错过 / 接下来 / 已完成` in that order;
+- the partial row remains visible under “已完成” while the other headers remain;
+- there are exactly three row lists;
+- all three lists have virtualization enabled in recycling mode;
+- partial item counts are exactly `[0, 0, 1]`.
+
+### Actual interaction and layout evidence
+
+Computer Use launched the final Release executable and inspected the visible WPF tree. The
+accessibility hierarchy contains:
+
+- `GroupList` / “今天提醒时间线”;
+- three ordered group items with names `时间线分组：已错过`, `时间线分组：接下来`,
+  and `时间线分组：已完成`;
+- child lists `已错过提醒`, `接下来提醒`, and `已完成提醒`.
+
+The actual 1267 × 794 capture is committed at:
+
+`.superpowers/sdd/2026-07-29-windows-reminder-app-implementation/task-9-fix-round-1-main-actual.jpg`
+
+The capture shows all three headers simultaneously in the real main window. Populated partial-row
+rendering is exercised by the actual WPF view test, which constructs and lays out the real XAML at
+the app's 900 × 600 minimum window size. Quick Add ambiguity reachability and subsequent focus
+movement are likewise exercised on a shown real WPF window, not through a pure key-policy fake.
+The reduced 360-DIP viewport test supplies deterministic high-scale layout pressure without
+changing the user's global display settings.
+
+The active desktop was not in Windows high-contrast mode, and this round did not mutate the user's
+OS-wide accessibility setting. Consequently, native WPF focus/automation behavior, text-plus-color
+status semantics, minimum-window layout, and reduced-logical-viewport scrolling are verified;
+an OS-level high-contrast screenshot remains a manual environment-specific check.
+
+### Fix-round final verification
+
+Fresh final results after the last XAML change:
+
+- `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 35/35
+- `dotnet test tests\Moment.Core.Tests\Moment.Core.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 78/78
+- `dotnet test tests\Moment.Infrastructure.Tests\Moment.Infrastructure.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 19/19
+- `dotnet test tests\Moment.Windows.Tests\Moment.Windows.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 78/78
+- `dotnet build Moment.slnx -c Release --verbosity minimal`:
+  PASS, 0 warnings and 0 errors
+
+The final Quick Add scroll-only XAML change was followed by a fresh App 35/35 run and full Release
+build. Core, Infrastructure, and Windows had already passed in Release after all changes to their
+consumed contracts; no Task 7/8 mechanics were modified.

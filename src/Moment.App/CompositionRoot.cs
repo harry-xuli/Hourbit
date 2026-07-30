@@ -87,14 +87,15 @@ public sealed class CompositionRoot : IAsyncDisposable
         var reminders = new ReminderService(repository, scheduler, clock);
 
         var parser = new ChineseTimeParser();
-        var quickAdd = new QuickAddViewModel(parser, reminders, clock, zone);
+        QuickAddViewModel? quickAdd = null;
         var quickWindow = new QuickAddWindowController(
-            () => new QuickAddWindow { DataContext = quickAdd },
+            () => new QuickAddWindow { DataContext = quickAdd! },
             System.Windows.Application.Current.Dispatcher);
-        var dialogs = new TimelineDialogService(quickWindow.ShowAndFocus);
+        var dialogs = new TimelineDialogService(quickWindow.ShowAndFocus, zone);
         var timelineQuery = new SqliteTimelineQuery(databasePath);
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, dialogs, zone);
+        quickAdd = ComposeQuickAdd(parser, reminders, clock, zone, timeline);
         var mainWindow = new MainWindow { DataContext = timeline };
         var navigator = new WindowNotificationNavigator(mainWindow);
         var notificationRuntime = new WindowsNotificationRuntime(actions, navigator);
@@ -130,6 +131,21 @@ public sealed class CompositionRoot : IAsyncDisposable
             timeline, quickAdd, mainWindow, quickWindow);
         return root;
     }
+
+    internal static QuickAddViewModel ComposeQuickAdd(
+        IChineseTimeParser parser,
+        IReminderService reminders,
+        IClock clock,
+        TimeZoneInfo zone,
+        TimelineViewModel timeline) =>
+        new(parser, reminders, clock, zone, async ct =>
+        {
+            ct.ThrowIfCancellationRequested();
+            await timeline.LoadAsync();
+            ct.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(timeline.ErrorMessage))
+                throw new InvalidOperationException(timeline.ErrorMessage);
+        });
 
     public async Task<bool> StartAsync(InstanceActivation activation, CancellationToken ct)
     {

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Moment.App.Commands;
+using Moment.App.Timeline;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
@@ -21,23 +22,28 @@ public sealed class QuickAddViewModel : ObservableObject
     private readonly IReminderService _service;
     private readonly IClock _clock;
     private readonly TimeZoneInfo _zone;
+    private readonly Func<CancellationToken, Task> _afterCreated;
     private string _text = string.Empty;
     private string? _previewText;
     private string? _errorMessage;
     private ReminderDraft? _draft;
     private QuickAddState _state;
     private bool _areDetailsVisible;
+    private EditReminderViewModel? _details;
+    private bool _creationPersisted;
 
     public QuickAddViewModel(
         IChineseTimeParser parser,
         IReminderService service,
         IClock clock,
-        TimeZoneInfo zone)
+        TimeZoneInfo zone,
+        Func<CancellationToken, Task>? afterCreated = null)
     {
         _parser = parser;
         _service = service;
         _clock = clock;
         _zone = zone;
+        _afterCreated = afterCreated ?? (_ => Task.CompletedTask);
         SubmitCommand = new AsyncCommand((_, ct) => SubmitAsync(ct));
         ChooseCommand = new AsyncCommand((choice, _) =>
             choice is QuickAddChoiceViewModel value ? ChooseAsync(value) : Task.CompletedTask);
@@ -86,6 +92,11 @@ public sealed class QuickAddViewModel : ObservableObject
         get => _areDetailsVisible;
         private set => SetProperty(ref _areDetailsVisible, value);
     }
+    public EditReminderViewModel? Details
+    {
+        get => _details;
+        private set => SetProperty(ref _details, value);
+    }
     public string Text
     {
         get => _text;
@@ -94,6 +105,14 @@ public sealed class QuickAddViewModel : ObservableObject
             if (SetProperty(ref _text, value ?? string.Empty))
                 Parse();
         }
+    }
+
+    public bool ShowDetails()
+    {
+        if (Details is null || AreDetailsVisible)
+            return false;
+        AreDetailsVisible = true;
+        return true;
     }
 
     public Task SubmitAsync() => SubmitAsync(CancellationToken.None);
@@ -105,7 +124,22 @@ public sealed class QuickAddViewModel : ObservableObject
         try
         {
             ErrorMessage = null;
-            await _service.CreateAsync(_draft, ct);
+            var draft = _draft;
+            if (AreDetailsVisible && Details is not null)
+            {
+                if (!Details.TryBuildDraft(out draft))
+                {
+                    ErrorMessage = Details.ErrorMessage;
+                    return;
+                }
+            }
+            if (!_creationPersisted)
+            {
+                await _service.CreateAsync(draft!, ct);
+                _creationPersisted = true;
+            }
+            await _afterCreated(ct);
+            _creationPersisted = false;
             HideRequested?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
@@ -118,6 +152,7 @@ public sealed class QuickAddViewModel : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(choice);
         _draft = choice.Draft;
+        Details = new EditReminderViewModel(_draft, _zone);
         Choices.Clear();
         PreviewText = FormatPreview(_draft);
         ErrorMessage = null;
@@ -128,6 +163,8 @@ public sealed class QuickAddViewModel : ObservableObject
     private void Parse()
     {
         _draft = null;
+        _creationPersisted = false;
+        Details = null;
         PreviewText = null;
         ErrorMessage = null;
         Choices.Clear();
@@ -141,6 +178,7 @@ public sealed class QuickAddViewModel : ObservableObject
         {
             case ParseResult.Success success:
                 _draft = success.Draft;
+                Details = new EditReminderViewModel(success.Draft, _zone);
                 PreviewText = FormatPreview(success.Draft);
                 State = QuickAddState.Success;
                 break;

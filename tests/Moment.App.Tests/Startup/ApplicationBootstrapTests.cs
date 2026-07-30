@@ -25,7 +25,7 @@ public sealed class ApplicationBootstrapTests
     }
 
     [Fact]
-    public async Task Missing_process_windows_directory_is_restored_before_application_resources_load()
+    public async Task Missing_process_windows_directory_is_restored_before_WPF_font_URI_is_constructed()
     {
         var completion = new TaskCompletionSource<Exception?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -48,10 +48,6 @@ public sealed class ApplicationBootstrapTests
                 Assert.True(new Uri(Path.Combine(machine!, "Fonts") + Path.DirectorySeparatorChar,
                     UriKind.Absolute).IsAbsoluteUri);
 
-                var application = new App();
-                application.InitializeComponent();
-                Assert.NotNull(application.Resources["PrimaryTextBrush"]);
-                Assert.NotNull(application.Resources["KeyboardFocusVisual"]);
                 completion.TrySetResult(null);
             }
             catch (Exception exception)

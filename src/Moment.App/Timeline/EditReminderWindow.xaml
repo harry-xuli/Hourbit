@@ -1,0 +1,122 @@
+<Window x:Class="Moment.App.Timeline.EditReminderWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+        Title="编辑提醒"
+        Width="560"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibility" />
+    </Window.Resources>
+    <Grid Margin="26">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="编辑提醒" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,18" />
+
+        <Grid Grid.Row="1" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="内容" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}"
+                     automation:AutomationProperties.Name="提醒内容" />
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="150" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="日期时间" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding DateText, UpdateSourceTrigger=PropertyChanged}"
+                     automation:AutomationProperties.Name="日期，格式年-月-日" />
+            <TextBox Grid.Column="3" Text="{Binding TimeText, UpdateSourceTrigger=PropertyChanged}"
+                     automation:AutomationProperties.Name="时间，格式小时:分钟" />
+        </Grid>
+
+        <Grid Grid.Row="3" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="类型" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" MinHeight="40"
+                      ItemsSource="{Binding Kinds}"
+                      DisplayMemberPath="Label"
+                      SelectedValuePath="Value"
+                      SelectedValue="{Binding SelectedKind}"
+                      automation:AutomationProperties.Name="提醒类型" />
+            <TextBlock Grid.Column="2" />
+            <StackPanel Grid.Column="3" Orientation="Horizontal">
+                <TextBlock Text="重要性" Width="66" VerticalAlignment="Center" />
+                <ComboBox MinWidth="126" MinHeight="40"
+                          ItemsSource="{Binding Importances}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectedValue="{Binding SelectedImportance}"
+                          automation:AutomationProperties.Name="重要性" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="4" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="重复" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" MinHeight="40"
+                      ItemsSource="{Binding Recurrences}"
+                      DisplayMemberPath="Label"
+                      SelectedValuePath="Value"
+                      SelectedValue="{Binding SelectedRecurrence}"
+                      automation:AutomationProperties.Name="重复方式" />
+        </Grid>
+
+        <Grid Grid.Row="5" Margin="0,0,0,12"
+              Visibility="{Binding IsWeekly, Converter={StaticResource BooleanToVisibility}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="92" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="每周日期" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1"
+                     Text="{Binding WeeklyDaysText, UpdateSourceTrigger=PropertyChanged}"
+                     automation:AutomationProperties.Name="每周日期"
+                     ToolTip="例如：周一、周三" />
+        </Grid>
+
+        <Grid Grid.Row="6">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="{Binding ErrorMessage}"
+                       Foreground="{StaticResource MissedBrush}"
+                       Margin="92,0,0,14"
+                       TextWrapping="Wrap" />
+            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource SecondaryButton}" Content="取消"
+                        IsCancel="True" Margin="0,0,10,0" />
+                <Button Content="保存" Click="OnSave" IsDefault="True"
+                        automation:AutomationProperties.Name="保存提醒修改" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

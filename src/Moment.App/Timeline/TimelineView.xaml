@@ -4,13 +4,6 @@
              xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
              Background="{StaticResource WindowBackgroundBrush}"
              FontFamily="Segoe UI, Microsoft YaHei UI">
-    <UserControl.Resources>
-        <CollectionViewSource x:Key="GroupedTimeline" Source="{Binding Items}">
-            <CollectionViewSource.GroupDescriptions>
-                <PropertyGroupDescription PropertyName="GroupName" />
-            </CollectionViewSource.GroupDescriptions>
-        </CollectionViewSource>
-    </UserControl.Resources>
     <UserControl.InputBindings>
         <KeyBinding Key="Enter" Command="{Binding EditCommand}" />
         <KeyBinding Key="Delete" Command="{Binding DeleteCommand}" />
@@ -137,27 +130,15 @@
                         <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource MissedBrush}" />
                     </Border>
 
-                    <ListBox ItemsSource="{Binding Source={StaticResource GroupedTimeline}}"
-                             SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
-                             ItemContainerStyle="{StaticResource TimelineListItem}"
-                             BorderThickness="0"
-                             Background="{StaticResource WindowBackgroundBrush}"
-                             Padding="26,8,26,20"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             VirtualizingPanel.IsVirtualizing="True"
-                             VirtualizingPanel.IsVirtualizingWhenGrouping="True"
-                             VirtualizingPanel.VirtualizationMode="Recycling"
-                             automation:AutomationProperties.Name="今天提醒时间线">
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <VirtualizingStackPanel />
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                        <ListBox.GroupStyle>
-                            <GroupStyle>
-                                <GroupStyle.HeaderTemplate>
-                                    <DataTemplate>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="26,8,26,20">
+                        <ItemsControl x:Name="GroupList"
+                                      ItemsSource="{Binding Groups}"
+                                      automation:AutomationProperties.Name="今天提醒时间线">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel>
                                         <Grid Height="58">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="34" />
@@ -170,87 +151,137 @@
                                                            FontFamily="Segoe UI Symbol" FontSize="14"
                                                            HorizontalAlignment="Center" VerticalAlignment="Center" />
                                             </Border>
-                                            <TextBlock x:Name="GroupName" Grid.Column="1" Text="{Binding Name}"
+                                            <TextBlock x:Name="GroupName" Grid.Column="1"
+                                                       Text="{Binding Name}"
+                                                       automation:AutomationProperties.Name="{Binding Name, StringFormat=时间线分组：{0}}"
                                                        Foreground="{StaticResource AccentBrush}"
                                                        FontSize="20" FontWeight="SemiBold"
                                                        VerticalAlignment="Center" Margin="8,0,0,0" />
                                         </Grid>
-                                        <DataTemplate.Triggers>
-                                            <DataTrigger Binding="{Binding Name}" Value="已错过">
-                                                <Setter TargetName="GroupMarker" Property="Background" Value="{StaticResource MissedBrush}" />
-                                                <Setter TargetName="GroupSymbol" Property="Text" Value="!" />
-                                                <Setter TargetName="GroupName" Property="Foreground" Value="{StaticResource MissedBrush}" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding Name}" Value="已完成">
-                                                <Setter TargetName="GroupMarker" Property="Background" Value="#7A828C" />
-                                                <Setter TargetName="GroupSymbol" Property="Text" Value="✓" />
-                                                <Setter TargetName="GroupName" Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
-                                            </DataTrigger>
-                                        </DataTemplate.Triggers>
-                                    </DataTemplate>
-                                </GroupStyle.HeaderTemplate>
-                            </GroupStyle>
-                        </ListBox.GroupStyle>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1"
-                                        MinHeight="64" Padding="28,0,8,0"
-                                        automation:AutomationProperties.Name="{Binding Title}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="110" />
-                                            <ColumnDefinition Width="2.2*" />
-                                            <ColumnDefinition Width="1.25*" />
-                                            <ColumnDefinition Width="1.05*" />
-                                            <ColumnDefinition Width="1.1*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock x:Name="Time" Grid.Column="0" Text="{Binding TimeText}"
-                                                   FontSize="18" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Border Width="42" Height="42" BorderBrush="{StaticResource BorderBrush}"
-                                                    BorderThickness="1" CornerRadius="5" Margin="0,0,16,0">
-                                                <TextBlock Text="{Binding KindSymbol}" FontFamily="Segoe UI Symbol"
-                                                           FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold"
-                                                       TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                        <TextBlock Grid.Column="2" Text="{Binding RecurrenceDisplay}"
-                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <TextBlock x:Name="ImportanceSymbol" Text="{Binding ImportanceSymbol}"
-                                                       Foreground="{StaticResource SecondaryTextBrush}" FontWeight="Bold"
-                                                       Margin="0,0,10,0" />
-                                            <TextBlock x:Name="Importance" Text="{Binding ImportanceText}" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <TextBlock x:Name="StatusSymbol" Text="{Binding StatusSymbol}"
-                                                       FontFamily="Segoe UI Symbol" Foreground="{StaticResource AccentBrush}"
-                                                       FontSize="18" Margin="0,0,10,0" />
-                                            <TextBlock x:Name="Status" Text="{Binding StatusText}"
-                                                       Foreground="{StaticResource AccentBrush}" />
-                                        </StackPanel>
-                                    </Grid>
-                                </Border>
-                                <DataTemplate.Triggers>
-                                    <DataTrigger Binding="{Binding ImportanceText}" Value="重要">
-                                        <Setter TargetName="ImportanceSymbol" Property="Foreground" Value="{StaticResource ImportantBrush}" />
-                                        <Setter TargetName="Importance" Property="Foreground" Value="{StaticResource ImportantBrush}" />
-                                        <Setter TargetName="Importance" Property="FontWeight" Value="SemiBold" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding GroupName}" Value="已错过">
-                                        <Setter TargetName="Time" Property="Foreground" Value="{StaticResource MissedBrush}" />
-                                        <Setter TargetName="StatusSymbol" Property="Foreground" Value="{StaticResource MissedBrush}" />
-                                        <Setter TargetName="Status" Property="Foreground" Value="{StaticResource MissedBrush}" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding GroupName}" Value="已完成">
-                                        <Setter TargetName="StatusSymbol" Property="Foreground" Value="{StaticResource CompletedBrush}" />
-                                        <Setter TargetName="Status" Property="Foreground" Value="{StaticResource CompletedBrush}" />
-                                    </DataTrigger>
-                                </DataTemplate.Triggers>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                                        <ListBox ItemsSource="{Binding Items}"
+                                                 SelectionChanged="OnTimelineSelectionChanged"
+                                                 ItemContainerStyle="{StaticResource TimelineListItem}"
+                                                 BorderThickness="0"
+                                                 Background="{StaticResource WindowBackgroundBrush}"
+                                                 MaxHeight="320"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                                 VirtualizingPanel.IsVirtualizing="True"
+                                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                                 automation:AutomationProperties.Name="{Binding Name, StringFormat={}{0}提醒}">
+                                            <ListBox.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <VirtualizingStackPanel />
+                                                </ItemsPanelTemplate>
+                                            </ListBox.ItemsPanel>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border BorderBrush="{StaticResource BorderBrush}"
+                                                            BorderThickness="0,0,0,1"
+                                                            MinHeight="64" Padding="28,0,8,0"
+                                                            automation:AutomationProperties.Name="{Binding Title}">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="110" />
+                                                                <ColumnDefinition Width="2.2*" />
+                                                                <ColumnDefinition Width="1.25*" />
+                                                                <ColumnDefinition Width="1.05*" />
+                                                                <ColumnDefinition Width="1.1*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock x:Name="Time" Grid.Column="0"
+                                                                       Text="{Binding TimeText}"
+                                                                       FontSize="18" VerticalAlignment="Center" />
+                                                            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                                        VerticalAlignment="Center">
+                                                                <Border Width="42" Height="42"
+                                                                        BorderBrush="{StaticResource BorderBrush}"
+                                                                        BorderThickness="1" CornerRadius="5"
+                                                                        Margin="0,0,16,0">
+                                                                    <TextBlock Text="{Binding KindSymbol}"
+                                                                               FontFamily="Segoe UI Symbol"
+                                                                               FontSize="20"
+                                                                               HorizontalAlignment="Center"
+                                                                               VerticalAlignment="Center" />
+                                                                </Border>
+                                                                <TextBlock Text="{Binding Title}" FontSize="18"
+                                                                           FontWeight="SemiBold"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           VerticalAlignment="Center" />
+                                                            </StackPanel>
+                                                            <TextBlock Grid.Column="2"
+                                                                       Text="{Binding RecurrenceDisplay}"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       VerticalAlignment="Center" />
+                                                            <StackPanel Grid.Column="3" Orientation="Horizontal"
+                                                                        VerticalAlignment="Center">
+                                                                <TextBlock x:Name="ImportanceSymbol"
+                                                                           Text="{Binding ImportanceSymbol}"
+                                                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                                                           FontWeight="Bold" Margin="0,0,10,0" />
+                                                                <TextBlock x:Name="Importance"
+                                                                           Text="{Binding ImportanceText}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="4" Orientation="Horizontal"
+                                                                        VerticalAlignment="Center">
+                                                                <TextBlock x:Name="StatusSymbol"
+                                                                           Text="{Binding StatusSymbol}"
+                                                                           FontFamily="Segoe UI Symbol"
+                                                                           Foreground="{StaticResource AccentBrush}"
+                                                                           FontSize="18" Margin="0,0,10,0" />
+                                                                <TextBlock x:Name="Status"
+                                                                           Text="{Binding StatusText}"
+                                                                           Foreground="{StaticResource AccentBrush}" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </Border>
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding ImportanceText}" Value="重要">
+                                                            <Setter TargetName="ImportanceSymbol" Property="Foreground"
+                                                                    Value="{StaticResource ImportantBrush}" />
+                                                            <Setter TargetName="Importance" Property="Foreground"
+                                                                    Value="{StaticResource ImportantBrush}" />
+                                                            <Setter TargetName="Importance" Property="FontWeight"
+                                                                    Value="SemiBold" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding GroupName}" Value="已错过">
+                                                            <Setter TargetName="Time" Property="Foreground"
+                                                                    Value="{StaticResource MissedBrush}" />
+                                                            <Setter TargetName="StatusSymbol" Property="Foreground"
+                                                                    Value="{StaticResource MissedBrush}" />
+                                                            <Setter TargetName="Status" Property="Foreground"
+                                                                    Value="{StaticResource MissedBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding GroupName}" Value="已完成">
+                                                            <Setter TargetName="StatusSymbol" Property="Foreground"
+                                                                    Value="{StaticResource CompletedBrush}" />
+                                                            <Setter TargetName="Status" Property="Foreground"
+                                                                    Value="{StaticResource CompletedBrush}" />
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </StackPanel>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding Name}" Value="已错过">
+                                            <Setter TargetName="GroupMarker" Property="Background"
+                                                    Value="{StaticResource MissedBrush}" />
+                                            <Setter TargetName="GroupSymbol" Property="Text" Value="!" />
+                                            <Setter TargetName="GroupName" Property="Foreground"
+                                                    Value="{StaticResource MissedBrush}" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding Name}" Value="已完成">
+                                            <Setter TargetName="GroupMarker" Property="Background" Value="#7A828C" />
+                                            <Setter TargetName="GroupSymbol" Property="Text" Value="✓" />
+                                            <Setter TargetName="GroupName" Property="Foreground"
+                                                    Value="{StaticResource SecondaryTextBrush}" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
                 </Grid>
             </Grid>
         </Grid>
