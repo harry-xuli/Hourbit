@@ -86,3 +86,33 @@ blocked across Core, Infrastructure, and Windows tests by the same policy
 ```
 
 The one passing Windows test is `Arguments_round_trip_occurrence_and_action`; it exercises no runtime Core dependency. The initial test-first RED stages and clean full compilation are recorded above, but the Smart App Control policy must be lifted or the build output trusted before the complete behavioral suite can execute.
+
+## Fix round 1 root-cause analysis (before changes)
+
+1. `ImportantAlertController` uses `Channel.CreateUnbounded`; `TryWrite` always accepts while the controller is live, so overload has no backpressure boundary.
+2. The controller owns no `CancellationTokenSource`; it passes `CancellationToken.None` to presenter, audio, and action calls, and disposal only completes the writer. An in-flight operation can therefore survive shutdown and queued callers have no deterministic disposal result.
+3. `IImportantAlertAudio` has only a silent in-process default implementation. No embedded `default-alert.wav`, OS player adapter, or production looping implementation exists.
+4. `WindowsAppNotificationPlatform` registers `AppNotificationManager` but never subscribes to `NotificationInvoked`. `AppNotificationSink` can parse only action-button arguments; timeline navigation arguments are neither distinguished nor routed.
+5. `NotificationHealth` initially assumes `Available` and moves only after registration/show exceptions. It does not read `AppNotificationManager.Setting`, publish state changes, or support an explicit refresh after the settings app returns.
+
+The remediation tests will assert observable outcomes at the controller and OS-adapter boundaries: bounded admission/cancellation, deterministic shutdown ownership, audio fallback/resource behavior, independent action vs navigation routing, and health state transitions.
+
+## Fix round 1 RED/GREEN evidence
+
+- Controller RED: new queue/lifetime tests failed because the constructor had no `queueCapacity` argument. GREEN: 7 controller tests passed after a bounded `Channel` (default capacity 32, `FullMode.Wait`) and controller-owned cancellation were added.
+- Audio RED: the production audio contract was absent. The first implementation then exposed three stop calls during a failed start; cleanup was narrowed to active streams. GREEN: the custom-failure fallback/resource test passed.
+- Activation/health RED: lifecycle tests failed for missing activation source, navigator, navigation payload, and health-source contracts. GREEN: both lifecycle tests passed after adding the router, Windows App SDK bridge, `Setting`-derived health refresh, and observable state changes.
+- A full Windows-suite invocation initially appeared stalled because the approval/wait layer produced no output. Its completed retry result was 21/21 passing in 340 ms; no runtime deadlock was found.
+
+Final verification:
+
+```text
+dotnet test tests\Moment.Windows.Tests\Moment.Windows.Tests.csproj --no-restore
+PASS — 21/21
+dotnet test tests\Moment.Core.Tests\Moment.Core.Tests.csproj --no-restore
+PASS — 78/78
+dotnet test Moment.slnx --no-restore
+PASS — Core 78/78, Infrastructure 19/19, Windows 21/21
+dotnet build Moment.slnx --no-restore
+PASS — 0 warnings, 0 errors
+```

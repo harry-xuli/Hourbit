@@ -9,14 +9,18 @@ public sealed record ImportantAlertFailure(ReminderAlert Alert, Exception Except
 
 public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDisposable
 {
+    /// <summary>Maximum alerts waiting behind the one visible important-alert window.</summary>
+    public const int DefaultQueueCapacity = 32;
+
     private static readonly TimeSpan CoalescingWindow = TimeSpan.FromMilliseconds(25);
-    private readonly Channel<PendingAlert> _queue = Channel.CreateUnbounded<PendingAlert>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+    private readonly Channel<PendingAlert> _queue;
     private readonly IImportantAlertPresenter _presenter;
     private readonly IReminderActionService _actions;
     private readonly IImportantAlertAudio _audio;
     private readonly TimeProvider _timeProvider;
+    private readonly CancellationTokenSource _lifetime = new();
     private readonly Task _worker;
+    private int _disposed;
 
     public event Action<ImportantAlertFailure>? PresentationFailed;
 
@@ -24,61 +28,135 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         IImportantAlertPresenter presenter,
         IReminderActionService actions,
         IImportantAlertAudio? audio = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        int queueCapacity = DefaultQueueCapacity)
     {
+        if (queueCapacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(queueCapacity));
+        }
+
         _presenter = presenter ?? throw new ArgumentNullException(nameof(presenter));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _audio = audio ?? SilentImportantAlertAudio.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _queue = Channel.CreateBounded<PendingAlert>(new BoundedChannelOptions(queueCapacity)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false
+        });
         _worker = Task.Run(ProcessQueueAsync);
     }
 
-    public Task EnqueueAsync(ReminderAlert alert, CancellationToken ct)
+    public async Task EnqueueAsync(ReminderAlert alert, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(alert);
         ct.ThrowIfCancellationRequested();
+        _lifetime.Token.ThrowIfCancellationRequested();
         var pending = new PendingAlert(alert);
-        if (!_queue.Writer.TryWrite(pending))
+
+        try
         {
-            throw new InvalidOperationException("Important alert delivery has stopped.");
+            while (await _queue.Writer.WaitToWriteAsync(ct).ConfigureAwait(false))
+            {
+                _lifetime.Token.ThrowIfCancellationRequested();
+                if (_queue.Writer.TryWrite(pending))
+                {
+                    // After admission, ownership is transferred to the controller; caller cancellation no longer drops it.
+                    await pending.Completion.Task.ConfigureAwait(false);
+                    return;
+                }
+            }
+        }
+        catch (ChannelClosedException) when (_lifetime.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(_lifetime.Token);
         }
 
-        return pending.Completion.Task.WaitAsync(ct);
+        throw new InvalidOperationException("Important alert delivery has stopped.");
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            await _worker.ConfigureAwait(false);
+            return;
+        }
+
+        _lifetime.Cancel();
         _queue.Writer.TryComplete();
         await _worker.ConfigureAwait(false);
     }
 
     private async Task ProcessQueueAsync()
     {
-        await foreach (var first in _queue.Reader.ReadAllAsync().ConfigureAwait(false))
+        try
         {
-            var batch = new List<PendingAlert> { first };
-            await Task.Delay(CoalescingWindow, _timeProvider).ConfigureAwait(false);
+            while (await _queue.Reader.WaitToReadAsync().ConfigureAwait(false))
+            {
+                if (_lifetime.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (!_queue.Reader.TryRead(out var first))
+                {
+                    continue;
+                }
+
+                var batch = new List<PendingAlert> { first };
+                try
+                {
+                    await Task.Delay(CoalescingWindow, _timeProvider, _lifetime.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                {
+                    Cancel(batch);
+                    return;
+                }
+
+                while (_queue.Reader.TryRead(out var pending))
+                {
+                    batch.Add(pending);
+                }
+
+                var ordered = batch.OrderBy(item => item.Alert.DueAt).ThenBy(item => item.Alert.OccurrenceId).ToArray();
+                for (var index = 0; index < ordered.Length; index++)
+                {
+                    if (_lifetime.IsCancellationRequested)
+                    {
+                        Cancel(ordered[index..]);
+                        return;
+                    }
+
+                    await PresentAsync(ordered[index], _lifetime.Token).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            // Disposal completes accepted requests in the finally block below.
+        }
+        finally
+        {
             while (_queue.Reader.TryRead(out var pending))
             {
-                batch.Add(pending);
-            }
-
-            foreach (var pending in batch.OrderBy(item => item.Alert.DueAt).ThenBy(item => item.Alert.OccurrenceId))
-            {
-                await PresentAsync(pending).ConfigureAwait(false);
+                pending.Completion.TrySetCanceled(_lifetime.Token);
             }
         }
     }
 
-    private async Task PresentAsync(PendingAlert pending)
+    private async Task PresentAsync(PendingAlert pending, CancellationToken ct)
     {
         try
         {
-            await StartAudioAsync(pending.Alert).ConfigureAwait(false);
+            await StartAudioAsync(pending.Alert, ct).ConfigureAwait(false);
             ImportantAlertAction action;
             try
             {
-                action = await _presenter.ShowAsync(pending.Alert, CancellationToken.None).ConfigureAwait(false);
+                action = await _presenter.ShowAsync(pending.Alert, ct).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -87,8 +165,13 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
                 return;
             }
 
-            await ApplyActionAsync(pending.Alert.OccurrenceId, action).ConfigureAwait(false);
+            await ApplyActionAsync(pending.Alert.OccurrenceId, action, ct).ConfigureAwait(false);
             pending.Completion.TrySetResult();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            pending.Completion.TrySetCanceled(ct);
+            throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -98,6 +181,7 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         {
             try
             {
+                // Teardown must not be skipped just because the controller lifetime was cancelled.
                 await _audio.StopAsync(CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -107,13 +191,13 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         }
     }
 
-    private async Task StartAudioAsync(ReminderAlert alert)
+    private async Task StartAudioAsync(ReminderAlert alert, CancellationToken ct)
     {
         if (!string.IsNullOrWhiteSpace(alert.CustomAudioPath))
         {
             try
             {
-                await _audio.StartCustomLoopAsync(alert.CustomAudioPath, CancellationToken.None).ConfigureAwait(false);
+                await _audio.StartCustomLoopAsync(alert.CustomAudioPath, ct).ConfigureAwait(false);
                 return;
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -122,19 +206,27 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
             }
         }
 
-        await _audio.StartDefaultLoopAsync(CancellationToken.None).ConfigureAwait(false);
+        await _audio.StartDefaultLoopAsync(ct).ConfigureAwait(false);
     }
 
-    private Task ApplyActionAsync(Guid occurrenceId, ImportantAlertAction action) => action switch
+    private Task ApplyActionAsync(Guid occurrenceId, ImportantAlertAction action, CancellationToken ct) => action switch
     {
-        ImportantAlertAction.Complete => _actions.CompleteAsync(occurrenceId, CancellationToken.None),
-        ImportantAlertAction.Ignore => _actions.IgnoreAsync(occurrenceId, CancellationToken.None),
-        ImportantAlertAction.Snooze5 => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(5), CancellationToken.None),
-        ImportantAlertAction.Snooze10 or ImportantAlertAction.Close => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(10), CancellationToken.None),
-        ImportantAlertAction.Snooze30 => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(30), CancellationToken.None),
-        ImportantAlertAction.Snooze60 => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(60), CancellationToken.None),
+        ImportantAlertAction.Complete => _actions.CompleteAsync(occurrenceId, ct),
+        ImportantAlertAction.Ignore => _actions.IgnoreAsync(occurrenceId, ct),
+        ImportantAlertAction.Snooze5 => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(5), ct),
+        ImportantAlertAction.Snooze10 or ImportantAlertAction.Close => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(10), ct),
+        ImportantAlertAction.Snooze30 => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(30), ct),
+        ImportantAlertAction.Snooze60 => _actions.SnoozeAsync(occurrenceId, TimeSpan.FromMinutes(60), ct),
         _ => throw new ArgumentOutOfRangeException(nameof(action))
     };
+
+    private void Cancel(IEnumerable<PendingAlert> pendingAlerts)
+    {
+        foreach (var pending in pendingAlerts)
+        {
+            pending.Completion.TrySetCanceled(_lifetime.Token);
+        }
+    }
 
     private void ReportPresentationFailure(ImportantAlertFailure failure)
     {

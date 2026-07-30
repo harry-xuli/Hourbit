@@ -63,6 +63,64 @@ public sealed class ImportantAlertControllerTests
         Assert.Empty(actions.Calls);
     }
 
+    [Fact]
+    public async Task Bounded_queue_applies_backpressure_without_losing_accepted_alerts()
+    {
+        var presenter = new BlockingPresenter();
+        var actions = new RecordingActions();
+        await using var controller = new ImportantAlertController(presenter, actions, queueCapacity: 1);
+        var first = controller.EnqueueAsync(TestData.Alert("A", dueMinute: 1), CancellationToken.None);
+        await presenter.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var second = controller.EnqueueAsync(TestData.Alert("B", dueMinute: 2), CancellationToken.None);
+        using var waitingCancellation = new CancellationTokenSource();
+        var third = controller.EnqueueAsync(TestData.Alert("C", dueMinute: 3), waitingCancellation.Token);
+
+        await Task.Delay(50);
+        waitingCancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => third);
+        presenter.Release();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(["A", "B"], presenter.Titles);
+        Assert.Equal(["ignore:" + presenter.OccurrenceIds[0], "ignore:" + presenter.OccurrenceIds[1]], actions.Calls);
+    }
+
+    [Fact]
+    public async Task Disposal_cancels_in_flight_and_queued_alerts_without_presenting_later_alerts()
+    {
+        var presenter = new BlockingPresenter();
+        var actions = new RecordingActions();
+        var controller = new ImportantAlertController(presenter, actions, queueCapacity: 1);
+        var first = controller.EnqueueAsync(TestData.Alert("A", dueMinute: 1), CancellationToken.None);
+        await presenter.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        var second = controller.EnqueueAsync(TestData.Alert("B", dueMinute: 2), CancellationToken.None);
+
+        await controller.DisposeAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+        Assert.Equal(["A"], presenter.Titles);
+        Assert.Empty(actions.Calls);
+    }
+
+    [Fact]
+    public async Task Accepted_alert_completes_even_if_its_caller_token_is_cancelled_after_admission()
+    {
+        var presenter = new BlockingPresenter();
+        var actions = new RecordingActions();
+        await using var controller = new ImportantAlertController(presenter, actions, queueCapacity: 1);
+        using var callerCancellation = new CancellationTokenSource();
+        var alert = TestData.Alert("A", dueMinute: 1);
+        var completion = controller.EnqueueAsync(alert, callerCancellation.Token);
+        await presenter.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        callerCancellation.Cancel();
+        presenter.Release();
+        await completion;
+
+        Assert.Equal(["ignore:" + alert.OccurrenceId], actions.Calls);
+    }
+
     private sealed class RecordingPresenter(ImportantAlertAction action) : IImportantAlertPresenter
     {
         private int _active;
@@ -83,6 +141,25 @@ public sealed class ImportantAlertControllerTests
     {
         public Task<ImportantAlertAction> ShowAsync(ReminderAlert alert, CancellationToken ct) =>
             Task.FromException<ImportantAlertAction>(new InvalidOperationException("window failed"));
+    }
+
+    private sealed class BlockingPresenter : IImportantAlertPresenter
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<string> Titles { get; } = [];
+        public List<Guid> OccurrenceIds { get; } = [];
+
+        public async Task<ImportantAlertAction> ShowAsync(ReminderAlert alert, CancellationToken ct)
+        {
+            Titles.Add(alert.Title);
+            OccurrenceIds.Add(alert.OccurrenceId);
+            Started.TrySetResult();
+            await _release.Task.WaitAsync(ct);
+            return ImportantAlertAction.Ignore;
+        }
+
+        public void Release() => _release.TrySetResult();
     }
 
     private sealed class RecordingAudio(bool failCustom) : IImportantAlertAudio

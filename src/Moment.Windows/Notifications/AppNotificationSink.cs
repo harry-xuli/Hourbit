@@ -33,6 +33,21 @@ public interface INotificationPlatform
     Task ShowAsync(NotificationPayload payload, CancellationToken ct);
     Task OpenSettingsAsync(CancellationToken ct);
 }
+public interface INotificationHealthSource
+{
+    event Action<NotificationHealth>? HealthChanged;
+    Task RefreshHealthAsync(CancellationToken ct);
+}
+
+public interface INotificationActivationSource
+{
+    event Func<string, Task>? Invoked;
+    void Register();
+    void Unregister();
+}
+
+public sealed record NotificationNavigation(string Section, Guid? OccurrenceId);
+public interface INotificationNavigator { Task NavigateAsync(NotificationNavigation navigation, CancellationToken ct); }
 
 public interface IImportantAlertDelivery
 {
@@ -40,15 +55,17 @@ public interface IImportantAlertDelivery
 }
 
 /// <summary>Windows App SDK boundary; tests use <see cref="INotificationPlatform"/> fakes instead.</summary>
-public sealed class WindowsAppNotificationPlatform : INotificationPlatform
+public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INotificationHealthSource
 {
     public NotificationHealth Health { get; private set; } = NotificationHealth.Available;
+    public event Action<NotificationHealth>? HealthChanged;
 
     public WindowsAppNotificationPlatform()
     {
         try
         {
             AppNotificationManager.Default.Register();
+            RefreshHealthAsync(CancellationToken.None).GetAwaiter().GetResult();
         }
         catch (UnauthorizedAccessException)
         {
@@ -58,6 +75,21 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform
         {
             Health = NotificationHealth.RegistrationFailed;
         }
+    }
+
+    public Task RefreshHealthAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        try { SetHealth(AppNotificationManager.Default.Setting == AppNotificationSetting.Enabled ? NotificationHealth.Available : NotificationHealth.PermissionDisabled); }
+        catch { SetHealth(NotificationHealth.RegistrationFailed); }
+        return Task.CompletedTask;
+    }
+
+    private void SetHealth(NotificationHealth health)
+    {
+        if (Health == health) return;
+        Health = health;
+        HealthChanged?.Invoke(health);
     }
 
     public Task ShowAsync(NotificationPayload payload, CancellationToken ct)
@@ -76,12 +108,12 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform
         }
         catch (UnauthorizedAccessException)
         {
-            Health = NotificationHealth.PermissionDisabled;
+            SetHealth(NotificationHealth.PermissionDisabled);
             throw;
         }
         catch
         {
-            Health = NotificationHealth.RegistrationFailed;
+            SetHealth(NotificationHealth.RegistrationFailed);
             throw;
         }
     }
@@ -96,7 +128,13 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform
 
 public sealed class AppNotificationSink(INotificationPlatform platform, IImportantAlertDelivery importantAlerts, IReminderActionService actions) : IReminderSink
 {
+    public event Action<NotificationHealth>? HealthChanged
+    {
+        add { if (platform is INotificationHealthSource source) source.HealthChanged += value; }
+        remove { if (platform is INotificationHealthSource source) source.HealthChanged -= value; }
+    }
     public NotificationHealth Health => platform.Health;
+    public Task RefreshHealthAsync(CancellationToken ct) => platform is INotificationHealthSource source ? source.RefreshHealthAsync(ct) : Task.CompletedTask;
     public Task OpenWindowsNotificationSettingsAsync(CancellationToken ct) => platform.OpenSettingsAsync(ct);
 
     public Task SendTestNotificationAsync(CancellationToken ct) => platform.ShowAsync(new NotificationPayload(
@@ -158,5 +196,47 @@ public sealed class AppNotificationSink(INotificationPlatform platform, IImporta
         }
 
         return true;
+    }
+}
+
+public sealed class NotificationActivationRouter(INotificationActivationSource source, IReminderActionService actions, INotificationNavigator navigator) : IAsyncDisposable
+{
+    public void Start() { source.Register(); source.Invoked += HandleAsync; }
+    public ValueTask DisposeAsync() { source.Invoked -= HandleAsync; source.Unregister(); return ValueTask.CompletedTask; }
+    private async Task HandleAsync(string arguments)
+    {
+        if (NotificationArguments.TryParse(arguments, out var action))
+        {
+            if (action.Action == NotificationAction.Complete) await actions.CompleteAsync(action.OccurrenceId, CancellationToken.None);
+            else if (action.Action == NotificationAction.Ignore) await actions.IgnoreAsync(action.OccurrenceId, CancellationToken.None);
+            else await actions.SnoozeAsync(action.OccurrenceId, TimeSpan.FromMinutes(10), CancellationToken.None);
+            return;
+        }
+        if (arguments == "section=missed") await navigator.NavigateAsync(new NotificationNavigation("missed", null), CancellationToken.None);
+        else if (arguments.StartsWith("section=timeline&occurrenceId=", StringComparison.Ordinal) && Guid.TryParseExact(arguments[30..], "D", out var id)) await navigator.NavigateAsync(new NotificationNavigation("timeline", id), CancellationToken.None);
+    }
+}
+
+/// <summary>Bridges the Windows App SDK activation lifetime into the testable router source.</summary>
+public sealed class WindowsAppNotificationActivationSource : INotificationActivationSource
+{
+    public event Func<string, Task>? Invoked;
+    public void Register() => AppNotificationManager.Default.NotificationInvoked += OnNotificationInvoked;
+    public void Unregister() => AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked;
+
+    private void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
+    {
+        var handlers = Invoked;
+        if (handlers is null) return;
+        foreach (Func<string, Task> handler in handlers.GetInvocationList())
+        {
+            _ = ObserveAsync(handler, string.Join("&", args.Arguments.Select(pair => pair.Key + "=" + pair.Value)));
+        }
+    }
+
+    private static async Task ObserveAsync(Func<string, Task> handler, string arguments)
+    {
+        try { await handler(arguments).ConfigureAwait(false); }
+        catch { }
     }
 }
