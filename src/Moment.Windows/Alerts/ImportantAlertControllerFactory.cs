@@ -6,5 +6,18 @@ namespace Moment.Windows.Alerts;
 public static class ImportantAlertControllerFactory
 {
     public static ImportantAlertController Create(IImportantAlertPresenter presenter, IReminderActionService actions, ILoopingAudioPlayer? player = null) =>
-        new(presenter, actions, new ImportantAlertAudio(player ?? new WindowsLoopingAudioPlayer()));
+        new(presenter, actions, CreateAudio(player));
+
+    public static ImportantAlertController CreatePresenterManaged(
+        IImportantAlertPresenter presenter,
+        IReminderActionService actions) =>
+        new(presenter, actions);
+
+    public static IImportantAlertAudio CreateAudio(
+        ILoopingAudioPlayer? player = null,
+        Func<Stream>? defaultWave = null) =>
+        defaultWave is null
+            ? new ImportantAlertAudio(player ?? new WindowsLoopingAudioPlayer())
+            : new ImportantAlertAudio(
+                player ?? new WindowsLoopingAudioPlayer(), defaultWave);
 }

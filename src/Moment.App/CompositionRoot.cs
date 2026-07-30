@@ -1,4 +1,6 @@
+using Moment.App.Alerts;
 using Moment.App.QuickAdd;
+using Moment.App.Settings;
 using Moment.App.Shell;
 using Moment.App.Timeline;
 using Moment.Core.Abstractions;
@@ -12,6 +14,9 @@ using Moment.Windows.Alerts;
 using Moment.Windows.Hotkeys;
 using Moment.Windows.Lifecycle;
 using Moment.Windows.Notifications;
+using Moment.Windows.Startup;
+using System.IO;
+using System.Reflection;
 
 namespace Moment.App;
 
@@ -27,6 +32,10 @@ public sealed class CompositionRoot : IAsyncDisposable
     private readonly TrayIconController _tray;
     private readonly IReminderService _reminderService;
     private readonly IClock _clock;
+    private readonly AppNotificationSink _notificationSink;
+    private readonly ImportantAlertWindowPresenter _importantAlertPresenter;
+    private readonly string _dataFolder;
+    private SettingsView? _settingsWindow;
     private bool _started;
     private int _disposed;
 
@@ -41,6 +50,10 @@ public sealed class CompositionRoot : IAsyncDisposable
         TrayIconController tray,
         IReminderService reminderService,
         IClock clock,
+        AppNotificationSink notificationSink,
+        ImportantAlertWindowPresenter importantAlertPresenter,
+        string dataFolder,
+        SettingsViewModel settings,
         TimelineViewModel timeline,
         QuickAddViewModel quickAdd,
         MainWindow mainWindow,
@@ -56,6 +69,10 @@ public sealed class CompositionRoot : IAsyncDisposable
         _tray = tray;
         _reminderService = reminderService;
         _clock = clock;
+        _notificationSink = notificationSink;
+        _importantAlertPresenter = importantAlertPresenter;
+        _dataFolder = dataFolder;
+        Settings = settings;
         Timeline = timeline;
         QuickAdd = quickAdd;
         MainWindow = mainWindow;
@@ -64,6 +81,7 @@ public sealed class CompositionRoot : IAsyncDisposable
 
     public TimelineViewModel Timeline { get; }
     public QuickAddViewModel QuickAdd { get; }
+    public SettingsViewModel Settings { get; }
     public MainWindow MainWindow { get; }
     public QuickAddWindowController QuickAddWindow { get; }
     public event Action<Exception>? RuntimeError;
@@ -74,12 +92,24 @@ public sealed class CompositionRoot : IAsyncDisposable
         var zone = TimeZoneInfo.Local;
         var databasePath = DatabasePathResolver.Resolve(AppContext.BaseDirectory);
         var repository = await SqliteReminderRepository.OpenAsync(databasePath, ct);
+        var settingsStore = new SqliteSettingsStore(databasePath);
+        var hotkey = new GlobalHotkeyService();
+        var executablePath = Environment.ProcessPath
+            ?? Assembly.GetExecutingAssembly().Location;
+        var settings = new SettingsViewModel(
+            hotkey, settingsStore, new StartupRegistrationService(), executablePath);
+        await settings.LoadAsync(ct);
 
         var schedulerSignal = new SchedulerSignalProxy();
         var recurrence = new RecurrenceCalculator();
         var actions = new ReminderActionService(repository, recurrence, schedulerSignal, clock, zone);
-        var importantAlerts = ImportantAlertControllerFactory.Create(
-            new MessageBoxImportantAlertPresenter(), actions);
+        var importantAlertPresenter = new ImportantAlertWindowPresenter(
+            System.Windows.Application.Current.Dispatcher,
+            new WindowPlacementService(),
+            () => CreateAppAlertAudio(() => settings.AlertVolume),
+            () => settings.CustomAlertSoundPath);
+        var importantAlerts = ImportantAlertControllerFactory.CreatePresenterManaged(
+            importantAlertPresenter, actions);
         var notificationPlatform = new WindowsAppNotificationPlatform();
         var notificationSink = new AppNotificationSink(notificationPlatform, importantAlerts, actions);
         var scheduler = new ReminderScheduler(repository, notificationSink, clock);
@@ -104,7 +134,6 @@ public sealed class CompositionRoot : IAsyncDisposable
             scheduler.Refresh();
             return timeline.LoadAsync();
         });
-        var hotkey = new GlobalHotkeyService();
         var singleInstance = new SingleInstanceCoordinator();
 
         CompositionRoot? root = null;
@@ -117,7 +146,7 @@ public sealed class CompositionRoot : IAsyncDisposable
                 if (root is not null)
                     _ = root.CreateCountdownObservedAsync(delay);
             },
-            () => System.Windows.MessageBox.Show("设置", "时刻"),
+            () => root?.ShowSettings(),
             () =>
             {
                 if (root is not null)
@@ -128,7 +157,9 @@ public sealed class CompositionRoot : IAsyncDisposable
         root = new CompositionRoot(
             repository, scheduler, importantAlerts, notificationRuntime,
             resumeMonitor, hotkey, singleInstance, tray, reminders, clock,
-            timeline, quickAdd, mainWindow, quickWindow);
+            notificationSink, importantAlertPresenter,
+            Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory,
+            settings, timeline, quickAdd, mainWindow, quickWindow);
         return root;
     }
 
@@ -163,7 +194,14 @@ public sealed class CompositionRoot : IAsyncDisposable
         await _scheduler.StartAsync(ct);
         TryStart(_notificationRuntime.Start);
         TryStart(_resumeMonitor.Start);
-        TryStart(() => _hotkey.Register("Ctrl+Alt+Space"));
+        try
+        {
+            await Settings.SaveHotkeyAsync(Settings.Hotkey, ct);
+        }
+        catch (Exception exception)
+        {
+            OnRuntimeError(exception);
+        }
         await Timeline.LoadAsync();
         if (activation.Kind == InstanceActivationKind.ShowQuickAdd)
             QuickAddWindow.ShowAndFocus();
@@ -182,6 +220,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         _scheduler.DeliveryFailed -= OnDeliveryFailed;
         _tray.ErrorOccurred -= OnRuntimeError;
         _tray.Dispose();
+        _settingsWindow?.Close();
         _hotkey.Dispose();
         await _resumeMonitor.DisposeAsync();
         await _notificationRuntime.DisposeAsync();
@@ -243,6 +282,51 @@ public sealed class CompositionRoot : IAsyncDisposable
             new Action(System.Windows.Application.Current.Shutdown));
     }
 
+    private void ShowSettings()
+    {
+        if (_settingsWindow is { IsLoaded: true })
+        {
+            _settingsWindow.Show();
+            _settingsWindow.Activate();
+            return;
+        }
+
+        var testAlert = new ReminderAlert(
+            Guid.NewGuid(),
+            "这是一条重要提醒测试。",
+            DateTimeOffset.Now);
+        var view = new SettingsView(
+            Settings,
+            new SettingsViewActions(
+                CreateAppAlertAudio(() => Settings.AlertVolume),
+                _notificationSink.SendTestNotificationAsync,
+                async ct =>
+                {
+                    _ = await _importantAlertPresenter.ShowAsync(testAlert, ct);
+                },
+                _dataFolder));
+        view.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_settingsWindow, view))
+                _settingsWindow = null;
+        };
+        _settingsWindow = view;
+        view.Show();
+        view.Activate();
+    }
+
+    private static IImportantAlertAudio CreateAppAlertAudio(Func<int> volume) =>
+        ImportantAlertControllerFactory.CreateAudio(
+            new VolumeControlledLoopingAudioPlayer(
+                new WindowsLoopingAudioPlayer(), volume),
+            defaultWave: OpenAppDefaultAlertWave);
+
+    private static Stream OpenAppDefaultAlertWave() =>
+        Assembly.GetExecutingAssembly().GetManifestResourceStream(
+            "Moment.App.Assets.default-alert.wav")
+        ?? throw new InvalidOperationException(
+            "The embedded default-alert.wav resource is missing.");
+
     private sealed class SchedulerSignalProxy : ISchedulerSignal
     {
         public ISchedulerSignal? Target { get; set; }
@@ -258,22 +342,4 @@ public sealed class CompositionRoot : IAsyncDisposable
         }
     }
 
-    private sealed class MessageBoxImportantAlertPresenter : IImportantAlertPresenter
-    {
-        public async Task<ImportantAlertAction> ShowAsync(ReminderAlert alert, CancellationToken ct)
-        {
-            ct.ThrowIfCancellationRequested();
-            return await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-            {
-                var result = System.Windows.MessageBox.Show(
-                    $"{alert.Title}\n{alert.DueAt:HH:mm}\n\n选择“是”完成，选择“否”10分钟后提醒。",
-                    "重要提醒",
-                    System.Windows.MessageBoxButton.YesNo,
-                    System.Windows.MessageBoxImage.Exclamation);
-                return result == System.Windows.MessageBoxResult.Yes
-                    ? ImportantAlertAction.Complete
-                    : ImportantAlertAction.Snooze10;
-            });
-        }
-    }
 }

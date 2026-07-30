@@ -1,0 +1,154 @@
+<Window x:Class="Moment.App.Alerts.ImportantAlertWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+        xmlns:domain="clr-namespace:Moment.Core.Domain;assembly=Moment.Core"
+        Title="重要提醒"
+        Width="720"
+        SizeToContent="Height"
+        MinWidth="520"
+        MaxHeight="720"
+        WindowStartupLocation="Manual"
+        Topmost="True"
+        ShowInTaskbar="True"
+        Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+        Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+        automation:AutomationProperties.Name="重要提醒窗口"
+        Closing="OnClosing"
+        PreviewKeyDown="OnPreviewKeyDown">
+    <ScrollViewer x:Name="AlertScrollViewer"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Focusable="False">
+        <Grid x:Name="AlertContent" Margin="30">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Orientation="Horizontal">
+                <TextBlock Text="⚠" FontFamily="Segoe UI Symbol"
+                           FontSize="28" Margin="0,0,12,0"
+                           Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <TextBlock Text="重要提醒" FontSize="25" FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Margin="0,24,0,22">
+                <TextBlock x:Name="ReminderTitle"
+                           FontSize="30"
+                           FontWeight="SemiBold"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <TextBlock x:Name="DueTime"
+                           Margin="0,10,0,0"
+                           FontSize="18"
+                           Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+            </StackPanel>
+
+            <Border x:Name="AudioWarningPanel"
+                    Grid.Row="2"
+                    Visibility="Collapsed"
+                    Margin="0,0,0,18"
+                    Padding="12"
+                    BorderBrush="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+                    BorderThickness="1">
+                <TextBlock x:Name="AudioWarningText"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+            </Border>
+
+            <StackPanel Grid.Row="3">
+                <TextBlock Text="稍后提醒"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,10"
+                           Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
+                <UniformGrid Columns="4">
+                    <Button x:Name="Snooze5Button"
+                            Margin="0,0,8,8"
+                            Style="{StaticResource SecondaryButton}"
+                            Tag="{x:Static domain:ImportantAlertAction.Snooze5}"
+                            Click="OnActionClick"
+                            automation:AutomationProperties.Name="5 分钟后提醒">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="◷" Margin="0,0,8,0" />
+                            <TextBlock Text="5 分钟" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="Snooze10Button"
+                            Margin="0,0,8,8"
+                            Style="{StaticResource SecondaryButton}"
+                            Tag="{x:Static domain:ImportantAlertAction.Snooze10}"
+                            Click="OnActionClick"
+                            automation:AutomationProperties.Name="10 分钟后提醒">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="◷" Margin="0,0,8,0" />
+                            <TextBlock Text="10 分钟" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="Snooze30Button"
+                            Margin="0,0,8,8"
+                            Style="{StaticResource SecondaryButton}"
+                            Tag="{x:Static domain:ImportantAlertAction.Snooze30}"
+                            Click="OnActionClick"
+                            automation:AutomationProperties.Name="30 分钟后提醒">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="◷" Margin="0,0,8,0" />
+                            <TextBlock Text="30 分钟" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="Snooze60Button"
+                            Margin="0,0,0,8"
+                            Style="{StaticResource SecondaryButton}"
+                            Tag="{x:Static domain:ImportantAlertAction.Snooze60}"
+                            Click="OnActionClick"
+                            automation:AutomationProperties.Name="60 分钟后提醒">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="◷" Margin="0,0,8,0" />
+                            <TextBlock Text="60 分钟" />
+                        </StackPanel>
+                    </Button>
+                </UniformGrid>
+            </StackPanel>
+
+            <Grid Grid.Row="4" Margin="0,16,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="IgnoreButton"
+                        MinWidth="128"
+                        Style="{StaticResource SecondaryButton}"
+                        Tag="{x:Static domain:ImportantAlertAction.Ignore}"
+                        Click="OnActionClick"
+                        automation:AutomationProperties.Name="忽略提醒">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="⊘" Margin="0,0,8,0" />
+                        <TextBlock Text="忽略" />
+                    </StackPanel>
+                </Button>
+                <Button x:Name="CompleteButton"
+                        Grid.Column="2"
+                        MinWidth="148"
+                        IsDefault="True"
+                        Tag="{x:Static domain:ImportantAlertAction.Complete}"
+                        Click="OnActionClick"
+                        Background="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
+                        BorderBrush="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
+                        automation:AutomationProperties.Name="完成提醒">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="✓" Margin="0,0,8,0"
+                                   Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                        <TextBlock Text="完成"
+                                   Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Grid>
+    </ScrollViewer>
+</Window>

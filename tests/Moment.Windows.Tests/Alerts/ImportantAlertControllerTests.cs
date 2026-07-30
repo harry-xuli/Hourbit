@@ -121,6 +121,41 @@ public sealed class ImportantAlertControllerTests
         Assert.Equal(["ignore:" + alert.OccurrenceId], actions.Calls);
     }
 
+    [Fact]
+    public async Task Accepted_alert_does_not_complete_until_audio_cleanup_succeeds()
+    {
+        var audio = new BlockingStopAudio();
+        await using var controller = new ImportantAlertController(
+            new RecordingPresenter(ImportantAlertAction.Ignore),
+            new RecordingActions(), audio);
+
+        var completion = controller.EnqueueAsync(
+            TestData.Alert("A", dueMinute: 1), CancellationToken.None);
+        await audio.StopStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.False(completion.IsCompleted);
+        audio.ReleaseStop();
+        await completion;
+    }
+
+    [Fact]
+    public async Task Audio_cleanup_failure_is_reported_to_the_accepted_alert_caller()
+    {
+        var audio = new BlockingStopAudio(failStop: true);
+        await using var controller = new ImportantAlertController(
+            new RecordingPresenter(ImportantAlertAction.Ignore),
+            new RecordingActions(), audio);
+
+        var completion = controller.EnqueueAsync(
+            TestData.Alert("A", dueMinute: 1), CancellationToken.None);
+        await audio.StopStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        audio.ReleaseStop();
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => completion);
+        Assert.Equal("audio cleanup failed", error.Message);
+    }
+
     private sealed class RecordingPresenter(ImportantAlertAction action) : IImportantAlertPresenter
     {
         private int _active;
@@ -172,6 +207,26 @@ public sealed class ImportantAlertControllerTests
         }
         public Task StartDefaultLoopAsync(CancellationToken ct) { Calls.Add("default"); return Task.CompletedTask; }
         public Task StopAsync(CancellationToken ct) { Calls.Add("stop"); return Task.CompletedTask; }
+    }
+
+    private sealed class BlockingStopAudio(bool failStop = false) : IImportantAlertAudio
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource StopStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task StartCustomLoopAsync(string audioPath, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task StartDefaultLoopAsync(CancellationToken ct) =>
+            Task.CompletedTask;
+        public async Task StopAsync(CancellationToken ct)
+        {
+            StopStarted.TrySetResult();
+            await _release.Task;
+            if (failStop)
+                throw new InvalidOperationException("audio cleanup failed");
+        }
+        public void ReleaseStop() => _release.TrySetResult();
     }
 
     private sealed class RecordingActions : IReminderActionService

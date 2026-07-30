@@ -67,10 +67,26 @@ public sealed class WindowsLoopingAudioPlayer : ILoopingAudioPlayer
 }
 
 /// <summary>Production audio service that owns the active stream for the duration of a loop.</summary>
-public sealed class ImportantAlertAudio(ILoopingAudioPlayer player) : IImportantAlertAudio, IAsyncDisposable
+public sealed class ImportantAlertAudio : IImportantAlertAudio, IAsyncDisposable
 {
     private const string DefaultResourceName = "Moment.Windows.Assets.default-alert.wav";
+    private readonly ILoopingAudioPlayer _player;
+    private readonly Func<Stream> _openDefaultWave;
     private Stream? _activeWave;
+
+    public ImportantAlertAudio(ILoopingAudioPlayer player)
+        : this(player, OpenBundledDefaultWave)
+    {
+    }
+
+    public ImportantAlertAudio(
+        ILoopingAudioPlayer player,
+        Func<Stream> openDefaultWave)
+    {
+        _player = player ?? throw new ArgumentNullException(nameof(player));
+        _openDefaultWave = openDefaultWave
+            ?? throw new ArgumentNullException(nameof(openDefaultWave));
+    }
 
     public async Task StartCustomLoopAsync(string audioPath, CancellationToken ct)
     {
@@ -85,11 +101,11 @@ public sealed class ImportantAlertAudio(ILoopingAudioPlayer player) : IImportant
     }
 
     public Task StartDefaultLoopAsync(CancellationToken ct) =>
-        StartAsync(OpenDefaultWave, ct);
+        StartAsync(_openDefaultWave, ct);
 
     public async Task StopAsync(CancellationToken ct)
     {
-        await player.StopAsync(ct).ConfigureAwait(false);
+        await _player.StopAsync(ct).ConfigureAwait(false);
         _activeWave?.Dispose();
         _activeWave = null;
     }
@@ -105,7 +121,7 @@ public sealed class ImportantAlertAudio(ILoopingAudioPlayer player) : IImportant
         var wave = openWave();
         try
         {
-            await player.StartLoopAsync(wave, ct).ConfigureAwait(false);
+            await _player.StartLoopAsync(wave, ct).ConfigureAwait(false);
             _activeWave = wave;
         }
         catch
@@ -115,7 +131,7 @@ public sealed class ImportantAlertAudio(ILoopingAudioPlayer player) : IImportant
         }
     }
 
-    private static Stream OpenDefaultWave()
+    private static Stream OpenBundledDefaultWave()
     {
         using var encoded = Assembly.GetExecutingAssembly().GetManifestResourceStream(DefaultResourceName)
             ?? throw new InvalidOperationException("The embedded default-alert.wav resource is missing.");

@@ -23,6 +23,20 @@ public sealed class ImportantAlertAudioTests
         Assert.Equal(1, player.StopCount);
     }
 
+    [Fact]
+    public async Task Application_supplied_default_wave_is_used_for_playback()
+    {
+        var player = new HeaderRecordingPlayer();
+        await using var audio = new ImportantAlertAudio(
+            player,
+            () => new MemoryStream(
+                Encoding.ASCII.GetBytes("RIFF-app-wave"), writable: false));
+
+        await audio.StartDefaultLoopAsync(CancellationToken.None);
+
+        Assert.Equal("RIFF", player.Header);
+    }
+
     private sealed class FailingFirstPlayer : ILoopingAudioPlayer
     {
         public int StartAttempts { get; private set; }
@@ -47,5 +61,17 @@ public sealed class ImportantAlertAudioTests
             StopCount++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class HeaderRecordingPlayer : ILoopingAudioPlayer
+    {
+        public string? Header { get; private set; }
+        public async Task StartLoopAsync(Stream wave, CancellationToken ct)
+        {
+            var header = new byte[4];
+            _ = await wave.ReadAsync(header, ct);
+            Header = Encoding.ASCII.GetString(header);
+        }
+        public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
     }
 }

@@ -150,10 +150,12 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
 
     private async Task PresentAsync(PendingAlert pending, CancellationToken ct)
     {
+        Exception? failure = null;
+        var cancelled = false;
         try
         {
             await StartAudioAsync(pending.Alert, ct).ConfigureAwait(false);
-            ImportantAlertAction action;
+            ImportantAlertAction? action = null;
             try
             {
                 action = await _presenter.ShowAsync(pending.Alert, ct).ConfigureAwait(false);
@@ -161,34 +163,41 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 ReportPresentationFailure(new ImportantAlertFailure(pending.Alert, exception));
-                pending.Completion.TrySetResult();
-                return;
             }
-
-            await ApplyActionAsync(pending.Alert.OccurrenceId, action, ct).ConfigureAwait(false);
-            pending.Completion.TrySetResult();
+            if (action is { } selectedAction)
+                await ApplyActionAsync(pending.Alert.OccurrenceId, selectedAction, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            pending.Completion.TrySetCanceled(ct);
-            throw;
+            cancelled = true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            pending.Completion.TrySetException(exception);
+            failure = exception;
         }
-        finally
+
+        try
         {
-            try
-            {
-                // Teardown must not be skipped just because the controller lifetime was cancelled.
-                await _audio.StopAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                pending.Completion.TrySetException(exception);
-            }
+            // Teardown must not be skipped just because the controller lifetime was cancelled.
+            await _audio.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            failure = failure is null
+                ? exception
+                : new AggregateException(failure, exception);
+        }
+
+        if (cancelled)
+        {
+            pending.Completion.TrySetCanceled(ct);
+            throw new OperationCanceledException(ct);
+        }
+
+        if (failure is not null)
+            pending.Completion.TrySetException(failure);
+        else
+            pending.Completion.TrySetResult();
     }
 
     private async Task StartAudioAsync(ReminderAlert alert, CancellationToken ct)

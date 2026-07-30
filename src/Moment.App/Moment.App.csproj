@@ -12,4 +12,7 @@
     <ProjectReference Include="..\Moment.Infrastructure\Moment.Infrastructure.csproj" />
     <ProjectReference Include="..\Moment.Windows\Moment.Windows.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\default-alert.wav" />
+  </ItemGroup>
 </Project>
