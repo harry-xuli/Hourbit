@@ -1,5 +1,6 @@
-using System.Media;
+using System.ComponentModel;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace Moment.Windows.Alerts;
 
@@ -12,22 +13,56 @@ public interface ILoopingAudioPlayer
 
 public sealed class WindowsLoopingAudioPlayer : ILoopingAudioPlayer
 {
-    private SoundPlayer? _player;
+    private const uint Async = 0x0001;
+    private const uint NoDefault = 0x0002;
+    private const uint Memory = 0x0004;
+    private const uint Loop = 0x0008;
+    private readonly object _gate = new();
+    private GCHandle? _wave;
 
     public Task StartLoopAsync(Stream wave, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _player = new SoundPlayer(wave);
-        _player.PlayLooping();
+        using var copy = new MemoryStream();
+        wave.CopyTo(copy);
+        var bytes = copy.ToArray();
+        lock (_gate)
+        {
+            StopCore();
+            var pinned = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+            _wave = pinned;
+            if (!NativeMethods.PlaySound(pinned.AddrOfPinnedObject(), IntPtr.Zero, Async | NoDefault | Memory | Loop))
+            {
+                StopCore();
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not play the reminder sound.");
+            }
+        }
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        _player?.Stop();
-        _player = null;
+        lock (_gate)
+            StopCore();
         return Task.CompletedTask;
+    }
+
+    private void StopCore()
+    {
+        NativeMethods.PlaySound(IntPtr.Zero, IntPtr.Zero, 0);
+        if (_wave is { } pinned)
+        {
+            pinned.Free();
+            _wave = null;
+        }
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("winmm.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool PlaySound(IntPtr sound, IntPtr module, uint flags);
     }
 }
 
