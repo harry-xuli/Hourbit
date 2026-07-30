@@ -344,3 +344,69 @@ Fresh final results after the last XAML change:
 The final Quick Add scroll-only XAML change was followed by a fresh App 35/35 run and full Release
 build. Core, Infrastructure, and Windows had already passed in Release after all changes to their
 consumed contracts; no Task 7/8 mechanics were modified.
+
+## Fix round 2 — Coordinated timeline selection
+
+**Base:** `cc740576924e1bf9a02102e67ce58649cb657df7`
+
+### Root cause
+
+The three fixed timeline groups are three independent WPF `ListBox` instances. Their shared
+`SelectionChanged` handler forwarded a newly selected row from the view to
+`TimelineViewModel.SelectedItem`, but there was no reverse projection from the view model to the
+lists and no clearing of a selection retained by either of the other two lists.
+
+This produced two related inconsistencies:
+
+- the initial selection assigned by `LoadAsync` had no visible selected row;
+- selecting a row in another group left the previous group highlighted, even though commands used
+  only the newest view-model selection.
+
+### Fix
+
+`TimelineView` now coordinates the lists as one logical selection:
+
+- while loaded, it observes `TimelineViewModel.SelectedItem`;
+- it selects that item only in the list that contains it and clears the other group lists;
+- it performs the same synchronization after a row-originated selection;
+- a reentrancy guard prevents the programmatic clears from feeding back through
+  `SelectionChanged`;
+- data-context subscriptions are replaced on change and detached when the view unloads.
+
+No command behavior, grouping, ordering, or timeline data contract changed.
+
+### Deterministic WPF regression coverage
+
+`tests/Moment.App.Tests/Timeline/TimelineViewTests.cs` now exercises the shown real WPF view for:
+
+1. the initial view-model selection being visible in exactly one group;
+2. switching from “已错过” to “接下来” clearing the previous group's visual selection;
+3. a view-model-projected “接下来” selection remaining the single visible target and supplying
+   the exact occurrence ID to `CompleteCommand`.
+
+TDD evidence:
+
+- Initial RED showed the missing initial and command-target projections:
+  `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj -c Release --filter FullyQualifiedName~TimelineViewTests --verbosity minimal`
+  → FAIL 2, PASS 3.
+- The cross-group fixture was then made independent of initial projection by explicitly selecting
+  the first group's row before switching. Final RED with unchanged product code:
+  the identical command → FAIL 3, PASS 2.
+- GREEN after the coordinated-selection implementation:
+  the identical command → PASS 5/5.
+
+### Fix-round final verification
+
+Fresh results after the final lifecycle self-review:
+
+- focused `TimelineViewTests`: PASS, 5/5;
+- `dotnet test tests\Moment.App.Tests\Moment.App.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 38/38;
+- `dotnet test tests\Moment.Core.Tests\Moment.Core.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 78/78;
+- `dotnet test tests\Moment.Infrastructure.Tests\Moment.Infrastructure.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 19/19;
+- `dotnet test tests\Moment.Windows.Tests\Moment.Windows.Tests.csproj -c Release --verbosity minimal`:
+  PASS, 78/78;
+- `dotnet build Moment.slnx -c Release --verbosity minimal`:
+  PASS, 0 warnings and 0 errors.

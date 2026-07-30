@@ -50,6 +50,64 @@ public sealed class TimelineViewTests
             Assert.Equal([0, 0, 1], rowLists.Select(list => list.Items.Count));
         });
 
+    [Fact]
+    public Task Initial_view_model_selection_is_visible_in_exactly_one_group() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var viewModel = Create(TwoGroupQuery());
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+
+            var selected = Descendants<ListBox>(view)
+                .SelectMany(list => list.SelectedItems.Cast<TimelineItemViewModel>())
+                .ToArray();
+
+            var item = Assert.Single(selected);
+            Assert.Same(viewModel.SelectedItem, item);
+            Assert.Equal("已错过事项", item.Title);
+        });
+
+    [Fact]
+    public Task Selecting_an_item_in_another_group_clears_the_previous_group_selection() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var viewModel = Create(TwoGroupQuery());
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var rowLists = Descendants<ListBox>(view).ToArray();
+            var missed = viewModel.Items.Single(item => item.Title == "已错过事项");
+            var upcoming = viewModel.Items.Single(item => item.Title == "接下来事项");
+            var missedList = rowLists.Single(list => list.Items.Contains(missed));
+            var upcomingList = rowLists.Single(list => list.Items.Contains(upcoming));
+
+            missedList.SelectedItem = missed;
+            upcomingList.SelectedItem = upcoming;
+
+            Assert.Same(upcoming, viewModel.SelectedItem);
+            Assert.Null(missedList.SelectedItem);
+            Assert.Same(upcoming, Assert.Single(rowLists
+                .SelectMany(list => list.SelectedItems.Cast<TimelineItemViewModel>())));
+        });
+
+    [Fact]
+    public Task Complete_command_targets_the_single_selection_projected_from_the_view_model() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var actions = new ActionServiceStub();
+            var viewModel = Create(TwoGroupQuery(), actions);
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var upcoming = viewModel.Items.Single(item => item.Title == "接下来事项");
+
+            viewModel.SelectedItem = upcoming;
+
+            var visibleSelection = Assert.Single(Descendants<ListBox>(view)
+                .SelectMany(list => list.SelectedItems.Cast<TimelineItemViewModel>()));
+            Assert.Same(upcoming, visibleSelection);
+            viewModel.CompleteCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+            Assert.Equal([upcoming.OccurrenceId], actions.CompletedOccurrenceIds);
+        });
+
     private static TimelineView Show(TimelineViewModel viewModel)
     {
         var view = new TimelineView { DataContext = viewModel };
@@ -92,9 +150,17 @@ public sealed class TimelineViewTests
         }
     }
 
-    private static TimelineViewModel Create(ITimelineQuery query) =>
+    private static QueryStub TwoGroupQuery() =>
+        new(
+            TestData.Row("已错过事项", "2026-07-29T08:00:00+08:00",
+                OccurrenceState.Missed),
+            TestData.Row("接下来事项", "2026-07-29T10:00:00+08:00"));
+
+    private static TimelineViewModel Create(
+        ITimelineQuery query,
+        ActionServiceStub? actions = null) =>
         new(query, new FakeClock("2026-07-29T09:00:00+08:00"),
-            new ReminderServiceStub(), new ActionServiceStub(), new DialogStub(),
+            new ReminderServiceStub(), actions ?? new ActionServiceStub(), new DialogStub(),
             TimeZoneInfo.CreateCustomTimeZone(
                 "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
 
@@ -117,7 +183,14 @@ public sealed class TimelineViewTests
 
     private sealed class ActionServiceStub : IReminderActionService
     {
-        public Task CompleteAsync(Guid occurrenceId, CancellationToken ct) => Task.CompletedTask;
+        public List<Guid> CompletedOccurrenceIds { get; } = [];
+
+        public Task CompleteAsync(Guid occurrenceId, CancellationToken ct)
+        {
+            CompletedOccurrenceIds.Add(occurrenceId);
+            return Task.CompletedTask;
+        }
+
         public Task IgnoreAsync(Guid occurrenceId, CancellationToken ct) => Task.CompletedTask;
         public Task<ReminderOccurrence> SnoozeAsync(
             Guid occurrenceId, TimeSpan delay, CancellationToken ct) =>
