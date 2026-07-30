@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Moment.App.QuickAdd;
+using Moment.App.Styles;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
@@ -105,6 +106,7 @@ public sealed class QuickAddWindowTests
                 DataContext = CreateWithoutTestSupport()
             };
             ApplyDarkPalette(window);
+            HighContrastPalette.Apply(window.Resources, true, window.FindResource);
             window.Show();
             window.UpdateLayout();
 
@@ -113,6 +115,12 @@ public sealed class QuickAddWindowTests
             var footer = Assert.IsType<Border>(
                 window.FindName("QuickAddFooter"));
             AssertBrush(Colors.DarkSlateGray, footer.Background);
+            var footerText = Assert.IsType<TextBlock>(
+                window.FindName("QuickAddFooterText"));
+            AssertBrush(Colors.White, footerText.Foreground);
+            Assert.True(ContrastRatio(
+                ((SolidColorBrush)footerText.Foreground).Color,
+                ((SolidColorBrush)footer.Background).Color) >= 4.5);
             window.Close();
         });
 
@@ -212,4 +220,26 @@ public sealed class QuickAddWindowTests
 
     private static void AssertBrush(Color expected, Brush actual) =>
         Assert.Equal(expected, Assert.IsType<SolidColorBrush>(actual).Color);
+
+    private static double ContrastRatio(Color first, Color second)
+    {
+        static double Luminance(Color color)
+        {
+            static double Channel(byte value)
+            {
+                var normalized = value / 255d;
+                return normalized <= 0.04045
+                    ? normalized / 12.92
+                    : Math.Pow((normalized + 0.055) / 1.055, 2.4);
+            }
+
+            return (0.2126 * Channel(color.R)) +
+                   (0.7152 * Channel(color.G)) +
+                   (0.0722 * Channel(color.B));
+        }
+
+        var a = Luminance(first);
+        var b = Luminance(second);
+        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+    }
 }

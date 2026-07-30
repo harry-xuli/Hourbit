@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Interop;
 
 namespace Moment.App.Shell;
 
@@ -8,67 +9,95 @@ public sealed record MonitorGeometry(
     double DpiScaleX,
     double DpiScaleY)
 {
-    public Rect ToDeviceIndependentWorkingArea()
+    public System.Windows.Size DeviceIndependentWorkingAreaSize()
     {
         if (DpiScaleX <= 0 || DpiScaleY <= 0)
             throw new ArgumentOutOfRangeException(nameof(DpiScaleX));
-        return new Rect(
-            PhysicalWorkingArea.Left / DpiScaleX,
-            PhysicalWorkingArea.Top / DpiScaleY,
+        return new System.Windows.Size(
             PhysicalWorkingArea.Width / DpiScaleX,
             PhysicalWorkingArea.Height / DpiScaleY);
     }
 }
 
+internal readonly record struct PhysicalWindowBounds(
+    int X, int Y, int Width, int Height);
+
+internal interface IPhysicalWindowPositioner
+{
+    void SetPosition(Window window, PhysicalWindowBounds bounds);
+}
+
 public sealed class WindowPlacementService
 {
     private readonly Func<MonitorGeometry> _targetMonitor;
+    private readonly IPhysicalWindowPositioner _positioner;
 
     public WindowPlacementService()
-        : this(CurrentTargetMonitor)
+        : this(CurrentTargetMonitor, new NativePhysicalWindowPositioner())
     {
     }
 
     public WindowPlacementService(Func<Rect> workingArea)
-        : this(() => new MonitorGeometry(workingArea(), 1, 1))
+        : this(
+            () => new MonitorGeometry(workingArea(), 1, 1),
+            new DeviceIndependentWindowPositioner())
     {
     }
 
-    public WindowPlacementService(Func<MonitorGeometry> targetMonitor) =>
+    public WindowPlacementService(Func<MonitorGeometry> targetMonitor)
+        : this(targetMonitor, new NativePhysicalWindowPositioner())
+    {
+    }
+
+    internal WindowPlacementService(
+        Func<MonitorGeometry> targetMonitor,
+        IPhysicalWindowPositioner positioner)
+    {
         _targetMonitor = targetMonitor ??
             throw new ArgumentNullException(nameof(targetMonitor));
+        _positioner = positioner ??
+            throw new ArgumentNullException(nameof(positioner));
+    }
 
     public void Place(Window window)
     {
         ArgumentNullException.ThrowIfNull(window);
-        var area = _targetMonitor().ToDeviceIndependentWorkingArea();
-        if (area.Width <= 0 || area.Height <= 0)
+        var monitor = _targetMonitor();
+        var physicalArea = monitor.PhysicalWorkingArea;
+        var available = monitor.DeviceIndependentWorkingAreaSize();
+        if (available.Width <= 0 || available.Height <= 0)
             return;
 
-        window.MinWidth = Math.Min(window.MinWidth, area.Width);
-        window.MinHeight = Math.Min(window.MinHeight, area.Height);
-        window.MaxWidth = area.Width;
-        window.MaxHeight = area.Height;
-        if (double.IsNaN(window.Width) || window.Width > area.Width)
-            window.Width = area.Width;
-        if (double.IsNaN(window.Height) || window.Height > area.Height)
-            window.Height = area.Height;
+        window.MinWidth = Math.Min(window.MinWidth, available.Width);
+        window.MinHeight = Math.Min(window.MinHeight, available.Height);
+        window.MaxWidth = available.Width;
+        window.MaxHeight = available.Height;
+        if (double.IsNaN(window.Width) || window.Width > available.Width)
+            window.Width = available.Width;
+        if (double.IsNaN(window.Height) || window.Height > available.Height)
+            window.Height = available.Height;
 
         window.UpdateLayout();
-        var width = Math.Min(
+        var widthDip = Math.Min(
             window.ActualWidth > 0 ? window.ActualWidth : window.Width,
-            area.Width);
-        var height = Math.Min(
+            available.Width);
+        var heightDip = Math.Min(
             window.ActualHeight > 0 ? window.ActualHeight : window.Height,
-            area.Height);
-        window.Left = Math.Clamp(
-            area.Left + ((area.Width - width) / 2),
-            area.Left,
-            area.Right - width);
-        window.Top = Math.Clamp(
-            area.Top + ((area.Height - height) / 2),
-            area.Top,
-            area.Bottom - height);
+            available.Height);
+        var width = Math.Min(
+            (int)Math.Round(widthDip * monitor.DpiScaleX),
+            (int)Math.Round(physicalArea.Width));
+        var height = Math.Min(
+            (int)Math.Round(heightDip * monitor.DpiScaleY),
+            (int)Math.Round(physicalArea.Height));
+        var left = (int)Math.Round(
+            physicalArea.Left + ((physicalArea.Width - width) / 2));
+        var top = (int)Math.Round(
+            physicalArea.Top + ((physicalArea.Height - height) / 2));
+
+        _positioner.SetPosition(
+            window,
+            new PhysicalWindowBounds(left, top, width, height));
     }
 
     private static MonitorGeometry CurrentTargetMonitor()
@@ -100,6 +129,34 @@ public sealed class WindowPlacementService
             scaleY);
     }
 
+    private sealed class NativePhysicalWindowPositioner : IPhysicalWindowPositioner
+    {
+        public void SetPosition(Window window, PhysicalWindowBounds bounds)
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException(
+                    "The window must be shown before it can be positioned.");
+            if (!NativeMethods.SetWindowPos(
+                    handle, IntPtr.Zero, bounds.X, bounds.Y,
+                    bounds.Width, bounds.Height, 0x0004 | 0x0010))
+            {
+                throw new InvalidOperationException(
+                    "Windows could not position the window on the target monitor.");
+            }
+        }
+    }
+
+    private sealed class DeviceIndependentWindowPositioner
+        : IPhysicalWindowPositioner
+    {
+        public void SetPosition(Window window, PhysicalWindowBounds bounds)
+        {
+            window.Left = bounds.X;
+            window.Top = bounds.Y;
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct Point(int X, int Y);
 
@@ -124,24 +181,20 @@ public sealed class WindowPlacementService
     private static class NativeMethods
     {
         [DllImport("user32.dll")]
-        internal static extern IntPtr MonitorFromPoint(
-            Point point,
-            uint flags);
+        internal static extern IntPtr MonitorFromPoint(Point point, uint flags);
 
-        [DllImport(
-            "user32.dll",
-            EntryPoint = "GetMonitorInfoW",
-            SetLastError = true)]
+        [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
-        internal static extern bool GetMonitorInfo(
-            IntPtr monitor,
-            ref MonitorInfo info);
+        internal static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
 
         [DllImport("shcore.dll")]
         internal static extern int GetDpiForMonitor(
-            IntPtr monitor,
-            int dpiType,
-            out uint dpiX,
-            out uint dpiY);
+            IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool SetWindowPos(
+            IntPtr window, IntPtr insertAfter, int x, int y,
+            int width, int height, uint flags);
     }
 }

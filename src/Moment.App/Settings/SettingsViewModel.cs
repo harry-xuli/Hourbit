@@ -115,8 +115,7 @@ public sealed class SettingsViewModel : ObservableObject
         }
 
         var previousHotkey = Hotkey;
-        var desired = new AppSettings(
-            hotkey, StartWithWindows, AlertVolume, CustomAlertSoundPath);
+        var desired = _persisted with { Hotkey = hotkey };
         try
         {
             await _store.SaveAsync(desired, ct);

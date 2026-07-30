@@ -19,7 +19,7 @@
             <RowDefinition Height="48" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1">
+        <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <Grid Margin="30,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -36,22 +36,22 @@
                            Text="{Binding ProductName}"
                            FontSize="36"
                            FontWeight="SemiBold"
-                           Foreground="{StaticResource AccentBrush}"
+                           Foreground="{DynamicResource AccentBrush}"
                            VerticalAlignment="Center" />
-                <Border Grid.Column="1" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0" Margin="17,24" />
+                <Border Grid.Column="1" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="17,24" />
                 <TextBlock Grid.Column="2" Text="{Binding DateText}" FontSize="22" VerticalAlignment="Center" />
-                <Border Grid.Column="3" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
+                <Border Grid.Column="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="◷" FontFamily="Segoe UI Symbol" FontSize="23" Margin="0,0,10,0" />
                     <TextBlock Text="下一个提醒" VerticalAlignment="Center" Margin="0,0,10,0" />
-                    <TextBlock Text="{Binding NextReminderText}" Foreground="{StaticResource AccentBrush}"
+                    <TextBlock Text="{Binding NextReminderText}" Foreground="{DynamicResource AccentBrush}"
                                FontWeight="SemiBold" VerticalAlignment="Center" />
                 </StackPanel>
-                <Border Grid.Column="5" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
+                <Border Grid.Column="5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
                 <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock Text="✓" FontFamily="Segoe UI Symbol" FontSize="22" Margin="0,0,10,0" />
                     <TextBlock Text="今日完成" VerticalAlignment="Center" Margin="0,0,10,0" />
-                    <TextBlock Text="{Binding CompletedCount}" Foreground="{StaticResource AccentBrush}"
+                    <TextBlock Text="{Binding CompletedCount}" Foreground="{DynamicResource AccentBrush}"
                                FontWeight="SemiBold" VerticalAlignment="Center" />
                 </StackPanel>
                 <Button x:Name="NewReminderButton"
@@ -75,11 +75,11 @@
                 <ColumnDefinition Width="132" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
                 <StackPanel HorizontalAlignment="Center" Margin="0,82,0,0">
                     <TextBlock Text="{Binding MonthText}" FontSize="17" HorizontalAlignment="Center" />
                     <TextBlock Text="{Binding DayText}" FontSize="43" FontWeight="SemiBold"
-                               Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center" />
+                               Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" />
                     <TextBlock Text="{Binding WeekdayText}" FontSize="17" HorizontalAlignment="Center" />
                 </StackPanel>
             </Border>
@@ -100,11 +100,11 @@
                             <ColumnDefinition Width="1.05*" />
                             <ColumnDefinition Width="1.1*" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="时间" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="提醒" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Text="重复" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Text="重要性" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="4" Text="状态" Foreground="{StaticResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TimelineHeaderText" Grid.Column="0" Text="时间" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="提醒" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="重复" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="3" Text="重要性" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="4" Text="状态" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
                     </Grid>
                 </Border>
 
@@ -130,7 +130,7 @@
                                 </Style.Triggers>
                             </Style>
                         </Border.Style>
-                        <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource MissedBrush}" />
+                        <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource MissedBrush}" />
                     </Border>
 
                     <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -149,7 +149,7 @@
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
                                             <Border x:Name="GroupMarker" Width="26" Height="26" CornerRadius="13"
-                                                    Background="{StaticResource AccentBrush}"
+                                                    Background="{DynamicResource AccentBrush}"
                                                     HorizontalAlignment="Center" VerticalAlignment="Center">
                                                 <TextBlock x:Name="GroupSymbol" Text="◷" Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"
                                                            FontFamily="Segoe UI Symbol" FontSize="14"
@@ -158,7 +158,7 @@
                                             <TextBlock x:Name="GroupName" Grid.Column="1"
                                                        Text="{Binding Name}"
                                                        automation:AutomationProperties.Name="{Binding Name, StringFormat=时间线分组：{0}}"
-                                                       Foreground="{StaticResource AccentBrush}"
+                                                       Foreground="{DynamicResource AccentBrush}"
                                                        FontSize="20" FontWeight="SemiBold"
                                                        VerticalAlignment="Center" Margin="8,0,0,0" />
                                         </Grid>
@@ -181,7 +181,7 @@
                                             </ListBox.ItemsPanel>
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
-                                                    <Border BorderBrush="{StaticResource BorderBrush}"
+                                                    <Border BorderBrush="{DynamicResource BorderBrush}"
                                                             BorderThickness="0,0,0,1"
                                                             MinHeight="64" Padding="28,0,8,0"
                                                             automation:AutomationProperties.Name="{Binding Title}">
@@ -199,21 +199,22 @@
                                                             <StackPanel Grid.Column="1" Orientation="Horizontal"
                                                                         VerticalAlignment="Center">
                                                                 <Border Width="42" Height="42"
-                                                                        BorderBrush="{StaticResource BorderBrush}"
+                                                                        BorderBrush="{DynamicResource BorderBrush}"
                                                                         BorderThickness="1" CornerRadius="5"
                                                                         Margin="0,0,16,0">
-                                                                    <TextBlock Text="{Binding KindSymbol}"
+                                                                    <TextBlock x:Name="KindSymbol"
+                                                                               Text="{Binding KindSymbol}"
                                                                                FontFamily="Segoe UI Symbol"
                                                                                FontSize="20"
                                                                                HorizontalAlignment="Center"
                                                                                VerticalAlignment="Center" />
                                                                 </Border>
-                                                                <TextBlock Text="{Binding Title}" FontSize="18"
+                                                                <TextBlock x:Name="Title" Text="{Binding Title}" FontSize="18"
                                                                            FontWeight="SemiBold"
                                                                            TextTrimming="CharacterEllipsis"
                                                                            VerticalAlignment="Center" />
                                                             </StackPanel>
-                                                            <TextBlock Grid.Column="2"
+                                                            <TextBlock x:Name="Recurrence" Grid.Column="2"
                                                                        Text="{Binding RecurrenceDisplay}"
                                                                        TextTrimming="CharacterEllipsis"
                                                                        VerticalAlignment="Center" />
@@ -221,7 +222,7 @@
                                                                         VerticalAlignment="Center">
                                                                 <TextBlock x:Name="ImportanceSymbol"
                                                                            Text="{Binding ImportanceSymbol}"
-                                                                           Foreground="{StaticResource SecondaryTextBrush}"
+                                                                           Foreground="{DynamicResource SecondaryTextBrush}"
                                                                            FontWeight="Bold" Margin="0,0,10,0" />
                                                                 <TextBlock x:Name="Importance"
                                                                            Text="{Binding ImportanceText}" />
@@ -231,36 +232,55 @@
                                                                 <TextBlock x:Name="StatusSymbol"
                                                                            Text="{Binding StatusSymbol}"
                                                                            FontFamily="Segoe UI Symbol"
-                                                                           Foreground="{StaticResource AccentBrush}"
+                                                                           Foreground="{DynamicResource AccentBrush}"
                                                                            FontSize="18" Margin="0,0,10,0" />
                                                                 <TextBlock x:Name="Status"
                                                                            Text="{Binding StatusText}"
-                                                                           Foreground="{StaticResource AccentBrush}" />
+                                                                           Foreground="{DynamicResource AccentBrush}" />
                                                             </StackPanel>
                                                         </Grid>
                                                     </Border>
                                                     <DataTemplate.Triggers>
                                                         <DataTrigger Binding="{Binding ImportanceText}" Value="重要">
                                                             <Setter TargetName="ImportanceSymbol" Property="Foreground"
-                                                                    Value="{StaticResource ImportantBrush}" />
+                                                                    Value="{DynamicResource ImportantBrush}" />
                                                             <Setter TargetName="Importance" Property="Foreground"
-                                                                    Value="{StaticResource ImportantBrush}" />
+                                                                    Value="{DynamicResource ImportantBrush}" />
                                                             <Setter TargetName="Importance" Property="FontWeight"
                                                                     Value="SemiBold" />
                                                         </DataTrigger>
                                                         <DataTrigger Binding="{Binding GroupName}" Value="已错过">
                                                             <Setter TargetName="Time" Property="Foreground"
-                                                                    Value="{StaticResource MissedBrush}" />
+                                                                    Value="{DynamicResource MissedBrush}" />
                                                             <Setter TargetName="StatusSymbol" Property="Foreground"
-                                                                    Value="{StaticResource MissedBrush}" />
+                                                                    Value="{DynamicResource MissedBrush}" />
                                                             <Setter TargetName="Status" Property="Foreground"
-                                                                    Value="{StaticResource MissedBrush}" />
+                                                                    Value="{DynamicResource MissedBrush}" />
                                                         </DataTrigger>
                                                         <DataTrigger Binding="{Binding GroupName}" Value="已完成">
                                                             <Setter TargetName="StatusSymbol" Property="Foreground"
-                                                                    Value="{StaticResource CompletedBrush}" />
+                                                                    Value="{DynamicResource CompletedBrush}" />
                                                             <Setter TargetName="Status" Property="Foreground"
-                                                                    Value="{StaticResource CompletedBrush}" />
+                                                                    Value="{DynamicResource CompletedBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
+                                                                     Value="True">
+                                                            <Setter TargetName="Time" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
+                                                            <Setter TargetName="KindSymbol" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
+                                                            <Setter TargetName="Title" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
+                                                            <Setter TargetName="Recurrence" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
+                                                            <Setter TargetName="ImportanceSymbol" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
+                                                            <Setter TargetName="Importance" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
+                                                            <Setter TargetName="StatusSymbol" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
+                                                            <Setter TargetName="Status" Property="Foreground"
+                                                                    Value="{DynamicResource SelectionTextBrush}" />
                                                         </DataTrigger>
                                                     </DataTemplate.Triggers>
                                                 </DataTemplate>
@@ -270,16 +290,16 @@
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding Name}" Value="已错过">
                                             <Setter TargetName="GroupMarker" Property="Background"
-                                                    Value="{StaticResource MissedBrush}" />
+                                                    Value="{DynamicResource MissedBrush}" />
                                             <Setter TargetName="GroupSymbol" Property="Text" Value="!" />
                                             <Setter TargetName="GroupName" Property="Foreground"
-                                                    Value="{StaticResource MissedBrush}" />
+                                                    Value="{DynamicResource MissedBrush}" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding Name}" Value="已完成">
                                             <Setter TargetName="GroupMarker" Property="Background" Value="#7A828C" />
                                             <Setter TargetName="GroupSymbol" Property="Text" Value="✓" />
                                             <Setter TargetName="GroupName" Property="Foreground"
-                                                    Value="{StaticResource SecondaryTextBrush}" />
+                                                    Value="{DynamicResource SecondaryTextBrush}" />
                                         </DataTrigger>
                                     </DataTemplate.Triggers>
                                 </DataTemplate>
@@ -292,8 +312,9 @@
 
         <Border Grid.Row="2" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,1,0,0">
-            <TextBlock Text="快捷键：Ctrl+N 新建   Ctrl+Shift+Space 完成   Delete 删除   Enter 编辑"
-                       Foreground="{StaticResource SecondaryTextBrush}"
+            <TextBlock x:Name="TimelineFooterText"
+                       Text="快捷键：Ctrl+N 新建   Ctrl+Shift+Space 完成   Delete 删除   Enter 编辑"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
                        VerticalAlignment="Center" Margin="30,0" />
         </Border>
     </Grid>

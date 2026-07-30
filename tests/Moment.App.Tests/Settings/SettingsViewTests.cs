@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using System.IO;
 using Moment.App.Settings;
+using Moment.App.Styles;
 using Moment.Core.Abstractions;
 using Moment.Windows.Hotkeys;
 using Moment.Windows.Alerts;
@@ -165,6 +166,7 @@ public sealed class SettingsViewTests
         {
             var view = CreateView();
             ApplyHighContrastPalette(view);
+            HighContrastPalette.Apply(view.Resources, true, view.FindResource);
             view.Show();
             view.UpdateLayout();
 

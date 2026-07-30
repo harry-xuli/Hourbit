@@ -4,6 +4,7 @@ using System.Windows.Media;
 using System.Reflection;
 using System.Windows.Input;
 using Moment.App.Alerts;
+using Moment.App.Styles;
 using Moment.App.Shell;
 using Moment.Core.Domain;
 using Moment.Windows.Alerts;
@@ -234,6 +235,8 @@ public sealed class ImportantAlertWindowTests
                 new WindowPlacementService(
                     () => new Rect(0, 0, 900, 700)));
             ApplyHighContrastPalette(window);
+            HighContrastPalette.Apply(
+                window.Resources, true, window.FindResource);
             window.Show();
             window.UpdateLayout();
 

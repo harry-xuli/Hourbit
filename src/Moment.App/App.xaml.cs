@@ -7,6 +7,8 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(System.Windows.StartupEventArgs eventArgs)
     {
         base.OnStartup(eventArgs);
+        ApplySystemTheme();
+        System.Windows.SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
         try
         {
             _root = await CompositionRoot.OpenAsync(CancellationToken.None);
@@ -28,6 +30,7 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(System.Windows.ExitEventArgs eventArgs)
     {
+        System.Windows.SystemParameters.StaticPropertyChanged -= OnSystemParametersChanged;
         if (_root is not null)
         {
             _root.RuntimeError -= OnRuntimeError;
@@ -38,4 +41,18 @@ public partial class App : System.Windows.Application
 
     private static void OnRuntimeError(Exception exception) =>
         System.Diagnostics.Debug.WriteLine(exception);
+
+    private void OnSystemParametersChanged(
+        object? sender,
+        System.ComponentModel.PropertyChangedEventArgs eventArgs)
+    {
+        if (eventArgs.PropertyName == nameof(System.Windows.SystemParameters.HighContrast))
+            ApplySystemTheme();
+    }
+
+    private void ApplySystemTheme() =>
+        Styles.HighContrastPalette.Apply(
+            Resources,
+            System.Windows.SystemParameters.HighContrast,
+            TryFindResource);
 }

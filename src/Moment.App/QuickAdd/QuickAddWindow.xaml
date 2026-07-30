@@ -63,7 +63,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
                 <TextBlock Text="选择时间后可按 Enter 创建"
-                           Foreground="{StaticResource SecondaryTextBrush}"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
                            Margin="16,12,16,15" />
             </StackPanel>
         </Border>
@@ -116,7 +116,7 @@
                     </Style.Triggers>
                 </Style>
             </Border.Style>
-            <TextBlock Text="{Binding ErrorMessage}" Foreground="{StaticResource MissedBrush}" />
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource MissedBrush}" />
         </Border>
 
         <Border Grid.Row="3"
@@ -210,8 +210,9 @@
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="0,1,0,0"
                 Padding="22,15">
-            <TextBlock Text="{Binding FooterText}"
-                       Foreground="{StaticResource SecondaryTextBrush}"
+            <TextBlock x:Name="QuickAddFooterText"
+                       Text="{Binding FooterText}"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
                        HorizontalAlignment="Center" />
         </Border>
     </Grid>

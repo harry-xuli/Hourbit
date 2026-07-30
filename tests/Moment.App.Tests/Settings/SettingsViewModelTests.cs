@@ -66,6 +66,54 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task Hotkey_save_commits_only_hotkey_and_full_save_later_validates_dirty_draft()
+    {
+        using var directory = new TempDirectory();
+        var malformedWave = Path.Combine(directory.Path, "malformed.wav");
+        await File.WriteAllBytesAsync(malformedWave, [1, 2, 3, 4]);
+        var startup = new StubStartup();
+        var store = new RecordingSettingsStore
+        {
+            Current = new AppSettings(
+                "Ctrl+Alt+Space", false, 100, null)
+        };
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            store,
+            startup,
+            @"C:\Program Files\Moment\Moment.exe");
+        await vm.LoadAsync();
+        startup.Calls.Clear();
+        vm.StartWithWindows = true;
+        vm.AlertVolume = 33;
+        vm.CustomAlertSoundPath = malformedWave;
+
+        var hotkeyResult = await vm.SaveHotkeyAsync("Ctrl+Shift+R");
+
+        Assert.True(hotkeyResult.Succeeded);
+        Assert.Equal(
+            new AppSettings("Ctrl+Shift+R", false, 100, null),
+            store.LastSaved);
+        Assert.Empty(startup.Calls);
+        Assert.True(vm.StartWithWindows);
+        Assert.Equal(33, vm.AlertVolume);
+        Assert.Equal(malformedWave, vm.CustomAlertSoundPath);
+
+        var fullResult = await vm.SaveAsync();
+
+        Assert.True(fullResult.Succeeded);
+        Assert.Equal(
+            new AppSettings("Ctrl+Shift+R", true, 33, null),
+            store.LastSaved);
+        Assert.Equal([true],
+            startup.Calls.Select(call => call.Enabled).ToArray());
+        Assert.Null(vm.CustomAlertSoundPath);
+        Assert.Equal(
+            "请选择未压缩 PCM 8 位或 16 位 WAV 声音文件，已恢复为内置声音",
+            vm.WarningMessage);
+    }
+
+    [Fact]
     public async Task Missing_custom_wave_resets_to_embedded_sound_and_warns_non_modally_once()
     {
         var store = new RecordingSettingsStore

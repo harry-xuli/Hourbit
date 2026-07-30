@@ -10,6 +10,8 @@
     <Color x:Key="ImportantColor">#C83B19</Color>
     <Color x:Key="MissedColor">#C42B1C</Color>
     <Color x:Key="CompletedColor">#287A43</Color>
+    <Color x:Key="SelectionBackgroundColor">#F3F7FD</Color>
+    <Color x:Key="SelectionTextColor">#18212F</Color>
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
     <SolidColorBrush x:Key="SubtleBackgroundBrush" Color="{StaticResource SubtleBackgroundColor}" />
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="{StaticResource PrimaryTextColor}" />
@@ -20,4 +22,6 @@
     <SolidColorBrush x:Key="ImportantBrush" Color="{StaticResource ImportantColor}" />
     <SolidColorBrush x:Key="MissedBrush" Color="{StaticResource MissedColor}" />
     <SolidColorBrush x:Key="CompletedBrush" Color="{StaticResource CompletedColor}" />
+    <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="{StaticResource SelectionBackgroundColor}" />
+    <SolidColorBrush x:Key="SelectionTextBrush" Color="{StaticResource SelectionTextColor}" />
 </ResourceDictionary>

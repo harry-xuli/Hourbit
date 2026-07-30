@@ -8,7 +8,7 @@ Verified on 2026-07-30 for the Windows 11 x64 WPF build.
 - Computer Use could not target the notification-area icon or the `ShowInTaskbar="False"` Quick Add HWND. Activating the main HWND hides Quick Add by design. Therefore Settings could not be opened through the tray, and the important-alert test action could not be triggered safely through Computer Use.
 - Settings and Important Alert were executed on a real STA WPF dispatcher in automated UI tests. These are production controls and templates, but this is not claimed as an end-to-end tray-path manual test.
 - Display scaling was simulated deterministically with WPF `LayoutTransform` values of 1.0, 1.25, 1.5, and 2.0. Windows display scaling was not changed.
-- High contrast was simulated by injecting black/white/yellow `SystemColors` resources into the production windows. The user's global Windows theme was not changed. A manual OS-toggle pass remains recommended before release.
+- High contrast was simulated by injecting black/white/yellow `SystemColors` resources and applying the production high-contrast palette to the production windows. Assertions inspect the rendered foreground/background brushes, not only container backgrounds. The user's global Windows theme was not changed. A manual OS-toggle pass remains recommended before release.
 
 ## Keyboard and automation
 
@@ -34,8 +34,9 @@ Quick Add separately passes its 200%-equivalent compact-viewport scrolling test.
 
 ## High contrast and reduced motion
 
-- PASS (simulated): Settings and Important Alert resolve window/control/highlight pairs to black/white, black/white, and yellow/black.
-- PASS (simulated): Timeline and Quick Add window backgrounds resolve to black/white, while headers, footers, warning panels, and borders use the injected control/active-border palette.
+- PASS (simulated): Settings and Important Alert resolve window/control/highlight pairs to black/white, black/white, and yellow/black through the production palette.
+- PASS (simulated): Quick Add footer text is white on the injected dark control surface and measures at least 4.5:1.
+- PASS (simulated): Timeline header and footer text are white on the injected dark control surface; a selected row and every visible row text element resolve to the exact yellow/black system highlight pair.
 - PASS: Required surfaces use matching dynamic system backgrounds, foregrounds, borders, highlight text, and focus brushes.
 - PASS: Focus uses a visible two-pixel outline. Text fields also change border thickness on keyboard focus.
 - PASS: No animations, fades, auto-scrolling, or motion-only feedback were added.

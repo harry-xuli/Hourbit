@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Input;
 using Moment.App.Timeline;
+using Moment.App.Styles;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
@@ -19,8 +20,11 @@ public sealed class TimelineViewTests
     public Task Simulated_dark_system_palette_reaches_timeline_surfaces() =>
         WpfTestHost.RunAsync(() =>
         {
-            var view = new TimelineView();
+            var viewModel = Create(TwoGroupQuery());
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = new TimelineView { DataContext = viewModel };
             ApplyDarkPalette(view);
+            HighContrastPalette.Apply(view.Resources, true, view.FindResource);
             var window = new Window
             {
                 Content = view,
@@ -36,6 +40,26 @@ public sealed class TimelineViewTests
             var header = Assert.IsType<Border>(
                 view.FindName("TimelineHeader"));
             AssertBrush(Colors.DarkSlateGray, header.Background);
+            var headerText = Assert.IsType<TextBlock>(
+                view.FindName("TimelineHeaderText"));
+            var footerText = Assert.IsType<TextBlock>(
+                view.FindName("TimelineFooterText"));
+            AssertBrush(Colors.White, headerText.Foreground);
+            AssertBrush(Colors.White, footerText.Foreground);
+
+            var selectedList = Descendants<ListBox>(view)
+                .Single(list => list.SelectedItem is not null);
+            var selected = Assert.IsType<ListBoxItem>(
+                selectedList.ItemContainerGenerator.ContainerFromItem(
+                    selectedList.SelectedItem));
+            var selectedSurface = Assert.Single(
+                Descendants<Border>(selected),
+                border => border.TemplatedParent == selected);
+            AssertBrush(Colors.Yellow, selectedSurface.Background);
+            AssertBrush(Colors.Black, selected.Foreground);
+            Assert.All(
+                Descendants<TextBlock>(selected).Where(text => text.IsVisible),
+                text => AssertBrush(Colors.Black, text.Foreground));
             window.Close();
         });
 
