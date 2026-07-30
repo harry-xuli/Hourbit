@@ -125,11 +125,13 @@ public sealed class WindowsAppNotificationPlatform : INotificationPlatform, INot
         }
         catch (UnauthorizedAccessException)
         {
-            SetHealth(NotificationHealth.PermissionDisabled);
+            _registered = false;
+            SetHealth(NotificationHealth.RegistrationFailed);
             throw;
         }
         catch
         {
+            _registered = false;
             SetHealth(NotificationHealth.RegistrationFailed);
             throw;
         }
@@ -235,8 +237,11 @@ public sealed class NotificationActivationRouter(INotificationActivationSource s
             else await actions.SnoozeAsync(action.OccurrenceId, TimeSpan.FromMinutes(10), CancellationToken.None);
             return;
         }
-        if (arguments == "section=missed") await navigator.NavigateAsync(new NotificationNavigation("missed", null), CancellationToken.None);
-        else if (arguments.StartsWith("section=timeline&occurrenceId=", StringComparison.Ordinal) && Guid.TryParseExact(arguments[30..], "D", out var id)) await navigator.NavigateAsync(new NotificationNavigation("timeline", id), CancellationToken.None);
+        var values = arguments.Split('&').Select(part => part.Split('=', 2)).Where(pair => pair.Length == 2).ToDictionary(pair => pair[0], pair => pair[1], StringComparer.Ordinal);
+        if (values.Count == 1 && values.TryGetValue("section", out var missed) && missed == "missed")
+            await navigator.NavigateAsync(new NotificationNavigation("missed", null), CancellationToken.None);
+        else if (values.Count == 2 && values.TryGetValue("section", out var section) && section == "timeline" && values.TryGetValue("occurrenceId", out var occurrence) && Guid.TryParseExact(occurrence, "D", out var id))
+            await navigator.NavigateAsync(new NotificationNavigation("timeline", id), CancellationToken.None);
     }
 }
 

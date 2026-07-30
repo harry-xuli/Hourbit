@@ -16,10 +16,11 @@ public sealed class NotificationLifecycleTests
         router.Start();
 
         await source.RaiseAsync("section=missed");
+        await source.RaiseAsync("occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d&section=timeline");
         await source.RaiseAsync("action=complete&occurrenceId=4b3eb3c9-970d-47d7-89e2-bab9778a406d");
         await source.RaiseAsync("section=unknown");
 
-        Assert.Equal(["missed"], navigation.Calls);
+        Assert.Equal(["missed", "timeline"], navigation.Calls);
         Assert.Equal(["complete:4b3eb3c9-970d-47d7-89e2-bab9778a406d"], actions.Calls);
         Assert.Equal(1, source.RegisterCount);
         await router.DisposeAsync();

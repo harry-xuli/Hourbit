@@ -6,8 +6,9 @@ namespace Moment.Windows.Notifications;
 public sealed class WindowsNotificationRuntime : IAsyncDisposable
 {
     private readonly NotificationActivationRouter _router;
-    private int _started;
-    private int _disposed;
+    private readonly object _gate = new();
+    private bool _started;
+    private bool _disposed;
 
     public WindowsNotificationRuntime(INotificationActivationSource source, IReminderActionService actions, INotificationNavigator navigator) =>
         _router = new NotificationActivationRouter(source, actions, navigator);
@@ -17,13 +18,13 @@ public sealed class WindowsNotificationRuntime : IAsyncDisposable
 
     public void Start()
     {
-        ObjectDisposedException.ThrowIf(_disposed != 0, this);
-        if (Interlocked.Exchange(ref _started, 1) == 0) _router.Start();
+        lock (_gate) { ObjectDisposedException.ThrowIf(_disposed, this); if (_started) return; _router.Start(); _started = true; }
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0 && Interlocked.Exchange(ref _started, 0) != 0)
-            await _router.DisposeAsync();
+        var disposeRouter = false;
+        lock (_gate) { if (_disposed) return; _disposed = true; disposeRouter = _started; _started = false; }
+        if (disposeRouter) await _router.DisposeAsync();
     }
 }

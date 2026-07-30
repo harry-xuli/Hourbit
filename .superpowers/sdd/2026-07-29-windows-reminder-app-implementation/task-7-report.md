@@ -132,3 +132,9 @@ Concern: direct Windows App SDK registration-failure/retry behavior remains a ma
 Amendment: extracted `INotificationRegistration`; RED was missing seam. The failure/retry/success transition test now injects registration failure then success, but its first GREEN execution was externally blocked before its body by Smart App Control (`0x800711C7` loading `Moment.Windows.dll`).
 
 Follow-up diagnosis: the controller's executed test exposed a fixture contradiction, not a production state-machine defect. `Registration(false, true)` modeled a disabled Windows setting even after its registration retry succeeded, so `PermissionDisabled` was the correct result. The fixture now uses `Registration(true, true)`: registration initially and on first refresh fails, then succeeds after `Allow = true` while the modeled setting is enabled. The assertion remains `Available` and continues to guard against a false promotion before successful registration.
+
+## Fix round 3
+
+Root causes: navigation parsed a fixed argument order; runtime lifecycle used racy independent atomics; and show failures did not clear the registration gate. RED: reversed timeline fields produced no navigation. GREEN: strict structural map parsing routes either field order, runtime lifecycle is lock-protected, and show failures clear `_registered` before `RegistrationFailed`.
+
+Verification: Windows 24/24, Core 78/78, full solution Core 78/78 + Infrastructure 19/19 + Windows 24/24, build 0 warnings/errors.
