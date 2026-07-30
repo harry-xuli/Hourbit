@@ -10,6 +10,7 @@ namespace Moment.Core.Tests.Services;
 public sealed class ReminderActionServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 7, 29, 9, 0, 0, TimeSpan.FromHours(8));
+    private static readonly TimeZoneInfo ChinaZone = TimeZoneInfo.FindSystemTimeZoneById("China Standard Time");
 
     [Fact]
     public async Task Complete_is_idempotent_and_creates_one_next_recurrence()
@@ -55,6 +56,25 @@ public sealed class ReminderActionServiceTests
     }
 
     [Fact]
+    public async Task Complete_calculates_recurrence_in_the_injected_scheduling_zone()
+    {
+        var repository = new FakeReminderRepository();
+        var due = DateTimeOffset.Parse("2026-07-29T09:20:00+08:00");
+        var item = new ReminderItem(Guid.NewGuid(), "跨时区循环", ReminderKind.Plan, ReminderImportance.Normal,
+            Now.AddDays(-1), RecurrenceRule.Daily(new TimeOnly(10, 0)));
+        var occurrence = ReminderOccurrence.Schedule(item.Id, due);
+        await repository.SaveItemWithOccurrenceAsync(item, occurrence, CancellationToken.None);
+        var easternZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        var service = new ReminderActionService(repository, new RecurrenceCalculator(), new NullSignal(),
+            new FakeClock(Now), easternZone);
+
+        await service.CompleteAsync(occurrence.Id, CancellationToken.None);
+
+        var next = Assert.Single(await repository.GetScheduledAsync(CancellationToken.None));
+        Assert.Equal(DateTimeOffset.Parse("2026-07-29T10:00:00-04:00"), next.Occurrence.DueAt);
+    }
+
+    [Fact]
     public async Task Snooze_links_the_new_occurrence_to_its_parent()
     {
         var repository = new FakeReminderRepository();
@@ -68,6 +88,43 @@ public sealed class ReminderActionServiceTests
         Assert.Equal(OccurrenceState.Snoozed,
             (await repository.GetScheduledReminderAsync(current.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
         Assert.Equal(snoozed.Id, (await repository.GetScheduledReminderAsync(snoozed.Id, CancellationToken.None))!.Occurrence.Id);
+    }
+
+    [Fact]
+    public async Task Snooze_for_a_missing_occurrence_throws_without_signal_or_mutation()
+    {
+        var repository = new FakeReminderRepository();
+        var signal = new RecordingSignal();
+        var service = new ReminderActionService(repository, new RecurrenceCalculator(), signal,
+            new FakeClock(Now), ChinaZone);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SnoozeAsync(
+            Guid.NewGuid(), TimeSpan.FromMinutes(10), CancellationToken.None));
+
+        Assert.Equal("Reminder occurrence is not actionable.", exception.Message);
+        Assert.Empty(await repository.GetScheduledAsync(CancellationToken.None));
+        Assert.Equal(0, signal.RefreshCount);
+    }
+
+    [Fact]
+    public async Task Snooze_for_a_terminal_occurrence_throws_without_signal_or_mutation()
+    {
+        var repository = new FakeReminderRepository();
+        var current = TestData.Scheduled("已完成提醒", "2026-07-29T09:20:00+08:00", ReminderImportance.Important);
+        await repository.AddAsync(current, CancellationToken.None);
+        await repository.ApplyActionAsync(current.Occurrence.Id, OccurrenceState.Completed, Now, null, CancellationToken.None);
+        var signal = new RecordingSignal();
+        var service = new ReminderActionService(repository, new RecurrenceCalculator(), signal,
+            new FakeClock(Now), ChinaZone);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SnoozeAsync(
+            current.Occurrence.Id, TimeSpan.FromMinutes(10), CancellationToken.None));
+
+        Assert.Equal("Reminder occurrence is not actionable.", exception.Message);
+        Assert.Equal(OccurrenceState.Completed,
+            (await repository.GetScheduledReminderAsync(current.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
+        Assert.Empty(await repository.GetScheduledAsync(CancellationToken.None));
+        Assert.Equal(0, signal.RefreshCount);
     }
 
     [Theory]
@@ -164,7 +221,7 @@ public sealed class ReminderActionServiceTests
     }
 
     private static ReminderActionService CreateService(FakeReminderRepository repository) =>
-        new(repository, new RecurrenceCalculator(), new NullSignal(), new FakeClock(Now));
+        new(repository, new RecurrenceCalculator(), new NullSignal(), new FakeClock(Now), ChinaZone);
 
     private static async Task<ReminderOccurrence> AddRecurringReminderAsync(FakeReminderRepository repository, DateTimeOffset due)
     {
@@ -180,5 +237,12 @@ public sealed class ReminderActionServiceTests
         public void Refresh()
         {
         }
+    }
+
+    private sealed class RecordingSignal : ISchedulerSignal
+    {
+        public int RefreshCount { get; private set; }
+
+        public void Refresh() => RefreshCount++;
     }
 }

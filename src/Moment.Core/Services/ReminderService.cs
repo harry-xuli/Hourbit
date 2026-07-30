@@ -18,10 +18,11 @@ public sealed class ReminderService(
 {
     public async Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(draft);
+        var createdAt = clock.Now;
+        ValidateDraft(draft, createdAt);
 
         var item = ReminderItem.Create(
-            draft.Title, draft.Kind, draft.Importance, clock.Now, draft.DueAt, draft.Recurrence);
+            draft.Title, draft.Kind, draft.Importance, createdAt, draft.DueAt, draft.Recurrence);
         var occurrence = ReminderOccurrence.Schedule(item.Id, draft.DueAt);
 
         await repository.SaveItemWithOccurrenceAsync(item, occurrence, ct);
@@ -31,7 +32,8 @@ public sealed class ReminderService(
 
     public async Task EditAsync(Guid occurrenceId, ReminderDraft draft, SeriesScope scope, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(draft);
+        var createdAt = clock.Now;
+        ValidateDraft(draft, createdAt);
         ValidateScope(scope);
 
         var current = await repository.GetScheduledReminderAsync(occurrenceId, ct);
@@ -41,7 +43,7 @@ public sealed class ReminderService(
         }
 
         var item = ReminderItem.Create(
-            draft.Title, draft.Kind, draft.Importance, clock.Now, draft.DueAt, draft.Recurrence);
+            draft.Title, draft.Kind, draft.Importance, createdAt, draft.DueAt, draft.Recurrence);
         var occurrence = current.Occurrence with
         {
             ItemId = item.Id,
@@ -73,6 +75,50 @@ public sealed class ReminderService(
         if (!Enum.IsDefined(scope))
         {
             throw new ArgumentOutOfRangeException(nameof(scope));
+        }
+    }
+
+    private static void ValidateDraft(ReminderDraft draft, DateTimeOffset createdAt)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        var title = draft.Title?.Trim();
+        if (title is null || title.Length is 0 or > 200)
+        {
+            throw new ArgumentOutOfRangeException(nameof(draft));
+        }
+
+        if (draft.DueAt < createdAt
+            || !Enum.IsDefined(draft.Kind)
+            || !Enum.IsDefined(draft.Importance))
+        {
+            throw new ArgumentOutOfRangeException(nameof(draft));
+        }
+
+        if (draft.Recurrence is not null)
+        {
+            ValidateRecurrence(draft.Recurrence);
+        }
+    }
+
+    private static void ValidateRecurrence(RecurrenceRule recurrence)
+    {
+        if (!Enum.IsDefined(recurrence.Kind) || recurrence.DaysOfWeek is null
+            || recurrence.DaysOfWeek.Any(day => !Enum.IsDefined(day)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(recurrence));
+        }
+
+        var isValid = recurrence.Kind switch
+        {
+            RecurrenceKind.Daily or RecurrenceKind.Weekdays => recurrence.DaysOfWeek.Count == 0,
+            RecurrenceKind.Weekly => recurrence.DaysOfWeek.Count > 0,
+            _ => false
+        };
+
+        if (!isValid)
+        {
+            throw new ArgumentOutOfRangeException(nameof(recurrence));
         }
     }
 }

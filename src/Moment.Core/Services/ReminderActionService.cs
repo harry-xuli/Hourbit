@@ -15,8 +15,12 @@ public sealed class ReminderActionService(
     IReminderRepository repository,
     IRecurrenceCalculator recurrenceCalculator,
     ISchedulerSignal schedulerSignal,
-    IClock clock) : IReminderActionService
+    IClock clock,
+    TimeZoneInfo schedulingTimeZone) : IReminderActionService
 {
+    private readonly TimeZoneInfo _schedulingTimeZone = schedulingTimeZone ??
+        throw new ArgumentNullException(nameof(schedulingTimeZone));
+
     public Task CompleteAsync(Guid occurrenceId, CancellationToken ct) =>
         ApplyActionAsync(occurrenceId, OccurrenceState.Completed, ct);
 
@@ -46,7 +50,7 @@ public sealed class ReminderActionService(
         var next = current.Item.Recurrence is null
             ? null
             : ReminderOccurrence.Schedule(current.Item.Id, recurrenceCalculator.NextAfter(
-                current.Item.Recurrence, current.Occurrence.DueAt, TimeZoneInfo.Local));
+                current.Item.Recurrence, current.Occurrence.DueAt, _schedulingTimeZone));
 
         await repository.ApplyActionAsync(occurrenceId, state, clock.Now, next, ct);
         schedulerSignal.Refresh();
