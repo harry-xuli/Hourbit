@@ -48,33 +48,14 @@ public sealed class DatabaseRecoveryService
         File.Copy(_databasePath, corruptCopy, overwrite: false);
         if (Directory.Exists(_backupDirectory))
         {
-            foreach (var backupPath in Directory.EnumerateFiles(
-                         _backupDirectory,
-                         "moment-*.moment-backup",
-                         SearchOption.TopDirectoryOnly)
-                         .OrderByDescending(Path.GetFileName, StringComparer.Ordinal))
+            foreach (var backupPath in
+                     BackupPackage.GetAutomaticBackupPaths(_backupDirectory))
             {
                 ct.ThrowIfCancellationRequested();
                 VerifiedBackup? verified = null;
                 try
                 {
-                    var stagingDirectory =
-                        Path.GetDirectoryName(_databasePath)
-                        ?? throw new InvalidOperationException(
-                            "Database path must have a parent directory.");
-                    verified = await BackupPackage.VerifyAndExtractAsync(
-                        backupPath, stagingDirectory, ct);
-                    await using (var connection =
-                                 await DatabaseMigrator.OpenConnectionAsync(
-                                     verified.DatabasePath, ct))
-                    {
-                        await DatabaseMigrator.MigrateAsync(connection, ct);
-                    }
-                    if (!await BackupPackage.CheckIntegrityAsync(
-                            verified.DatabasePath, fullCheck: true, ct))
-                    {
-                        continue;
-                    }
+                    verified = await PrepareBackupAsync(backupPath, ct);
 
                     BackupPackage.AtomicReplace(
                         verified.DatabasePath, _databasePath);
@@ -104,6 +85,57 @@ public sealed class DatabaseRecoveryService
         return new DatabaseRecoveryResult(
             DatabaseRecoveryStatus.RequiresUserDecision,
             corruptCopy);
+    }
+
+    public async Task RestoreUserSelectedAsync(
+        string backupPath,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
+        var verified = await PrepareBackupAsync(
+            Path.GetFullPath(backupPath), ct);
+        try
+        {
+            BackupPackage.AtomicReplace(
+                verified.DatabasePath, _databasePath);
+        }
+        finally
+        {
+            BackupPackage.TryDelete(verified.DatabasePath);
+        }
+    }
+
+    private async Task<VerifiedBackup> PrepareBackupAsync(
+        string backupPath,
+        CancellationToken ct)
+    {
+        var stagingDirectory =
+            Path.GetDirectoryName(_databasePath)
+            ?? throw new InvalidOperationException(
+                "Database path must have a parent directory.");
+        var verified = await BackupPackage.VerifyAndExtractAsync(
+            backupPath, stagingDirectory, ct);
+        try
+        {
+            await using (var connection =
+                         await DatabaseMigrator.OpenConnectionAsync(
+                             verified.DatabasePath, ct))
+            {
+                await DatabaseMigrator.MigrateAsync(connection, ct);
+            }
+            if (!await BackupPackage.CheckIntegrityAsync(
+                    verified.DatabasePath, fullCheck: true, ct))
+            {
+                throw new InvalidDataException(
+                    "Selected backup failed SQLite integrity validation after migration.");
+            }
+            return verified;
+        }
+        catch
+        {
+            BackupPackage.TryDelete(verified.DatabasePath);
+            throw;
+        }
     }
 
     private string CreateCorruptCopyPath()

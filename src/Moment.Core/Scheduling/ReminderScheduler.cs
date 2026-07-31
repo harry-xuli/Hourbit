@@ -11,6 +11,7 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
     private readonly IReminderSink _sink;
     private readonly IClock _clock;
     private readonly SemaphoreSlim _refreshSignal = new(0, 1);
+    private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private readonly CancellationTokenSource _disposeCancellation = new();
     private readonly object _gate = new();
     private CancellationTokenSource? _runCancellation;
@@ -37,55 +38,103 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
         _clock = clock;
     }
 
-    public Task StartAsync(CancellationToken ct)
+    public async Task StartAsync(CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        lock (_gate)
+        await _transitionGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_loop is not null)
+            Task? completedLoop = null;
+            CancellationTokenSource? completedCancellation = null;
+            lock (_gate)
             {
-                return Task.CompletedTask;
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_loop is { IsCompleted: false })
+                    return;
+                if (_loop is not null)
+                {
+                    completedLoop = _loop;
+                    completedCancellation = _runCancellation;
+                    _loop = null;
+                    _runCancellation = null;
+                }
             }
 
+            if (completedLoop is not null)
+            {
+                try
+                {
+                    await completedLoop.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (
+                    completedCancellation?.IsCancellationRequested == true)
+                {
+                }
+                finally
+                {
+                    completedCancellation?.Dispose();
+                }
+            }
+
+            ct.ThrowIfCancellationRequested();
             var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(
                 _disposeCancellation.Token, ct);
-            _runCancellation = runCancellation;
-            _loop = Task.Run(
-                () => RunAsync(runCancellation.Token),
-                CancellationToken.None);
-            return Task.CompletedTask;
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                _runCancellation = runCancellation;
+                _loop = Task.Run(
+                    () => RunAsync(runCancellation.Token),
+                    CancellationToken.None);
+            }
+        }
+        finally
+        {
+            _transitionGate.Release();
         }
     }
 
     public async Task StopAsync(CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        Task? loop;
-        CancellationTokenSource? runCancellation;
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            loop = _loop;
-            runCancellation = _runCancellation;
-            _loop = null;
-            _runCancellation = null;
-        }
-
-        if (loop is null)
-            return;
-
-        runCancellation!.Cancel();
+        await _transitionGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await loop.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (runCancellation.IsCancellationRequested)
-        {
+            Task? loop;
+            CancellationTokenSource? runCancellation;
+            lock (_gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                loop = _loop;
+                runCancellation = _runCancellation;
+            }
+
+            if (loop is null)
+                return;
+
+            runCancellation!.Cancel();
+            try
+            {
+                await loop.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (
+                runCancellation.IsCancellationRequested)
+            {
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    if (ReferenceEquals(_loop, loop))
+                    {
+                        _loop = null;
+                        _runCancellation = null;
+                    }
+                }
+                runCancellation.Dispose();
+            }
         }
         finally
         {
-            runCancellation.Dispose();
+            _transitionGate.Release();
         }
     }
 
@@ -111,33 +160,39 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
 
     public void Dispose()
     {
-        Task? loop;
-        CancellationTokenSource? runCancellation;
-        lock (_gate)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _disposed = true;
-            loop = _loop;
-            runCancellation = _runCancellation;
-        }
-
-        _disposeCancellation.Cancel();
-        runCancellation?.Cancel();
+        _transitionGate.Wait();
         try
         {
-            loop?.GetAwaiter().GetResult();
-        }
-        catch (OperationCanceledException)
-        {
-        }
+            Task? loop;
+            CancellationTokenSource? runCancellation;
+            lock (_gate)
+            {
+                if (_disposed)
+                    return;
 
-        runCancellation?.Dispose();
-        _disposeCancellation.Dispose();
-        _refreshSignal.Dispose();
+                _disposed = true;
+                loop = _loop;
+                runCancellation = _runCancellation;
+            }
+
+            _disposeCancellation.Cancel();
+            runCancellation?.Cancel();
+            try
+            {
+                loop?.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
+            runCancellation?.Dispose();
+            _disposeCancellation.Dispose();
+            _refreshSignal.Dispose();
+        }
+        finally
+        {
+            _transitionGate.Release();
+        }
     }
 
     private async Task RunAsync(CancellationToken ct)

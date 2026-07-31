@@ -146,6 +146,55 @@ internal static class TestBackupFactory
         await RewriteAsync(path, entries);
     }
 
+    internal static async Task AddUnexpectedManifestPropertyAsync(string path)
+    {
+        var entries = await ReadEntriesAsync(path);
+        using var document = JsonDocument.Parse(entries["manifest.json"]);
+        var root = document.RootElement;
+        entries["manifest.json"] = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            formatVersion = root.GetProperty("formatVersion").GetInt32(),
+            schemaVersion = root.GetProperty("schemaVersion").GetInt32(),
+            createdAt = root.GetProperty("createdAt").GetDateTimeOffset(),
+            sha256 = root.GetProperty("sha256").GetString(),
+            unexpected = true
+        });
+        await RewriteAsync(path, entries);
+    }
+
+    internal static async Task ForgeOversizedManifestLengthAsync(string path)
+    {
+        var entries = await ReadEntriesAsync(path);
+        using var document = JsonDocument.Parse(entries["manifest.json"]);
+        var root = document.RootElement;
+        entries["manifest.json"] = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            formatVersion = root.GetProperty("formatVersion").GetInt32(),
+            schemaVersion = root.GetProperty("schemaVersion").GetInt32(),
+            createdAt = root.GetProperty("createdAt").GetDateTimeOffset(),
+            sha256 = new string('a', 70_000)
+        });
+        await RewriteAsync(path, entries);
+        var bytes = await File.ReadAllBytesAsync(path);
+        PatchDeclaredLength(bytes, "manifest.json", 1);
+        await File.WriteAllBytesAsync(path, bytes);
+    }
+
+    internal static async Task SetManifestFormatVersionToStringAsync(string path)
+    {
+        var entries = await ReadEntriesAsync(path);
+        using var document = JsonDocument.Parse(entries["manifest.json"]);
+        var root = document.RootElement;
+        entries["manifest.json"] = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            formatVersion = "1",
+            schemaVersion = root.GetProperty("schemaVersion").GetInt32(),
+            createdAt = root.GetProperty("createdAt").GetDateTimeOffset(),
+            sha256 = root.GetProperty("sha256").GetString()
+        });
+        await RewriteAsync(path, entries);
+    }
+
     internal static async Task AddTraversalEntryAsync(string path)
     {
         var entries = await ReadEntriesAsync(path);
@@ -171,6 +220,15 @@ internal static class TestBackupFactory
     {
         var bytes = await File.ReadAllBytesAsync(path);
         const uint declaredLength = 1024U * 1024U * 1024U + 1U;
+        PatchDeclaredLength(bytes, "moment.db", declaredLength);
+        await File.WriteAllBytesAsync(path, bytes);
+    }
+
+    private static void PatchDeclaredLength(
+        byte[] bytes,
+        string entryName,
+        uint declaredLength)
+    {
         var patchedLocal = false;
         var patchedCentral = false;
         for (var index = 0; index <= bytes.Length - 46; index++)
@@ -183,7 +241,7 @@ internal static class TestBackupFactory
                     bytes.AsSpan(index + 26, 2));
                 if (index + 30 + nameLength <= bytes.Length &&
                     Encoding.UTF8.GetString(
-                        bytes, index + 30, nameLength) == "moment.db")
+                        bytes, index + 30, nameLength) == entryName)
                 {
                     BinaryPrimitives.WriteUInt32LittleEndian(
                         bytes.AsSpan(index + 22, 4), declaredLength);
@@ -196,7 +254,7 @@ internal static class TestBackupFactory
                     bytes.AsSpan(index + 28, 2));
                 if (index + 46 + nameLength <= bytes.Length &&
                     Encoding.UTF8.GetString(
-                        bytes, index + 46, nameLength) == "moment.db")
+                        bytes, index + 46, nameLength) == entryName)
                 {
                     BinaryPrimitives.WriteUInt32LittleEndian(
                         bytes.AsSpan(index + 24, 4), declaredLength);
@@ -205,8 +263,8 @@ internal static class TestBackupFactory
             }
         }
         if (!patchedLocal || !patchedCentral)
-            throw new InvalidOperationException("moment.db ZIP headers were not found.");
-        await File.WriteAllBytesAsync(path, bytes);
+            throw new InvalidOperationException(
+                $"{entryName} ZIP headers were not found.");
     }
 
     internal static async Task<Dictionary<string, byte[]>> ReadEntriesAsync(

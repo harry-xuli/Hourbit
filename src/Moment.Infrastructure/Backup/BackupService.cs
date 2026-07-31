@@ -21,6 +21,29 @@ public interface IBackupRestoreLifecycle
     Task RefreshAsync(CancellationToken ct);
 }
 
+public interface IBackupStorageOperations
+{
+    Task CreateSqliteSnapshotAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken ct);
+    void AtomicReplace(string sourcePath, string destinationPath);
+}
+
+public interface IBackupDailyMaintenance
+{
+    Task<string?> ReadLastSuccessfulLocalDateAsync(
+        string databasePath,
+        CancellationToken ct);
+    Task WriteLastSuccessfulLocalDateAsync(
+        string databasePath,
+        string value,
+        CancellationToken ct);
+    void RetainNewestAutomaticBackups(
+        IReadOnlyList<string> paths,
+        int keep);
+}
+
 public sealed class BackupService : IBackupService
 {
     private const string LastBackupDateKey = "last_successful_local_backup_date";
@@ -29,6 +52,8 @@ public sealed class BackupService : IBackupService
     private readonly IBackupRestoreLifecycle _lifecycle;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly TimeZoneInfo _localZone;
+    private readonly IBackupStorageOperations _storage;
+    private readonly IBackupDailyMaintenance _dailyMaintenance;
     private readonly SemaphoreSlim _operationGate = new(1, 1);
 
     public BackupService(
@@ -36,7 +61,9 @@ public sealed class BackupService : IBackupService
         string backupDirectory,
         IBackupRestoreLifecycle? lifecycle = null,
         Func<DateTimeOffset>? utcNow = null,
-        TimeZoneInfo? localZone = null)
+        TimeZoneInfo? localZone = null,
+        IBackupStorageOperations? storageOperations = null,
+        IBackupDailyMaintenance? dailyMaintenance = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(backupDirectory);
@@ -45,6 +72,9 @@ public sealed class BackupService : IBackupService
         _lifecycle = lifecycle ?? NoopBackupRestoreLifecycle.Instance;
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _localZone = localZone ?? TimeZoneInfo.Local;
+        _storage = storageOperations ?? DefaultBackupStorageOperations.Instance;
+        _dailyMaintenance =
+            dailyMaintenance ?? DefaultBackupDailyMaintenance.Instance;
     }
 
     public async Task<string> CreateDailyBackupAsync(CancellationToken ct)
@@ -56,12 +86,33 @@ public sealed class BackupService : IBackupService
             var localDate = DateOnly.FromDateTime(
                 TimeZoneInfo.ConvertTime(now, _localZone).DateTime);
             var localDateText = localDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var storedDate =
+                await _dailyMaintenance.ReadLastSuccessfulLocalDateAsync(
+                    _databasePath, ct);
+            var existingForDate =
+                BackupPackage.GetAutomaticBackupPathForLocalDate(
+                    _backupDirectory, localDate, _localZone);
             if (string.Equals(
-                    await ReadSettingAsync(LastBackupDateKey, ct),
-                    localDateText,
-                    StringComparison.Ordinal))
+                    storedDate, localDateText, StringComparison.Ordinal) ||
+                existingForDate is not null)
             {
-                return GetNewestAutomaticBackup() ?? string.Empty;
+                if (!string.Equals(
+                        storedDate,
+                        localDateText,
+                        StringComparison.Ordinal))
+                {
+                    await _dailyMaintenance
+                        .WriteLastSuccessfulLocalDateAsync(
+                            _databasePath,
+                            localDateText,
+                            CancellationToken.None);
+                }
+                _dailyMaintenance.RetainNewestAutomaticBackups(
+                    BackupPackage.GetAutomaticBackupPaths(_backupDirectory),
+                    7);
+                return existingForDate ??
+                       GetNewestAutomaticBackup() ??
+                       string.Empty;
             }
 
             Directory.CreateDirectory(_backupDirectory);
@@ -69,8 +120,13 @@ public sealed class BackupService : IBackupService
                 _backupDirectory,
                 $"moment-{now:yyyyMMdd'T'HHmmssfff'Z'}.moment-backup");
             await ExportCoreAsync(path, now, ct);
-            RetainNewestAutomaticBackups();
-            await WriteSettingAsync(LastBackupDateKey, localDateText, ct);
+            await _dailyMaintenance.WriteLastSuccessfulLocalDateAsync(
+                _databasePath,
+                localDateText,
+                CancellationToken.None);
+            _dailyMaintenance.RetainNewestAutomaticBackups(
+                BackupPackage.GetAutomaticBackupPaths(_backupDirectory),
+                7);
             return path;
         }
         finally
@@ -126,7 +182,7 @@ public sealed class BackupService : IBackupService
         var package = Path.Combine(destinationDirectory, $".moment-{token}.moment-backup.tmp");
         try
         {
-            await BackupPackage.CreateSqliteSnapshotAsync(_databasePath, snapshot, ct);
+            await _storage.CreateSqliteSnapshotAsync(_databasePath, snapshot, ct);
             var schemaVersion = await BackupPackage.ReadSchemaVersionAsync(snapshot, ct);
             BackupPackage.EnsureCompatibleSchema(schemaVersion);
             var hash = await BackupPackage.ComputeSha256Async(snapshot, ct);
@@ -136,7 +192,7 @@ public sealed class BackupService : IBackupService
                 createdAt,
                 hash);
             await BackupPackage.WriteAsync(package, snapshot, manifest, ct);
-            BackupPackage.AtomicReplace(package, destination);
+            _storage.AtomicReplace(package, destination);
         }
         finally
         {
@@ -156,15 +212,25 @@ public sealed class BackupService : IBackupService
             Path.GetFullPath(backupPath), databaseDirectory, ct);
         var safetyPath = Path.Combine(
             databaseDirectory, $".moment-{Guid.NewGuid():N}.restore-safety.db");
+        var rollbackInstallPath = Path.Combine(
+            databaseDirectory, $".moment-{Guid.NewGuid():N}.rollback-install.db");
         var stopped = false;
+        var safetyReady = false;
+        var replacementAttempted = false;
+        var lifecycleMayBeRunning = false;
+        var retainSafety = false;
         try
         {
             await _lifecycle.StopAsync(ct);
             stopped = true;
-            await BackupPackage.CreateSqliteSnapshotAsync(
+            await _storage.CreateSqliteSnapshotAsync(
                 _databasePath, safetyPath, ct);
-            BackupPackage.AtomicReplace(verified.DatabasePath, _databasePath);
+            await ValidateSafetySnapshotAsync(safetyPath, ct);
+            safetyReady = true;
+            replacementAttempted = true;
+            _storage.AtomicReplace(verified.DatabasePath, _databasePath);
             await MigrateAndVerifyAsync(_databasePath, ct);
+            lifecycleMayBeRunning = true;
             await _lifecycle.StartAsync(ct);
             await _lifecycle.RefreshAsync(ct);
         }
@@ -173,14 +239,43 @@ public sealed class BackupService : IBackupService
             Exception? rollbackFailure = null;
             try
             {
-                if (File.Exists(safetyPath))
-                    BackupPackage.AtomicReplace(safetyPath, _databasePath);
+                if (lifecycleMayBeRunning)
+                {
+                    await _lifecycle.StopAsync(CancellationToken.None);
+                    lifecycleMayBeRunning = false;
+                }
+                if (replacementAttempted)
+                {
+                    if (!safetyReady || !File.Exists(safetyPath))
+                    {
+                        throw new InvalidDataException(
+                            "Validated restore safety snapshot is unavailable.");
+                    }
+                    File.Copy(safetyPath, rollbackInstallPath, overwrite: false);
+                    _storage.AtomicReplace(rollbackInstallPath, _databasePath);
+                }
+                lifecycleMayBeRunning = true;
                 await _lifecycle.StartAsync(CancellationToken.None);
                 await _lifecycle.RefreshAsync(CancellationToken.None);
             }
             catch (Exception exception)
             {
                 rollbackFailure = exception;
+                retainSafety = safetyReady && File.Exists(safetyPath);
+                if (lifecycleMayBeRunning)
+                {
+                    try
+                    {
+                        await _lifecycle.StopAsync(CancellationToken.None);
+                        lifecycleMayBeRunning = false;
+                    }
+                    catch (Exception stopFailure)
+                    {
+                        rollbackFailure = new AggregateException(
+                            rollbackFailure,
+                            stopFailure);
+                    }
+                }
             }
 
             if (rollbackFailure is not null)
@@ -195,7 +290,9 @@ public sealed class BackupService : IBackupService
         finally
         {
             BackupPackage.TryDelete(verified.DatabasePath);
-            BackupPackage.TryDelete(safetyPath);
+            BackupPackage.TryDelete(rollbackInstallPath);
+            if (!retainSafety)
+                BackupPackage.TryDelete(safetyPath);
         }
     }
 
@@ -216,56 +313,27 @@ public sealed class BackupService : IBackupService
         }
     }
 
-    private async Task<string?> ReadSettingAsync(string key, CancellationToken ct)
-    {
-        await using var connection =
-            await DatabaseMigrator.OpenConnectionAsync(_databasePath, ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT value FROM settings WHERE key = $key;";
-        command.Parameters.AddWithValue("$key", key);
-        return (string?)await command.ExecuteScalarAsync(ct);
-    }
-
-    private async Task WriteSettingAsync(
-        string key,
-        string value,
+    private static async Task ValidateSafetySnapshotAsync(
+        string databasePath,
         CancellationToken ct)
     {
-        await using var connection =
-            await DatabaseMigrator.OpenConnectionAsync(_databasePath, ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO settings(key, value) VALUES ($key, $value)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-            """;
-        command.Parameters.AddWithValue("$key", key);
-        command.Parameters.AddWithValue("$value", value);
-        await command.ExecuteNonQueryAsync(ct);
+        var schemaVersion =
+            await BackupPackage.ReadSchemaVersionAsync(databasePath, ct);
+        BackupPackage.EnsureCompatibleSchema(schemaVersion);
+        if (!await BackupPackage.CheckIntegrityAsync(
+                databasePath, fullCheck: true, ct))
+        {
+            throw new InvalidDataException(
+                "The safety snapshot failed SQLite integrity validation.");
+        }
     }
 
     private string? GetNewestAutomaticBackup()
     {
         if (!Directory.Exists(_backupDirectory))
             return null;
-        return Directory.EnumerateFiles(
-                _backupDirectory,
-                "moment-*.moment-backup",
-                SearchOption.TopDirectoryOnly)
-            .OrderByDescending(Path.GetFileName, StringComparer.Ordinal)
+        return BackupPackage.GetAutomaticBackupPaths(_backupDirectory)
             .FirstOrDefault();
-    }
-
-    private void RetainNewestAutomaticBackups()
-    {
-        foreach (var path in Directory.EnumerateFiles(
-                     _backupDirectory,
-                     "moment-*.moment-backup",
-                     SearchOption.TopDirectoryOnly)
-                     .OrderByDescending(Path.GetFileName, StringComparer.Ordinal)
-                     .Skip(7))
-        {
-            File.Delete(path);
-        }
     }
 
     private sealed class NoopBackupRestoreLifecycle : IBackupRestoreLifecycle
@@ -274,6 +342,67 @@ public sealed class BackupService : IBackupService
         public Task StopAsync(CancellationToken ct) => Task.CompletedTask;
         public Task StartAsync(CancellationToken ct) => Task.CompletedTask;
         public Task RefreshAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class DefaultBackupStorageOperations :
+        IBackupStorageOperations
+    {
+        internal static DefaultBackupStorageOperations Instance { get; } = new();
+
+        public Task CreateSqliteSnapshotAsync(
+            string sourcePath,
+            string destinationPath,
+            CancellationToken ct) =>
+            BackupPackage.CreateSqliteSnapshotAsync(
+                sourcePath, destinationPath, ct);
+
+        public void AtomicReplace(
+            string sourcePath,
+            string destinationPath) =>
+            BackupPackage.AtomicReplace(sourcePath, destinationPath);
+    }
+
+    private sealed class DefaultBackupDailyMaintenance :
+        IBackupDailyMaintenance
+    {
+        internal static DefaultBackupDailyMaintenance Instance { get; } = new();
+
+        public async Task<string?> ReadLastSuccessfulLocalDateAsync(
+            string databasePath,
+            CancellationToken ct)
+        {
+            await using var connection =
+                await DatabaseMigrator.OpenConnectionAsync(databasePath, ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT value FROM settings WHERE key = $key;";
+            command.Parameters.AddWithValue("$key", LastBackupDateKey);
+            return (string?)await command.ExecuteScalarAsync(ct);
+        }
+
+        public async Task WriteLastSuccessfulLocalDateAsync(
+            string databasePath,
+            string value,
+            CancellationToken ct)
+        {
+            await using var connection =
+                await DatabaseMigrator.OpenConnectionAsync(databasePath, ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO settings(key, value) VALUES ($key, $value)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                """;
+            command.Parameters.AddWithValue("$key", LastBackupDateKey);
+            command.Parameters.AddWithValue("$value", value);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        public void RetainNewestAutomaticBackups(
+            IReadOnlyList<string> paths,
+            int keep)
+        {
+            foreach (var path in paths.Skip(keep))
+                File.Delete(path);
+        }
     }
 }
 
@@ -357,13 +486,7 @@ internal static class BackupPackage
                 if (manifestEntry.Length > MaximumManifestBytes)
                     throw new InvalidDataException("Backup manifest is too large.");
 
-                await using (var manifestStream = manifestEntry.Open())
-                {
-                    manifest = await JsonSerializer.DeserializeAsync<BackupManifest>(
-                                   manifestStream, JsonOptions, ct)
-                               ?? throw new InvalidDataException(
-                                   "Backup manifest is missing.");
-                }
+                manifest = await ReadManifestAsync(manifestEntry, ct);
                 ValidateManifest(manifest);
 
                 await using var entryInput = databaseEntry.Open();
@@ -537,6 +660,49 @@ internal static class BackupPackage
             File.Move(sourcePath, destinationPath);
     }
 
+    internal static IReadOnlyList<string> GetAutomaticBackupPaths(
+        string directory)
+    {
+        if (!Directory.Exists(directory))
+            return [];
+        return Directory.EnumerateFiles(
+                directory,
+                "*.moment-backup",
+                SearchOption.TopDirectoryOnly)
+            .Select(path => (
+                Path: path,
+                Timestamp: TryParseAutomaticBackupTimestamp(
+                    Path.GetFileName(path), out var timestamp)
+                    ? timestamp
+                    : (DateTimeOffset?)null))
+            .Where(candidate => candidate.Timestamp is not null)
+            .OrderByDescending(candidate => candidate.Timestamp)
+            .ThenByDescending(
+                candidate => Path.GetFileName(candidate.Path),
+                StringComparer.Ordinal)
+            .Select(candidate => candidate.Path)
+            .ToArray();
+    }
+
+    internal static string? GetAutomaticBackupPathForLocalDate(
+        string directory,
+        DateOnly localDate,
+        TimeZoneInfo localZone)
+    {
+        foreach (var path in GetAutomaticBackupPaths(directory))
+        {
+            if (TryParseAutomaticBackupTimestamp(
+                    Path.GetFileName(path), out var timestamp) &&
+                DateOnly.FromDateTime(
+                    TimeZoneInfo.ConvertTime(timestamp, localZone).DateTime) ==
+                localDate)
+            {
+                return path;
+            }
+        }
+        return null;
+    }
+
     internal static void TryDelete(string path)
     {
         try
@@ -564,6 +730,29 @@ internal static class BackupPackage
             }.ConnectionString);
         await connection.OpenAsync(ct);
         return connection;
+    }
+
+    private static bool TryParseAutomaticBackupTimestamp(
+        string fileName,
+        out DateTimeOffset timestamp)
+    {
+        const string prefix = "moment-";
+        const string suffix = ".moment-backup";
+        timestamp = default;
+        if (!fileName.StartsWith(prefix, StringComparison.Ordinal) ||
+            !fileName.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var value = fileName[
+            prefix.Length..^suffix.Length];
+        return DateTimeOffset.TryParseExact(
+            value,
+            "yyyyMMdd'T'HHmmssfff'Z'",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal |
+            DateTimeStyles.AdjustToUniversal,
+            out timestamp);
     }
 
     private static void ValidateEntries(ZipArchive archive)
@@ -601,6 +790,106 @@ internal static class BackupPackage
         {
             throw new InvalidDataException(
                 "Backup manifest has an invalid SHA-256 checksum.");
+        }
+    }
+
+    private static async Task<BackupManifest> ReadManifestAsync(
+        ZipArchiveEntry entry,
+        CancellationToken ct)
+    {
+        byte[] bytes;
+        await using (var input = entry.Open())
+        {
+            bytes = await ReadWithLimitAsync(
+                input,
+                MaximumManifestBytes,
+                "Backup manifest is too large.",
+                ct);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(
+                bytes,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = 8
+                });
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("Backup manifest must be a JSON object.");
+
+            var properties = new Dictionary<string, JsonElement>(
+                StringComparer.Ordinal);
+            foreach (var property in root.EnumerateObject())
+            {
+                if (property.Name is not (
+                        "formatVersion" or "schemaVersion" or
+                        "createdAt" or "sha256"))
+                {
+                    throw new InvalidDataException(
+                        $"Backup manifest contains unexpected property '{property.Name}'.");
+                }
+                if (!properties.TryAdd(property.Name, property.Value))
+                {
+                    throw new InvalidDataException(
+                        $"Backup manifest contains duplicate property '{property.Name}'.");
+                }
+            }
+            if (properties.Count != 4 ||
+                !properties.TryGetValue("formatVersion", out var formatVersion) ||
+                !properties.TryGetValue("schemaVersion", out var schemaVersion) ||
+                !properties.TryGetValue("createdAt", out var createdAt) ||
+                !properties.TryGetValue("sha256", out var sha256))
+            {
+                throw new InvalidDataException(
+                    "Backup manifest must contain exactly formatVersion, schemaVersion, createdAt, and sha256.");
+            }
+            if (formatVersion.ValueKind != JsonValueKind.Number ||
+                !formatVersion.TryGetInt32(out var parsedFormat) ||
+                schemaVersion.ValueKind != JsonValueKind.Number ||
+                !schemaVersion.TryGetInt32(out var parsedSchema) ||
+                createdAt.ValueKind != JsonValueKind.String ||
+                !createdAt.TryGetDateTimeOffset(out var parsedCreatedAt) ||
+                sha256.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidDataException(
+                    "Backup manifest contains an invalid property type.");
+            }
+            return new BackupManifest(
+                parsedFormat,
+                parsedSchema,
+                parsedCreatedAt,
+                sha256.GetString()!);
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException(
+                "Backup manifest is not valid UTF-8 JSON.",
+                exception);
+        }
+    }
+
+    private static async Task<byte[]> ReadWithLimitAsync(
+        Stream input,
+        long maximumBytes,
+        string limitMessage,
+        CancellationToken ct)
+    {
+        using var output = new MemoryStream();
+        var buffer = new byte[81920];
+        long total = 0;
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer, ct);
+            if (read == 0)
+                return output.ToArray();
+            total += read;
+            if (total > maximumBytes)
+                throw new InvalidDataException(limitMessage);
+            await output.WriteAsync(buffer.AsMemory(0, read), ct);
         }
     }
 

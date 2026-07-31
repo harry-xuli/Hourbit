@@ -11,12 +11,18 @@ public partial class App : System.Windows.Application
         System.Windows.SystemParameters.StaticPropertyChanged += OnSystemParametersChanged;
         try
         {
-            _root = await CompositionRoot.OpenAsync(CancellationToken.None);
-            _root.RuntimeError += OnRuntimeError;
+            var root = await CompositionRoot.OpenAsync(CancellationToken.None);
+            if (root is null)
+            {
+                Shutdown();
+                return;
+            }
+            _root = root;
+            root.RuntimeError += OnRuntimeError;
             var activation = eventArgs.Args.Contains("--quick-add", StringComparer.OrdinalIgnoreCase)
                 ? Moment.Windows.Lifecycle.InstanceActivation.ShowQuickAdd
                 : Moment.Windows.Lifecycle.InstanceActivation.ShowMain;
-            if (!await _root.StartAsync(activation, CancellationToken.None))
+            if (!await root.StartAsync(activation, CancellationToken.None))
                 Shutdown();
         }
         catch (Exception exception)

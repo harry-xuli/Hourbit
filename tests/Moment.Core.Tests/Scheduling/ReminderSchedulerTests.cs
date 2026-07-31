@@ -149,6 +149,48 @@ public sealed class ReminderSchedulerTests
     }
 
     [Fact]
+    public async Task Start_waits_for_in_progress_stop_before_starting_next_loop()
+    {
+        var repository = new BlockingScheduledQueryRepository();
+        using var scheduler = new ReminderScheduler(
+            repository,
+            new RecordingReminderSink(),
+            new FakeClock("2026-07-29T09:00:00+08:00"));
+        await scheduler.StartAsync(CancellationToken.None);
+        await repository.FirstQueryEntered.Task;
+
+        var stop = scheduler.StopAsync(CancellationToken.None);
+        var restart = scheduler.StartAsync(CancellationToken.None);
+        await Task.Yield();
+
+        Assert.False(restart.IsCompleted);
+
+        repository.ReleaseFirstQuery.TrySetResult();
+        await stop;
+        await restart;
+        Assert.Equal(2, repository.QueryCount);
+    }
+
+    [Fact]
+    public async Task Caller_cancelled_completed_loop_can_be_restarted()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var scheduler = new ReminderScheduler(
+            new FakeReminderRepository(),
+            new RecordingReminderSink(),
+            new FakeClock("2026-07-29T09:00:00+08:00"));
+        await scheduler.StartAsync(cancellation.Token);
+        var cancelledLoop = scheduler.Completion;
+
+        cancellation.Cancel();
+        await cancelledLoop;
+        await scheduler.StartAsync(CancellationToken.None);
+
+        Assert.NotSame(cancelledLoop, scheduler.Completion);
+        await scheduler.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
     public async Task Sink_failure_is_reported_without_stopping_later_delivery_or_faulting_disposal()
     {
         var clock = new FakeClock("2026-07-29T09:00:00+08:00");
@@ -245,5 +287,27 @@ public sealed class ReminderSchedulerTests
         }
 
         private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class BlockingScheduledQueryRepository :
+        FakeReminderRepository
+    {
+        private int _queries;
+        public int QueryCount => Volatile.Read(ref _queries);
+        public TaskCompletionSource FirstQueryEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseFirstQuery { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async Task<IReadOnlyList<ScheduledReminder>>
+            GetScheduledAsync(CancellationToken ct)
+        {
+            if (Interlocked.Increment(ref _queries) == 1)
+            {
+                FirstQueryEntered.TrySetResult();
+                await ReleaseFirstQuery.Task;
+            }
+            return await base.GetScheduledAsync(ct);
+        }
     }
 }

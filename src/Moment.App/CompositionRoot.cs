@@ -3,6 +3,7 @@ using Moment.App.QuickAdd;
 using Moment.App.Settings;
 using Moment.App.Shell;
 using Moment.App.Timeline;
+using Moment.App.Startup;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
@@ -90,7 +91,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     public QuickAddWindowController QuickAddWindow { get; }
     public event Action<Exception>? RuntimeError;
 
-    public static async Task<CompositionRoot> OpenAsync(CancellationToken ct)
+    public static async Task<CompositionRoot?> OpenAsync(CancellationToken ct)
     {
         var clock = new SystemClock();
         var zone = TimeZoneInfo.Local;
@@ -98,17 +99,17 @@ public sealed class CompositionRoot : IAsyncDisposable
         var dataFolder =
             Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory;
         var backupDirectory = Path.Combine(dataFolder, "backups");
-        var recovery = await new DatabaseRecoveryService(
+        var recoveryService = new DatabaseRecoveryService(
             databasePath,
             backupDirectory,
-            () => clock.Now.ToUniversalTime())
-            .OpenWithRecoveryAsync(ct);
-        if (recovery.Status == DatabaseRecoveryStatus.RequiresUserDecision)
-        {
-            throw new InvalidDataException(
-                "提醒数据库已损坏，且没有可自动恢复的有效备份。"
-                + $"损坏数据已原样保存在：{recovery.CorruptDatabasePath}");
-        }
+            () => clock.Now.ToUniversalTime());
+        var recovery = await recoveryService.OpenWithRecoveryAsync(ct);
+        if (!await DatabaseRecoveryWorkflow.RunAsync(
+                recoveryService,
+                recovery,
+                new WpfPreCompositionRecoveryDialog(),
+                ct))
+            return null;
 
         var repository = await SqliteReminderRepository.OpenAsync(databasePath, ct);
         var settingsStore = new SqliteSettingsStore(databasePath);

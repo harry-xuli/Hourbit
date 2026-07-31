@@ -279,3 +279,127 @@ Task 10 code/test was changed to mask this desktop pointer-injection issue.
   application has no separate pre-composition recovery wizard; manual restore
   remains available only through the normal Settings UI when the application
   can open.
+
+## Fix Round 1
+
+This round addresses the two Critical and five Important findings reviewed
+against commit `c1751946b3d1319cf2d60d400158aa4202782cdb`.
+
+### Restore safety and rollback
+
+- A safety snapshot is now rollback-eligible only after SQLite snapshot
+  creation, schema compatibility, and full integrity verification complete.
+  Partial snapshot files are never installed after `IOException` or
+  cancellation.
+- After a post-replacement start or refresh attempt, failure handling stops the
+  possibly running lifecycle again before rollback.
+- Rollback installs a disposable copy of the validated safety snapshot. The
+  original safety file is retained until replacement, restart, and refresh all
+  succeed, so a failed rollback replacement remains manually recoverable.
+- A rollback replacement failure does not restart services over an uncertain
+  database.
+
+RED/GREEN:
+
+```powershell
+dotnet test tests\Moment.Infrastructure.Tests\Moment.Infrastructure.Tests.csproj --filter "Partial_safety_snapshot|Refresh_failure_stops|Rollback_replace_failure" --no-restore
+```
+
+The initial run exposed the missing storage seam and then three lifecycle/order
+failures. After the fixes, the Critical restore cases passed 5/5.
+
+### Strict package input and automatic-name classification
+
+- Manifest reads enforce the 64 KiB limit on actual decompressed bytes,
+  independent of forged ZIP metadata.
+- The manifest is a strict, case-sensitive four-property object: unknown,
+  duplicate, missing, wrong-type, and malformed values are rejected as
+  `InvalidDataException` before lifecycle stop.
+- Automatic discovery, recovery, and retention accept only the exact invariant
+  UTC form `moment-yyyyMMddTHHmmssfffZ.moment-backup`. Manual exports and
+  malformed lookalikes neither consume retention slots nor become recovery
+  candidates.
+
+RED/GREEN evidence included:
+
+- an extra manifest property, previously accepted;
+- a 70 KiB manifest with a forged uncompressed length of one byte, previously
+  reaching later SHA validation;
+- a string `formatVersion`, initially escaping as
+  `InvalidOperationException`;
+- manual/malformed filenames previously affecting retention and recovery.
+
+The final exact wrong-type regression passed 1/1 and the full Backup filter
+passed 23/23.
+
+### Pre-composition recovery workflow
+
+- `CompositionRoot.OpenAsync` now resolves corruption before repositories,
+  scheduler, and view models are constructed.
+- When automatic recovery cannot proceed, the dialog displays the preserved
+  corrupt-copy path and offers backup selection or exit.
+- A selected package requires a separate explicit confirmation, then passes
+  package verification, migration, full integrity checking, and atomic install
+  before normal composition resumes.
+- Cancel and decline leave the corrupt primary untouched.
+
+The workflow tests were RED for the missing boundary and passed 3/3 after
+implementation.
+
+### Daily backup commit semantics
+
+- Atomic package installation is the commit point.
+- Marker persistence is retried independently of caller cancellation after
+  commit, and exact automatic filenames provide durable same-local-day
+  deduplication if marker persistence previously failed.
+- Retention runs after marker persistence. Cancellation immediately after
+  commit, one-time marker failure, and one-time retention failure all retry
+  without creating a second package.
+
+The three failure-window regressions were RED for the missing maintenance seam
+and passed 3/3 after implementation.
+
+### Scheduler transition serialization
+
+- `StartAsync`, `StopAsync`, and disposal serialize transitions through one
+  gate.
+- Start waits for an in-progress stop, and completed/caller-cancelled loops can
+  be observed, cleared, and restarted with a fresh cancellation source.
+- Stop leaves loop state visible until cancellation and await complete.
+
+The two new race regressions initially failed as expected; the transition
+group passed 3/3 after the fix.
+
+### Fix-round verification
+
+Focused results:
+
+- exact wrong-manifest-type regression: 1/1 passed;
+- Backup filter: 23/23 passed;
+- Core suite: 81/81 passed;
+- affected App recovery/settings/daily-backup group: 32/32 passed.
+
+Unfiltered solution verification:
+
+```powershell
+dotnet test Moment.slnx --no-restore
+```
+
+Result: 313/313 passed (Core 81, Infrastructure 44, Windows 85, App 103).
+The previously documented pointer-only test passed in this run.
+
+```powershell
+dotnet build Moment.slnx --no-restore
+```
+
+Result: success, 0 warnings, 0 errors.
+
+`git diff --check` reported no whitespace errors (only repository line-ending
+conversion notices).
+
+### Fix-round concerns
+
+- The pre-existing desktop pointer-injection test is environment-sensitive,
+  although it did not reproduce in this final unfiltered run.
+- The lifecycle constructor no-op noted as Minor was intentionally deferred
+  because it does not affect runtime behavior or the reviewed safety findings.

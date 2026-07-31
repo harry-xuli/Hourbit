@@ -57,4 +57,37 @@ public sealed class DatabaseRecoveryServiceTests
         Assert.Equal(corruptBytes,
             await File.ReadAllBytesAsync(result.CorruptDatabasePath!));
     }
+
+    [Fact]
+    public async Task Recovery_ignores_manual_and_malformed_moment_packages()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path, "automatic");
+        var now = DateTimeOffset.Parse("2026-07-28T01:02:03Z");
+        var service = TestBackupFactory.Create(temp.Path, () => now);
+        var automatic = await service.CreateDailyBackupAsync(default);
+        await TestBackupFactory.ChangeDatabaseAsync(temp.Path, "not automatic");
+        var manual = Path.Combine(
+            TestBackupFactory.BackupDirectory(temp.Path),
+            "moment-export-user.moment-backup");
+        var malformed = Path.Combine(
+            TestBackupFactory.BackupDirectory(temp.Path),
+            "moment-99999999T999999999Z.moment-backup");
+        await service.ExportAsync(manual, default);
+        File.Copy(manual, malformed);
+        await File.WriteAllBytesAsync(
+            TestBackupFactory.DatabasePath(temp.Path),
+            [83, 81, 76, 105, 116, 101, 9, 8, 7]);
+        var recovery = new DatabaseRecoveryService(
+            TestBackupFactory.DatabasePath(temp.Path),
+            TestBackupFactory.BackupDirectory(temp.Path),
+            () => now.AddDays(1));
+
+        var result = await recovery.OpenWithRecoveryAsync(default);
+
+        Assert.Equal(DatabaseRecoveryStatus.Restored, result.Status);
+        Assert.Equal(automatic, result.RestoredBackupPath);
+        Assert.Equal("automatic",
+            await TestBackupFactory.ReadMarkerAsync(temp.Path));
+    }
 }

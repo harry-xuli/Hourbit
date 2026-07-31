@@ -79,6 +79,41 @@ public sealed class BackupServiceTests
     }
 
     [Fact]
+    public async Task Retention_ignores_manual_and_malformed_moment_packages()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        Directory.CreateDirectory(TestBackupFactory.BackupDirectory(temp.Path));
+        var manual = Path.Combine(
+            TestBackupFactory.BackupDirectory(temp.Path),
+            "moment-export-user.moment-backup");
+        var malformed = Path.Combine(
+            TestBackupFactory.BackupDirectory(temp.Path),
+            "moment-99999999T999999999Z.moment-backup");
+        await TestBackupFactory.Create(temp.Path).ExportAsync(manual, default);
+        File.Copy(manual, malformed);
+        var now = DateTimeOffset.Parse("2026-07-20T01:02:03Z");
+        var service = TestBackupFactory.Create(temp.Path, () => now);
+
+        for (var index = 0; index < 9; index++)
+        {
+            now = now.AddDays(1);
+            await service.CreateDailyBackupAsync(default);
+        }
+
+        Assert.True(File.Exists(manual));
+        Assert.True(File.Exists(malformed));
+        var automatic = Directory.GetFiles(
+                TestBackupFactory.BackupDirectory(temp.Path),
+                "moment-202607*T010203000Z.moment-backup")
+            .Select(Path.GetFileName)
+            .Order()
+            .ToArray();
+        Assert.Equal(7, automatic.Length);
+        Assert.Equal("moment-20260723T010203000Z.moment-backup", automatic[0]);
+    }
+
+    [Fact]
     public async Task Daily_backup_skips_a_second_package_on_the_same_local_date()
     {
         using var temp = new TempDirectory();
@@ -94,6 +129,81 @@ public sealed class BackupServiceTests
         Assert.Single(Directory.GetFiles(
             TestBackupFactory.BackupDirectory(temp.Path),
             "*.moment-backup"));
+    }
+
+    [Fact]
+    public async Task Cancellation_after_package_commit_does_not_duplicate_same_day_backup()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var now = DateTimeOffset.Parse("2026-07-29T01:02:03Z");
+        using var cancellation = new CancellationTokenSource();
+        var storage = new CancelAfterPackageCommitStorage(cancellation);
+        var service = new BackupService(
+            TestBackupFactory.DatabasePath(temp.Path),
+            TestBackupFactory.BackupDirectory(temp.Path),
+            utcNow: () => now,
+            localZone: TestBackupFactory.LocalZone,
+            storageOperations: storage);
+
+        var first = await service.CreateDailyBackupAsync(cancellation.Token);
+        now = now.AddHours(1);
+        var second = await service.CreateDailyBackupAsync(default);
+
+        Assert.Equal(first, second);
+        Assert.Single(StrictAutomaticBackups(temp.Path));
+    }
+
+    [Fact]
+    public async Task Settings_failure_after_package_commit_does_not_duplicate_same_day_backup()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var now = DateTimeOffset.Parse("2026-07-29T01:02:03Z");
+        var maintenance = new FaultingDailyMaintenance
+        {
+            FailNextWrite = true
+        };
+        var service = new BackupService(
+            TestBackupFactory.DatabasePath(temp.Path),
+            TestBackupFactory.BackupDirectory(temp.Path),
+            utcNow: () => now,
+            localZone: TestBackupFactory.LocalZone,
+            dailyMaintenance: maintenance);
+
+        await Assert.ThrowsAsync<IOException>(
+            () => service.CreateDailyBackupAsync(default));
+        now = now.AddHours(1);
+        var recovered = await service.CreateDailyBackupAsync(default);
+
+        Assert.True(File.Exists(recovered));
+        Assert.Single(StrictAutomaticBackups(temp.Path));
+    }
+
+    [Fact]
+    public async Task Retention_failure_surfaces_after_success_marker_and_does_not_duplicate()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var now = DateTimeOffset.Parse("2026-07-29T01:02:03Z");
+        var maintenance = new FaultingDailyMaintenance
+        {
+            FailNextRetention = true
+        };
+        var service = new BackupService(
+            TestBackupFactory.DatabasePath(temp.Path),
+            TestBackupFactory.BackupDirectory(temp.Path),
+            utcNow: () => now,
+            localZone: TestBackupFactory.LocalZone,
+            dailyMaintenance: maintenance);
+
+        await Assert.ThrowsAsync<IOException>(
+            () => service.CreateDailyBackupAsync(default));
+        now = now.AddHours(1);
+        var recovered = await service.CreateDailyBackupAsync(default);
+
+        Assert.True(File.Exists(recovered));
+        Assert.Single(StrictAutomaticBackups(temp.Path));
     }
 
     [Fact]
@@ -154,6 +264,61 @@ public sealed class BackupServiceTests
     }
 
     [Fact]
+    public async Task Restore_rejects_extra_manifest_property_before_stopping()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var path = Path.Combine(temp.Path, "extra-manifest.moment-backup");
+        await TestBackupFactory.Create(temp.Path).ExportAsync(path, default);
+        await TestBackupFactory.AddUnexpectedManifestPropertyAsync(path);
+        var lifecycle = new RecordingLifecycle();
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => TestBackupFactory.Create(
+                temp.Path, lifecycle: lifecycle).RestoreAsync(path, default));
+
+        Assert.Empty(lifecycle.Events);
+    }
+
+    [Fact]
+    public async Task Restore_stream_limits_manifest_when_zip_length_is_forged()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var path = Path.Combine(temp.Path, "oversized-manifest.moment-backup");
+        await TestBackupFactory.Create(temp.Path).ExportAsync(path, default);
+        await TestBackupFactory.ForgeOversizedManifestLengthAsync(path);
+        var lifecycle = new RecordingLifecycle();
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(
+            () => TestBackupFactory.Create(
+                temp.Path, lifecycle: lifecycle).RestoreAsync(path, default));
+
+        Assert.Contains(
+            "manifest is too large",
+            exception.Message,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(lifecycle.Events);
+    }
+
+    [Fact]
+    public async Task Restore_normalizes_wrong_manifest_property_type_before_stopping()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var path = Path.Combine(temp.Path, "wrong-type.moment-backup");
+        await TestBackupFactory.Create(temp.Path).ExportAsync(path, default);
+        await TestBackupFactory.SetManifestFormatVersionToStringAsync(path);
+        var lifecycle = new RecordingLifecycle();
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => TestBackupFactory.Create(
+                temp.Path, lifecycle: lifecycle).RestoreAsync(path, default));
+
+        Assert.Empty(lifecycle.Events);
+    }
+
+    [Fact]
     public async Task Failed_export_preserves_existing_destination_and_cleans_staging_files()
     {
         using var temp = new TempDirectory();
@@ -191,8 +356,102 @@ public sealed class BackupServiceTests
 
         Assert.Equal("current", await TestBackupFactory.ReadMarkerAsync(temp.Path));
         Assert.Equal(
-            ["stop", "start", "refresh", "start", "refresh"],
+            ["stop", "start", "refresh", "stop", "start", "refresh"],
             lifecycle.Events);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Partial_safety_snapshot_is_never_installed_when_creation_fails(
+        bool cancelDuringSnapshot)
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path, "backup");
+        var path = Path.Combine(temp.Path, "data.moment-backup");
+        await TestBackupFactory.Create(temp.Path).ExportAsync(path, default);
+        await TestBackupFactory.ChangeDatabaseAsync(temp.Path, "current");
+        var lifecycle = new RecordingLifecycle();
+        var storage = new PartialSnapshotStorage(
+            cancelDuringSnapshot
+                ? new OperationCanceledException("snapshot cancelled")
+                : new IOException("snapshot failed"));
+        var service = new BackupService(
+            TestBackupFactory.DatabasePath(temp.Path),
+            TestBackupFactory.BackupDirectory(temp.Path),
+            lifecycle,
+            () => DateTimeOffset.Parse("2026-07-29T01:02:03Z"),
+            TestBackupFactory.LocalZone,
+            storage);
+
+        await Assert.ThrowsAnyAsync<Exception>(
+            () => service.RestoreAsync(path, default));
+
+        Assert.Equal("current", await TestBackupFactory.ReadMarkerAsync(temp.Path));
+        Assert.Equal(["stop", "start", "refresh"], lifecycle.Events);
+        Assert.False(storage.AtomicReplaceCalled);
+    }
+
+    [Fact]
+    public async Task Refresh_failure_stops_restarted_lifecycle_before_rollback()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path, "backup");
+        var path = Path.Combine(temp.Path, "data.moment-backup");
+        await TestBackupFactory.Create(temp.Path).ExportAsync(path, default);
+        await TestBackupFactory.ChangeDatabaseAsync(temp.Path, "current");
+        var lifecycle = new StatefulLifecycle(failFirstRefresh: true);
+        var storage = new LifecycleAwareStorage(lifecycle);
+        var service = new BackupService(
+            TestBackupFactory.DatabasePath(temp.Path),
+            TestBackupFactory.BackupDirectory(temp.Path),
+            lifecycle,
+            () => DateTimeOffset.Parse("2026-07-29T01:02:03Z"),
+            TestBackupFactory.LocalZone,
+            storage);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.RestoreAsync(path, default));
+
+        Assert.Equal("current", await TestBackupFactory.ReadMarkerAsync(temp.Path));
+        Assert.Equal(
+            ["stop", "start", "refresh", "stop", "start", "refresh"],
+            lifecycle.Events);
+        Assert.Empty(Directory.GetFiles(
+            temp.Path, ".moment-*.restore-safety.db"));
+    }
+
+    [Fact]
+    public async Task Rollback_replace_failure_retains_valid_safety_and_does_not_restart()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path, "backup");
+        var path = Path.Combine(temp.Path, "data.moment-backup");
+        await TestBackupFactory.Create(temp.Path).ExportAsync(path, default);
+        await TestBackupFactory.ChangeDatabaseAsync(temp.Path, "current");
+        var lifecycle = new StatefulLifecycle(failFirstRefresh: true);
+        var storage = new LifecycleAwareStorage(lifecycle)
+        {
+            FailSafetyReplace = true
+        };
+        var service = new BackupService(
+            TestBackupFactory.DatabasePath(temp.Path),
+            TestBackupFactory.BackupDirectory(temp.Path),
+            lifecycle,
+            () => DateTimeOffset.Parse("2026-07-29T01:02:03Z"),
+            TestBackupFactory.LocalZone,
+            storage);
+
+        await Assert.ThrowsAsync<AggregateException>(
+            () => service.RestoreAsync(path, default));
+
+        Assert.Equal(
+            ["stop", "start", "refresh", "stop"],
+            lifecycle.Events);
+        var safetyPath = Assert.Single(Directory.GetFiles(
+            temp.Path, ".moment-*.restore-safety.db"));
+        Assert.Equal("current", await ReadMarkerAsync(safetyPath));
+        Assert.Equal("backup", await TestBackupFactory.ReadMarkerAsync(temp.Path));
     }
 
     [Fact]
@@ -253,6 +512,203 @@ public sealed class BackupServiceTests
                 throw new InvalidOperationException("refresh failed");
             }
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class PartialSnapshotStorage(Exception failure) :
+        IBackupStorageOperations
+    {
+        public bool AtomicReplaceCalled { get; private set; }
+
+        public Task CreateSqliteSnapshotAsync(
+            string sourcePath,
+            string destinationPath,
+            CancellationToken ct)
+        {
+            File.WriteAllBytes(destinationPath, [1, 2, 3, 4]);
+            return Task.FromException(failure);
+        }
+
+        public void AtomicReplace(string sourcePath, string destinationPath)
+        {
+            AtomicReplaceCalled = true;
+            File.Replace(sourcePath, destinationPath, null);
+        }
+    }
+
+    private sealed class StatefulLifecycle(bool failFirstRefresh) :
+        IBackupRestoreLifecycle
+    {
+        private bool _refreshFailed;
+        public bool IsRunning { get; private set; } = true;
+        public List<string> Events { get; } = [];
+
+        public Task StopAsync(CancellationToken ct)
+        {
+            Events.Add("stop");
+            IsRunning = false;
+            return Task.CompletedTask;
+        }
+
+        public Task StartAsync(CancellationToken ct)
+        {
+            Events.Add("start");
+            IsRunning = true;
+            return Task.CompletedTask;
+        }
+
+        public Task RefreshAsync(CancellationToken ct)
+        {
+            Events.Add("refresh");
+            if (failFirstRefresh && !_refreshFailed)
+            {
+                _refreshFailed = true;
+                throw new InvalidOperationException("refresh failed");
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class LifecycleAwareStorage(StatefulLifecycle lifecycle) :
+        IBackupStorageOperations
+    {
+        public bool FailSafetyReplace { get; init; }
+
+        public async Task CreateSqliteSnapshotAsync(
+            string sourcePath,
+            string destinationPath,
+            CancellationToken ct)
+        {
+            await using var connection =
+                await Moment.Infrastructure.Data.DatabaseMigrator
+                    .OpenConnectionAsync(sourcePath, ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "VACUUM INTO $destination;";
+            command.Parameters.AddWithValue("$destination", destinationPath);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        public void AtomicReplace(string sourcePath, string destinationPath)
+        {
+            var isRollback = sourcePath.EndsWith(
+                                 ".restore-safety.db",
+                                 StringComparison.Ordinal) ||
+                             sourcePath.EndsWith(
+                                 ".rollback-install.db",
+                                 StringComparison.Ordinal);
+            if (isRollback && lifecycle.IsRunning)
+                throw new IOException("database locked by running scheduler");
+            if (isRollback && FailSafetyReplace)
+                throw new IOException("rollback replace failed");
+            if (File.Exists(destinationPath))
+                File.Replace(sourcePath, destinationPath, null);
+            else
+                File.Move(sourcePath, destinationPath);
+        }
+    }
+
+    private static async Task<string?> ReadMarkerAsync(string databasePath)
+    {
+        await using var connection =
+            await Moment.Infrastructure.Data.DatabaseMigrator
+                .OpenConnectionAsync(databasePath, default);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT value FROM settings WHERE key = 'test_marker';";
+        return (string?)await command.ExecuteScalarAsync();
+    }
+
+    private static string[] StrictAutomaticBackups(string root) =>
+        Directory.GetFiles(
+            TestBackupFactory.BackupDirectory(root),
+            "moment-????????T?????????Z.moment-backup");
+
+    private sealed class CancelAfterPackageCommitStorage(
+        CancellationTokenSource cancellation) : IBackupStorageOperations
+    {
+        public async Task CreateSqliteSnapshotAsync(
+            string sourcePath,
+            string destinationPath,
+            CancellationToken ct)
+        {
+            await using var connection =
+                await Moment.Infrastructure.Data.DatabaseMigrator
+                    .OpenConnectionAsync(sourcePath, ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "VACUUM INTO $destination;";
+            command.Parameters.AddWithValue("$destination", destinationPath);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        public void AtomicReplace(string sourcePath, string destinationPath)
+        {
+            if (File.Exists(destinationPath))
+                File.Replace(sourcePath, destinationPath, null);
+            else
+                File.Move(sourcePath, destinationPath);
+            if (destinationPath.EndsWith(
+                    ".moment-backup", StringComparison.Ordinal))
+            {
+                cancellation.Cancel();
+            }
+        }
+    }
+
+    private sealed class FaultingDailyMaintenance :
+        IBackupDailyMaintenance
+    {
+        public bool FailNextWrite { get; set; }
+        public bool FailNextRetention { get; set; }
+
+        public async Task<string?> ReadLastSuccessfulLocalDateAsync(
+            string databasePath,
+            CancellationToken ct)
+        {
+            await using var connection =
+                await Moment.Infrastructure.Data.DatabaseMigrator
+                    .OpenConnectionAsync(databasePath, ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT value FROM settings
+                WHERE key = 'last_successful_local_backup_date';
+                """;
+            return (string?)await command.ExecuteScalarAsync(ct);
+        }
+
+        public async Task WriteLastSuccessfulLocalDateAsync(
+            string databasePath,
+            string value,
+            CancellationToken ct)
+        {
+            if (FailNextWrite)
+            {
+                FailNextWrite = false;
+                throw new IOException("settings write failed");
+            }
+            await using var connection =
+                await Moment.Infrastructure.Data.DatabaseMigrator
+                    .OpenConnectionAsync(databasePath, ct);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO settings(key, value)
+                VALUES ('last_successful_local_backup_date', $value)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                """;
+            command.Parameters.AddWithValue("$value", value);
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        public void RetainNewestAutomaticBackups(
+            IReadOnlyList<string> paths,
+            int keep)
+        {
+            if (FailNextRetention)
+            {
+                FailNextRetention = false;
+                throw new IOException("retention failed");
+            }
+            foreach (var path in paths.Skip(keep))
+                File.Delete(path);
         }
     }
 }
