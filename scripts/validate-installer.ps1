@@ -56,17 +56,22 @@ if ($registryLines.Count -ne 1 -or $registryLines[0] -cne $expectedRegistry) {
 
 $requiredCode = @(
     "LegacyStartupSubkey = 'Software\Microsoft\Windows\CurrentVersion\Run';",
+    "StartupApprovedSubkey = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';",
     "LegacyStartupValueName = 'Moment';",
     "LegacyExecutableName = 'Moment.App.exe';",
     "StringChangeEx(Normalized, '/', '\', True);",
     "LegacyPath := ExpandConstant('{app}\') + LegacyExecutableName;",
-    "(CompareText(Normalized, LegacyPath) = 0) or",
     "(CompareText(Normalized, LegacyPath + ' --background') = 0) or",
-    '(CompareText(Normalized, ''"'' + LegacyPath + ''"'') = 0) or',
     '(CompareText(Normalized, ''"'' + LegacyPath + ''" --background'') = 0);',
+    'if not RegValueExists(',
+    'HKCU, StartupApprovedSubkey, LegacyStartupValueName) then',
+    'if not RegQueryBinaryValue(',
+    'HKCU, StartupApprovedSubkey, LegacyStartupValueName, ApprovalData) then',
+    'Result := IsRecognizedEnabledApproval(ApprovalData);',
     'if not RegQueryStringValue(',
     'HKCU, LegacyStartupSubkey, LegacyStartupValueName, ExistingCommand) then',
-    'Result := IsLegacyStartupCommand(ExistingCommand);'
+    'Result := IsLegacyStartupCommand(ExistingCommand) and',
+    'IsStartupApprovedForMigration();'
 )
 foreach ($fragment in $requiredCode) {
     if (-not $source.Contains($fragment)) {
@@ -75,6 +80,10 @@ foreach ($fragment in $requiredCode) {
 }
 if ($source -match '(?i)RegDeleteValue|UninstallDelete') {
     throw 'Installer compatibility logic must not delete registry values or user data.'
+}
+if ($source.Contains('(CompareText(Normalized, LegacyPath) = 0)') -or
+    $source.Contains('(CompareText(Normalized, ''"'' + LegacyPath + ''"'') = 0)')) {
+    throw 'Startup migration must reject legacy commands that omit --background.'
 }
 
 function Test-LegacyStartupCommandContract {
@@ -85,22 +94,21 @@ function Test-LegacyStartupCommandContract {
 
     $normalized = $Command.Trim().Replace('/', '\')
     return @(
-        $LegacyPath,
         "$LegacyPath --background",
-        ('"' + $LegacyPath + '"'),
         ('"' + $LegacyPath + '" --background')
     ) -icontains $normalized
 }
 
 $probePath = 'C:\Users\Name With Space\AppData\Local\Programs\Moment\Moment.App.exe'
 $matchingCommands = @(
-    $probePath,
     "  $probePath --background  ",
-    ('"' + $probePath + '"'),
+    ($probePath.ToUpperInvariant().Replace('\', '/') + ' --BACKGROUND'),
     ('"' + $probePath.ToUpperInvariant().Replace('\', '/') + '" --background')
 )
 $nonMatchingCommands = @(
     '',
+    $probePath,
+    ('"' + $probePath + '"'),
     '"C:\Other\Moment.App.exe" --background',
     '"C:\Users\Name With Space\AppData\Local\Programs\Moment\Hourbit.exe" --background',
     ('"' + $probePath + '" --unexpected')
@@ -108,6 +116,39 @@ $nonMatchingCommands = @(
 foreach ($command in $matchingCommands) {
     if (-not (Test-LegacyStartupCommandContract $command $probePath)) {
         throw "Startup migration rejected a legacy command form: $command"
+    }
+}
+
+function Test-StartupApprovedContract {
+    param(
+        [Parameter(Mandatory = $true)][bool]$Present,
+        [AllowNull()][byte[]]$Data
+    )
+
+    if (-not $Present) {
+        return $true
+    }
+    if ($null -eq $Data -or $Data.Length -ne 12 -or $Data[0] -ne 2) {
+        return $false
+    }
+    return @($Data[1..11] | Where-Object { $_ -ne 0 }).Count -eq 0
+}
+
+$enabledState = [byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+$approvalCases = @(
+    @{ Name = 'absent'; Present = $false; Data = $null; Expected = $true },
+    @{ Name = 'canonical enabled'; Present = $true; Data = $enabledState; Expected = $true },
+    @{ Name = 'disabled 03'; Present = $true; Data = [byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8); Expected = $false },
+    @{ Name = 'disabled 07'; Present = $true; Data = [byte[]](7, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8); Expected = $false },
+    @{ Name = 'short unknown'; Present = $true; Data = [byte[]](2); Expected = $false },
+    @{ Name = 'nonzero enabled payload'; Present = $true; Data = [byte[]](2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); Expected = $false },
+    @{ Name = 'unknown state 04'; Present = $true; Data = [byte[]](4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); Expected = $false },
+    @{ Name = 'empty present value'; Present = $true; Data = [byte[]]@(); Expected = $false }
+)
+foreach ($case in $approvalCases) {
+    $actual = Test-StartupApprovedContract -Present $case.Present -Data $case.Data
+    if ($actual -ne $case.Expected) {
+        throw "StartupApproved contract failed for $($case.Name): expected $($case.Expected), got $actual"
     }
 }
 foreach ($command in $nonMatchingCommands) {
@@ -120,4 +161,5 @@ Write-Output 'Installer upgrade contract validation passed.'
 Write-Output 'Validated cleanup: {app}\Moment.App.exe'
 Write-Output 'Validated cleanup: legacy start-menu and desktop shortcuts only'
 Write-Output 'Validated startup migration: existing HKCU Moment value, old executable only'
-Write-Output 'Validated startup command matrix: quoted/unquoted, case and separator forms'
+Write-Output 'Validated startup command matrix: --background required; quoted/unquoted, case and separator forms'
+Write-Output 'Validated StartupApproved matrix: absent or canonical 12-byte enabled state only'

@@ -63,8 +63,11 @@ Filename: "{app}\{#AppAssemblyName}.exe"; Description: "启动 {#AppProductName}
 [Code]
 const
   LegacyStartupSubkey = 'Software\Microsoft\Windows\CurrentVersion\Run';
+  StartupApprovedSubkey = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
   LegacyStartupValueName = 'Moment';
   LegacyExecutableName = 'Moment.App.exe';
+  StartupApprovedDataLength = 12;
+  StartupApprovedEnabledState = 2;
 
 function IsLegacyStartupCommand(const Command: String): Boolean;
 var
@@ -75,10 +78,49 @@ begin
   StringChangeEx(Normalized, '/', '\', True);
   LegacyPath := ExpandConstant('{app}\') + LegacyExecutableName;
   Result :=
-    (CompareText(Normalized, LegacyPath) = 0) or
     (CompareText(Normalized, LegacyPath + ' --background') = 0) or
-    (CompareText(Normalized, '"' + LegacyPath + '"') = 0) or
     (CompareText(Normalized, '"' + LegacyPath + '" --background') = 0);
+end;
+
+function IsRecognizedEnabledApproval(const ApprovalData: AnsiString): Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  if Length(ApprovalData) <> StartupApprovedDataLength then
+    exit;
+  if Ord(ApprovalData[1]) <> StartupApprovedEnabledState then
+    exit;
+
+  { The canonical enabled value is 02 followed by eleven zero bytes. Treat
+    every other present encoding conservatively because this format is not
+    publicly documented by Windows. }
+  for Index := 2 to StartupApprovedDataLength do
+    if Ord(ApprovalData[Index]) <> 0 then
+      exit;
+  Result := True;
+end;
+
+function IsStartupApprovedForMigration(): Boolean;
+var
+  ApprovalData: AnsiString;
+begin
+  { A missing override uses normal Run-key startup semantics. A present value
+    must be the canonical enabled state; disabled, malformed, or unreadable
+    values block migration. Never write or delete StartupApproved here. }
+  if not RegValueExists(
+      HKCU, StartupApprovedSubkey, LegacyStartupValueName) then
+  begin
+    Result := True;
+    exit;
+  end;
+  if not RegQueryBinaryValue(
+      HKCU, StartupApprovedSubkey, LegacyStartupValueName, ApprovalData) then
+  begin
+    Result := False;
+    exit;
+  end;
+  Result := IsRecognizedEnabledApproval(ApprovalData);
 end;
 
 function ShouldMigrateLegacyStartup(): Boolean;
@@ -93,5 +135,6 @@ begin
     Result := False;
     exit;
   end;
-  Result := IsLegacyStartupCommand(ExistingCommand);
+  Result := IsLegacyStartupCommand(ExistingCommand) and
+    IsStartupApprovedForMigration();
 end;
