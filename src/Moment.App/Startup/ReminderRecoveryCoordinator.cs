@@ -35,7 +35,7 @@ public sealed class ReminderRecoveryCoordinator : IAsyncDisposable
             new Func<CancellationToken, Task>(scheduler.StartAsync),
             timelineRefresh is null
                 ? throw new ArgumentNullException(nameof(timelineRefresh))
-                : new Func<CancellationToken, Task>(timelineRefresh.RequestAsync),
+                : new Func<CancellationToken, Task>(timelineRefresh.RequestAndDrainAsync),
             clock,
             appLifetime)
     {

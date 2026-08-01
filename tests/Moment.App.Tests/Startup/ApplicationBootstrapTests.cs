@@ -9,6 +9,56 @@ using Moment.TestSupport;
 public sealed class ApplicationBootstrapTests
 {
     [Fact]
+    public async Task Backup_restore_cancellation_waits_for_admitted_reload_before_rollback_boundary()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            var reloadEntered = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseReload = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var timelineRefresh = new TimelineRefreshCoordinator(dispatcher, async () =>
+            {
+                reloadEntered.TrySetResult();
+                await releaseReload.Task;
+            });
+            using var scheduler = new ReminderScheduler(
+                new FakeReminderRepository(),
+                new RecordingReminderSink(),
+                new FakeClock("2026-08-01T20:04:00+08:00"));
+            var lifecycle = new CompositionRoot.ConfigurableBackupRestoreLifecycle();
+            lifecycle.Configure(scheduler, timelineRefresh);
+            using var cancellation = new CancellationTokenSource();
+            var rollbackStarted = false;
+
+            var restoreBoundary = ObserveRollbackBoundaryAsync();
+            await reloadEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            cancellation.Cancel();
+            await Task.Yield();
+
+            Assert.False(rollbackStarted);
+            Assert.False(restoreBoundary.IsCompleted);
+            releaseReload.TrySetResult();
+            await restoreBoundary.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.True(rollbackStarted);
+            await timelineRefresh.DisposeAsync();
+
+            async Task ObserveRollbackBoundaryAsync()
+            {
+                try
+                {
+                    await lifecycle.RefreshAsync(cancellation.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    rollbackStarted = true;
+                }
+            }
+        });
+    }
+
+    [Fact]
     public async Task Scheduler_state_change_eventually_refreshes_timeline_on_dispatcher()
     {
         await WpfTestHost.RunAsync(async () =>

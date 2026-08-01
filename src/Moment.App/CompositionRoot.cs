@@ -26,6 +26,7 @@ public sealed class CompositionRoot : IAsyncDisposable
 {
     private readonly SqliteReminderRepository _repository;
     private readonly ReminderScheduler _scheduler;
+    private readonly TimelineRefreshCoordinator _timelineRefresh;
     private readonly ReminderRecoveryCoordinator _reminderRecovery;
     private readonly ImportantAlertController _importantAlerts;
     private readonly WindowsNotificationRuntime _notificationRuntime;
@@ -71,6 +72,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     {
         _repository = repository;
         _scheduler = scheduler;
+        _timelineRefresh = timelineRefresh;
         _reminderRecovery = reminderRecovery;
         _importantAlerts = importantAlerts;
         _notificationRuntime = notificationRuntime;
@@ -310,6 +312,21 @@ public sealed class CompositionRoot : IAsyncDisposable
         _hotkey.Dispose();
         await _resumeMonitor.DisposeAsync();
         await _reminderRecovery.DisposeAsync();
+        try
+        {
+            await _timelineRefresh.DisposeAsync();
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                OnRuntimeError(exception);
+            }
+            catch
+            {
+                // Refresh disposal must not prevent the remaining runtime cleanup.
+            }
+        }
         await _notificationRuntime.DisposeAsync();
         await _singleInstance.DisposeAsync();
         _scheduler.Dispose();
@@ -362,7 +379,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     {
         try
         {
-            await timelineRefresh.RequestAsync(lifetime);
+            await timelineRefresh.RequestAndDrainAsync(lifetime);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -469,7 +486,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         public void Refresh() => Target?.Refresh();
     }
 
-    private sealed class ConfigurableBackupRestoreLifecycle :
+    internal sealed class ConfigurableBackupRestoreLifecycle :
         IBackupRestoreLifecycle
     {
         private ReminderScheduler? _scheduler;
@@ -493,7 +510,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         {
             ct.ThrowIfCancellationRequested();
             Scheduler.Refresh();
-            await TimelineRefresh.RequestAsync(ct);
+            await TimelineRefresh.RequestAndDrainAsync(ct);
         }
 
         private ReminderScheduler Scheduler =>

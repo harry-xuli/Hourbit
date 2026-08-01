@@ -1,4 +1,5 @@
 using Moment.App.Startup;
+using Moment.App.Timeline;
 using Moment.TestSupport;
 
 namespace Moment.App.Tests.Startup;
@@ -7,6 +8,42 @@ public sealed class ReminderRecoveryCoordinatorTests
 {
     private static readonly DateTimeOffset Now =
         DateTimeOffset.Parse("2026-08-01T20:04:00+08:00");
+
+    [Fact]
+    public async Task Root_lifetime_cancellation_keeps_refresh_admitted_until_recovery_disposal_drains()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+            var reloadEntered = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseReload = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var timelineRefresh = new TimelineRefreshCoordinator(dispatcher, async () =>
+            {
+                reloadEntered.TrySetResult();
+                await releaseReload.Task;
+            });
+            using var lifetime = new CancellationTokenSource();
+            var coordinator = CreateCoordinator(
+                refresh: timelineRefresh.RequestAndDrainAsync,
+                appLifetime: lifetime.Token);
+
+            var recovery = coordinator.RecoverAndRefreshAsync(CancellationToken.None);
+            await reloadEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            lifetime.Cancel();
+            var recoveryDisposal = coordinator.DisposeAsync().AsTask();
+            var refreshDisposal = timelineRefresh.DisposeAsync().AsTask();
+
+            Assert.False(recovery.IsCompleted);
+            Assert.False(recoveryDisposal.IsCompleted);
+            Assert.False(refreshDisposal.IsCompleted);
+            releaseReload.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => recovery);
+            await recoveryDisposal.WaitAsync(TimeSpan.FromSeconds(1));
+            await refreshDisposal.WaitAsync(TimeSpan.FromSeconds(1));
+        });
+    }
 
     [Fact]
     public async Task Recovery_stops_scheduler_persists_restarts_then_refreshes()
