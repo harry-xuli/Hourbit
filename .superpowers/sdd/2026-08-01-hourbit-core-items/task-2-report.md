@@ -112,3 +112,78 @@ outside the parser-owned files:
   choices intentionally changed: the approved binding rule says every no-clock recurrence
   phrase is an ordinary todo title.
 - This task performs no persistence from the parser.
+
+## Fix Round 1
+
+### Findings addressed
+
+1. Clock regexes could restart inside signed or overlong values, allowing inputs such as
+   `123点`, `-1点`, and `-1:00` to hide invalid prefixes and create reminder drafts.
+2. Malformed date/time-like text was checked only when no valid token existed, so a valid
+   relative date or clock could mask a malformed companion and leave it in the title.
+3. Raw `IndexOf('M')` / `IndexOf('d')` calls treated quoted and escaped literals in
+   `ShortDatePattern` as date fields.
+
+### RED
+
+The first regression matrix added signed, overlong, embedded, and adjacent malformed
+Chinese/colon clocks; valid+malformed companion tokens; custom quoted/escaped short-date
+patterns; and ordinary version text. Running:
+
+```text
+dotnet test tests/Moment.Core.Tests/Moment.Core.Tests.csproj --filter "FullyQualifiedName~ChineseTimeParserTests"
+```
+
+produced 14 expected failures out of 87 cases. The failures reproduced all three findings,
+including successful drafts for malformed clocks, a mixed-separator date left in a todo
+title, wrong DMY resolution, and `v1.2.3` rejected as a date.
+
+After the first implementation pass, the focused suite was 87/87. A second boundary slice
+added clocks embedded after title text, trailing signs, and the ordinary title
+`发布 v1.2.2026`. That title failed because `1.2.2026` was stripped as a dated todo token,
+confirming one remaining false positive.
+
+### GREEN
+
+The exact focused command after the final boundary fix:
+
+```text
+dotnet test tests/Moment.Core.Tests/Moment.Core.Tests.csproj --filter "FullyQualifiedName~ChineseTimeParserTests"
+```
+
+Result: 92 passed, 0 failed, 0 skipped.
+
+The full Release command:
+
+```text
+dotnet test Moment.slnx --configuration Release
+```
+
+Results:
+
+- Moment.Core.Tests: 161 passed;
+- Moment.Infrastructure.Tests: 48 passed;
+- Moment.Windows.Tests: 88 passed;
+- Moment.App.Tests: 132 passed;
+- total failures: 0.
+
+### Implementation notes
+
+- Valid clock regexes now have digit/sign boundaries on both sides. Separate lightweight
+  colon and Chinese-clock markers identify every scheduling-like clock occurrence; every
+  marker must be covered by a complete valid candidate before any draft can be returned.
+  This rejects signed, overlong, embedded, chained, and valid+malformed clock combinations.
+- Date-like candidates with a four-digit leading or trailing year are independently matched
+  and must be covered by a valid same-separator numeric date. Mixed separators therefore
+  remain actionable invalid input even alongside a valid relative/absolute date.
+- Numeric dotted text without a four-digit endpoint remains ordinary title text. ASCII
+  identifier adjacency also prevents `v1.2.2026` from being consumed as a date, while normal
+  standalone dates and dates adjacent to Chinese title text remain supported.
+- The short-date scanner skips single- and double-quoted literals, doubled quote escapes,
+  and backslash-escaped characters before locating actual `M` and `d` field runs. Tests use
+  `'M''/d' dd/MM/yyyy` for DMY and `\d/\M MM/dd/yyyy` for MDY.
+
+### Remaining concerns
+
+No new call-site changes were required in this round. The Task 5 Quick Add todo-dispatch
+handoff from the original implementation remains unchanged.

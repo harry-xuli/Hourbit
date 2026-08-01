@@ -23,23 +23,27 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex NumericDatePattern = new(
-        "(?<![\\d./-])(?<first>\\d{1,4})(?<separator>[/.-])(?<second>\\d{1,2})\\k<separator>(?<third>\\d{1,4})(?![\\d./-])",
+        "(?<![A-Za-z\\d./+-])(?=(?:\\d{4}[/.-]|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{4}(?![A-Za-z\\d./+-])))(?<first>\\d{1,4})(?<separator>[/.-])(?<second>\\d{1,2})\\k<separator>(?<third>\\d{1,4})(?![A-Za-z\\d./+-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex DateLikePattern = new(
-        "(?<![\\d./-])\\d{1,4}[/.-]\\d{1,2}[/.-]\\d{1,4}(?![\\d./-])",
+        "(?<![A-Za-z\\d./+-])(?:\\d{4}[/.-]\\d{1,2}[/.-]\\d{1,2}|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{4})(?![A-Za-z\\d./+-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseClockPattern = new(
-        "(?<period>上午|中午|下午|晚上)?\\s*(?<hour>\\d{1,2})点(?:(?<half>半)|(?<minute>\\d{1,2})分?)?",
+        "(?<![\\d+-])(?<period>上午|中午|下午|晚上)?\\s*(?<hour>\\d{1,2})点(?:(?<half>半)|(?<minute>\\d{1,2})分?)?(?![\\d点分+-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ColonClockPattern = new(
-        "(?<![\\d:])(?<hour>\\d{1,2}):(?<minute>\\d{2})(?![\\d:])",
+        "(?<![\\d:+-])(?<hour>\\d{1,2}):(?<minute>\\d{2})(?![\\d:+-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex ClockLikePattern = new(
-        "(?<![\\d:])\\d{1,3}:\\d{1,3}(?![\\d:])",
+    private static readonly Regex ChineseClockMarkerPattern = new(
+        "(?<!\\d)[+-]?\\d+点",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex ColonClockMarkerPattern = new(
+        "(?<!\\d)[+-]?\\d+:",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ReminderPrefixPattern = new(
@@ -131,12 +135,17 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             return Invalid(originalText, "日期格式无效。");
         }
 
-        if (!dateMatch.Success && DateLikePattern.IsMatch(normalized))
+        if (HasMalformedDateToken(normalized, dateMatches))
         {
             return Invalid(originalText, "日期格式无效。");
         }
 
         var clockMatches = FindClockMatches(normalized);
+        if (HasMalformedClockToken(normalized, clockMatches))
+        {
+            return Invalid(originalText, "时间格式无效。");
+        }
+
         if (clockMatches.Count > 1)
         {
             return Invalid(originalText, "只能指定一个钟点。");
@@ -145,11 +154,6 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         var clockMatch = clockMatches.Count == 1 ? clockMatches[0] : Match.Empty;
         var time = default(TimeOnly);
         if (clockMatch.Success && !TryParseClock(clockMatch, out time))
-        {
-            return Invalid(originalText, "时间格式无效。");
-        }
-
-        if (!clockMatch.Success && ClockLikePattern.IsMatch(normalized))
         {
             return Invalid(originalText, "时间格式无效。");
         }
@@ -283,7 +287,27 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         FindDateMatches(text).Count != 0 || DateLikePattern.IsMatch(text);
 
     private static bool HasClockToken(string text) =>
-        FindClockMatches(text).Count != 0 || ClockLikePattern.IsMatch(text);
+        FindClockMatches(text).Count != 0 ||
+        ChineseClockMarkerPattern.IsMatch(text) ||
+        ColonClockMarkerPattern.IsMatch(text);
+
+    private static bool HasMalformedDateToken(
+        string text,
+        IReadOnlyList<Match> validDateMatches) =>
+        DateLikePattern.Matches(text).Cast<Match>().Any(candidate =>
+            !validDateMatches.Any(valid =>
+                valid.Groups["first"].Success && Covers(valid, candidate)));
+
+    private static bool HasMalformedClockToken(
+        string text,
+        IReadOnlyList<Match> validClockMatches) =>
+        ChineseClockMarkerPattern.Matches(text).Cast<Match>()
+            .Concat(ColonClockMarkerPattern.Matches(text).Cast<Match>())
+            .Any(marker => !validClockMatches.Any(valid => Covers(valid, marker)));
+
+    private static bool Covers(Match match, Match candidate) =>
+        match.Index <= candidate.Index &&
+        match.Index + match.Length >= candidate.Index + candidate.Length;
 
     private static bool TryParseDate(
         Match match,
@@ -323,17 +347,72 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             return false;
         }
 
-        var pattern = culture.DateTimeFormat.ShortDatePattern;
-        var monthIndex = pattern.IndexOf('M', StringComparison.Ordinal);
-        var dayIndex = pattern.IndexOf('d', StringComparison.Ordinal);
+        if (!TryGetMonthFirst(culture.DateTimeFormat.ShortDatePattern, out var monthFirst))
+        {
+            return false;
+        }
+
+        return monthFirst
+            ? TryCreateDate(thirdText, firstText, secondText, out date)
+            : TryCreateDate(thirdText, secondText, firstText, out date);
+    }
+
+    private static bool TryGetMonthFirst(string pattern, out bool monthFirst)
+    {
+        monthFirst = false;
+        var monthIndex = -1;
+        var dayIndex = -1;
+        char? quote = null;
+
+        for (var index = 0; index < pattern.Length; index++)
+        {
+            var current = pattern[index];
+            if (current == '\\')
+            {
+                index++;
+                continue;
+            }
+
+            if (quote is not null)
+            {
+                if (current == quote)
+                {
+                    if (index + 1 < pattern.Length && pattern[index + 1] == quote)
+                    {
+                        index++;
+                    }
+                    else
+                    {
+                        quote = null;
+                    }
+                }
+
+                continue;
+            }
+
+            if (current is '\'' or '"')
+            {
+                quote = current;
+                continue;
+            }
+
+            if (current == 'M' && monthIndex < 0)
+            {
+                monthIndex = index;
+            }
+            else if (current == 'd' && dayIndex < 0)
+            {
+                dayIndex = index;
+            }
+        }
+
         if (monthIndex < 0 || dayIndex < 0)
         {
             return false;
         }
 
-        return monthIndex < dayIndex
-            ? TryCreateDate(thirdText, firstText, secondText, out date)
-            : TryCreateDate(thirdText, secondText, firstText, out date);
+        monthFirst = monthIndex < dayIndex;
+        return true;
     }
 
     private static bool TryCreateDate(

@@ -188,6 +188,70 @@ public sealed class ChineseTimeParserTests
         Assert.False(string.IsNullOrWhiteSpace(invalid.Message));
     }
 
+    [Theory]
+    [InlineData("123点开会")]
+    [InlineData("-1点开会")]
+    [InlineData("+1点开会")]
+    [InlineData("下午123点开会")]
+    [InlineData("事项123点开会")]
+    [InlineData("1点2分3开会")]
+    [InlineData("1点2点开会")]
+    [InlineData("1点+2开会")]
+    [InlineData("123:00开会")]
+    [InlineData("事项123:00开会")]
+    [InlineData("-1:00开会")]
+    [InlineData("+1:00开会")]
+    [InlineData("14:300开会")]
+    [InlineData("14:30:00开会")]
+    [InlineData("14:30-1:00开会")]
+    [InlineData("14:30+1开会")]
+    public void Rejects_signed_overlong_embedded_or_adjacent_malformed_clock_tokens(string text)
+    {
+        var invalid = Assert.IsType<ParseResult.Invalid>(Parse(text));
+
+        Assert.Equal(text, invalid.OriginalText);
+        Assert.False(string.IsNullOrWhiteSpace(invalid.Message));
+    }
+
+    [Theory]
+    [InlineData("明天 2026/08-05 开会")]
+    [InlineData("明天 14:30:00 开会")]
+    [InlineData("14:30 123:00 开会")]
+    [InlineData("14点 1点2分3 开会")]
+    public void Rejects_a_malformed_scheduling_token_even_with_a_valid_companion(string text)
+    {
+        var invalid = Assert.IsType<ParseResult.Invalid>(Parse(text));
+
+        Assert.Equal(text, invalid.OriginalText);
+        Assert.False(string.IsNullOrWhiteSpace(invalid.Message));
+    }
+
+    [Fact]
+    public void Ignores_quoted_and_escaped_literals_when_reading_short_date_field_order()
+    {
+        var dayFirst = (CultureInfo)CultureInfo.GetCultureInfo("en-GB").Clone();
+        dayFirst.DateTimeFormat.ShortDatePattern = "'M''/d' dd/MM/yyyy";
+        var monthFirst = (CultureInfo)CultureInfo.GetCultureInfo("en-US").Clone();
+        monthFirst.DateTimeFormat.ShortDatePattern = "\\d/\\M MM/dd/yyyy";
+
+        Assert.Equal(DateTimeOffset.Parse("2026-09-08T14:30:00+08:00"),
+            Reminder("08/09/2026 14:30 复盘", dayFirst).DueAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-09T14:30:00+08:00"),
+            Reminder("08/09/2026 14:30 复盘", monthFirst).DueAt);
+    }
+
+    [Theory]
+    [InlineData("发布 v1.2.3")]
+    [InlineData("发布 v1.2.2026")]
+    [InlineData("修复 M/d 格式")]
+    public void Keeps_ordinary_title_text_that_is_not_a_date_or_clock_token(string text)
+    {
+        var draft = Todo(text);
+
+        Assert.Equal(text, draft.Title);
+        Assert.Null(draft.DueDate);
+    }
+
     [Fact]
     public void Returns_time_preserving_future_choices_for_an_ambiguous_week()
     {
@@ -264,6 +328,16 @@ public sealed class ChineseTimeParserTests
         return Assert.IsType<ReminderDraft>(result.Draft);
     }
 
+    private static ReminderDraft Reminder(
+        string text,
+        CultureInfo culture,
+        DateTimeOffset? now = null,
+        TimeZoneInfo? zone = null)
+    {
+        var result = Assert.IsType<ParseResult.Success>(Parse(text, culture, now, zone));
+        return Assert.IsType<ReminderDraft>(result.Draft);
+    }
+
     private static TodoDraft Todo(string text, string cultureName = "zh-CN")
     {
         var result = Assert.IsType<ParseResult.Success>(Parse(text, cultureName));
@@ -280,4 +354,11 @@ public sealed class ChineseTimeParserTests
             now ?? Now,
             zone ?? ChinaTimeZone,
             CultureInfo.GetCultureInfo(cultureName));
+
+    private static ParseResult Parse(
+        string text,
+        CultureInfo culture,
+        DateTimeOffset? now = null,
+        TimeZoneInfo? zone = null) =>
+        new ChineseTimeParser().Parse(text, now ?? Now, zone ?? ChinaTimeZone, culture);
 }
