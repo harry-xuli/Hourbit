@@ -13,6 +13,7 @@ public sealed class SmokeTestRunnerTests
         "completed",
         "snoozed",
         "restart-recovered",
+        "missed-recovery",
         "single-instance-protocol"
     ];
 

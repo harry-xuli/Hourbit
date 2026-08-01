@@ -1,6 +1,8 @@
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Data.Sqlite;
+using Moment.App.Timeline;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
@@ -21,6 +23,7 @@ internal static class SmokeTestRunner
         "completed",
         "snoozed",
         "restart-recovered",
+        "missed-recovery",
         "single-instance-protocol"
     ];
 
@@ -52,6 +55,7 @@ internal static class SmokeTestRunner
             await using (var events = await EventLog.CreateAsync(resultPath, ct))
             {
                 await ExerciseReminderPipelineAsync(databasePath, events, ct);
+                await ExerciseMissedRecoveryAsync(databasePath, events, ct);
                 await ExerciseSingleInstanceProtocolAsync(events, ct);
             }
 
@@ -63,6 +67,61 @@ internal static class SmokeTestRunner
             Console.Error.WriteLine($"Self-test failed: {exception}");
             return 1;
         }
+        finally
+        {
+            // In-process self-tests must release provider-owned native handles
+            // before their isolated output directory can be removed on Windows.
+            SqliteConnection.ClearAllPools();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+    }
+
+    private static async Task ExerciseMissedRecoveryAsync(
+        string databasePath,
+        EventLog events,
+        CancellationToken ct)
+    {
+        var clock = new ControllableClock(
+            new DateTimeOffset(2026, 1, 5, 18, 59, 0, TimeSpan.Zero));
+        var zone = TimeZoneInfo.Utc;
+        var repository = await SqliteReminderRepository.OpenAsync(databasePath, ct);
+        var reminders = new ReminderService(repository, new SchedulerSignalProxy(), clock);
+        var occurrence = await reminders.CreateAsync(
+            ParseSuccess(
+                new ChineseTimeParser(),
+                "19点 提醒我 恢复验证",
+                clock.Now,
+                zone),
+            ct);
+
+        clock.AdvanceBy(TimeSpan.FromMinutes(65));
+        var sink = new MissedRecoverySink(occurrence.Id);
+        var recovery = new ReminderRecoveryService(repository, sink, sink);
+
+        var first = await recovery.RecoverAsync(clock.Now, ct);
+        var second = await recovery.RecoverAsync(clock.Now, ct);
+        var persisted = await repository.GetScheduledReminderAsync(occurrence.Id, ct);
+        var rows = await new SqliteTimelineQuery(databasePath).GetTimelineAsync(
+            DateOnly.FromDateTime(clock.Now.UtcDateTime), zone, ct);
+        var visible = new TimelineItemViewModel(
+            rows.Single(row => row.OccurrenceId == occurrence.Id),
+            clock.Now);
+
+        if (occurrence.DueAt !=
+                new DateTimeOffset(2026, 1, 5, 19, 0, 0, TimeSpan.Zero) ||
+            first != new ReminderRecoveryResult(Fired: 0, Missed: 1, Failed: 0) ||
+            second != new ReminderRecoveryResult(Fired: 0, Missed: 0, Failed: 0) ||
+            persisted?.Occurrence.State != OccurrenceState.Missed ||
+            visible.StatusText != "已错过" ||
+            visible.GroupName != "已错过" ||
+            sink.SummaryCount != 1)
+        {
+            throw new InvalidOperationException(
+                "The 19:00 reminder was not recovered once as a visible missed reminder at 20:04.");
+        }
+
+        await events.RecordAsync("missed-recovery", ct);
     }
 
     private static string ValidateOutputDirectory(string outputDirectory)
@@ -328,6 +387,37 @@ internal static class SmokeTestRunner
 
         public Task WaitAsync(CancellationToken ct) =>
             _completed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+    }
+
+    private sealed class MissedRecoverySink(Guid expectedOccurrenceId) :
+        IReminderSink,
+        IReminderRecoverySummarySink
+    {
+        public int SummaryCount { get; private set; }
+
+        public Task DeliverAsync(ScheduledReminder reminder, CancellationToken ct) =>
+            throw new InvalidOperationException(
+                "The expired normal reminder was delivered instead of marked missed.");
+
+        public Task DeliverMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders,
+            CancellationToken ct) => SendMissedSummaryAsync(reminders, ct);
+
+        public Task SendMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (reminders.Count != 1 ||
+                reminders[0].Occurrence.Id != expectedOccurrenceId)
+            {
+                throw new InvalidOperationException(
+                    "The missed reminder summary contained an unexpected occurrence.");
+            }
+
+            SummaryCount++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ControllableClock(DateTimeOffset now) : IClock

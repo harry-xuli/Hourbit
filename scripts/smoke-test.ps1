@@ -14,6 +14,7 @@ $expectedEvents = @(
     'completed',
     'snoozed',
     'restart-recovered',
+    'missed-recovery',
     'single-instance-protocol'
 )
 $repositoryRoot = [System.IO.Path]::GetFullPath(
