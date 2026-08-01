@@ -3,11 +3,123 @@ namespace Moment.App.Tests.Startup;
 using System.IO;
 using Moment.App.Startup;
 using Moment.App.Timeline;
+using Moment.Core.Abstractions;
+using Moment.Core.Domain;
 using Moment.Core.Scheduling;
+using Moment.Core.Services;
 using Moment.TestSupport;
+using Moment.Windows.Alerts;
+using Moment.Windows.Notifications;
 
 public sealed class ApplicationBootstrapTests
 {
+    [Fact]
+    public async Task Runtime_failure_reporting_forwards_recovery_and_important_alert_errors()
+    {
+        var now = DateTimeOffset.Parse("2026-08-01T20:04:00+08:00");
+        var repository = new FakeReminderRepository();
+        await repository.AddAsync(TestData.Scheduled(
+            "delivery failure", now.AddMinutes(-1).ToString("O")));
+        var recoveryFailure = new InvalidOperationException("recovery delivery failed");
+        var deliverySink = new ThrowingDeliverySink(recoveryFailure);
+        var recoveryService = new ReminderRecoveryService(
+            repository, deliverySink, new RecoverySummarySink(deliverySink));
+        var alertFailure = new InvalidOperationException("important action failed");
+        await using var importantAlerts = new ImportantAlertController(
+            new ImmediateImportantPresenter(),
+            new ThrowingImportantActions(alertFailure));
+        var reported = new List<Exception>();
+        var allReported = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var reporting = CompositionRoot.ConnectRuntimeFailureReporting(
+            recoveryService, importantAlerts, Report);
+
+        _ = await recoveryService.RecoverAsync(now, CancellationToken.None);
+        await importantAlerts.AdmitAsync(
+            new ReminderAlert(Guid.NewGuid(), "important", now),
+            CancellationToken.None);
+        await allReported.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal([recoveryFailure, alertFailure], reported);
+        return;
+
+        void Report(Exception exception)
+        {
+            reported.Add(exception);
+            if (reported.Count == 2)
+                allReported.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public async Task Blocked_important_alert_does_not_stall_later_missed_recovery_restart_or_refresh()
+    {
+        var now = DateTimeOffset.Parse("2026-08-01T20:04:00+08:00");
+        var repository = new FakeReminderRepository();
+        var important = TestData.Scheduled(
+            "important", now.AddHours(-2).ToString("O"), ReminderImportance.Important);
+        var expired = TestData.Scheduled(
+            "expired normal", now.AddHours(-1).ToString("O"));
+        await repository.AddAsync(important);
+        await repository.AddAsync(expired);
+        var presenter = new BlockingImportantPresenter();
+        var actions = new RecordingImportantActions();
+        var importantAlerts = new ImportantAlertController(presenter, actions);
+        var platform = new RecordingNotificationPlatform();
+        var notificationSink = new AppNotificationSink(platform, importantAlerts, actions);
+        var recoveryService = new ReminderRecoveryService(
+            repository, notificationSink, new RecoverySummarySink(notificationSink));
+        var schedulerStarts = 0;
+        var timelineRefreshes = 0;
+        var coordinator = new ReminderRecoveryCoordinator(
+            _ => Task.CompletedTask,
+            async (recoveryNow, ct) =>
+                _ = await recoveryService.RecoverAsync(recoveryNow, ct),
+            _ =>
+            {
+                Interlocked.Increment(ref schedulerStarts);
+                return Task.CompletedTask;
+            },
+            _ =>
+            {
+                Interlocked.Increment(ref timelineRefreshes);
+                return Task.CompletedTask;
+            },
+            new FakeClock(now),
+            CancellationToken.None);
+
+        try
+        {
+            var recovery = coordinator.RecoverAndRefreshAsync(CancellationToken.None);
+            await presenter.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+            await recovery.WaitAsync(TimeSpan.FromSeconds(1));
+
+            Assert.False(presenter.ActionFinished.Task.IsCompleted);
+            Assert.Empty(actions.Calls);
+            Assert.Equal(OccurrenceState.Fired,
+                (await repository.GetScheduledReminderAsync(
+                    important.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
+            Assert.Equal(OccurrenceState.Missed,
+                (await repository.GetScheduledReminderAsync(
+                    expired.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
+            var summary = Assert.Single(platform.Payloads);
+            Assert.Equal("missed-summary", summary.Tag);
+            Assert.Equal(1, Volatile.Read(ref schedulerStarts));
+            Assert.Equal(1, Volatile.Read(ref timelineRefreshes));
+
+            presenter.Release();
+            await presenter.ActionFinished.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            await actions.Called.Task.WaitAsync(TimeSpan.FromSeconds(1));
+        }
+        finally
+        {
+            presenter.Release();
+            await coordinator.DisposeAsync();
+            await importantAlerts.DisposeAsync();
+        }
+    }
+
     [Fact]
     public async Task Backup_restore_pre_cancelled_refresh_joins_active_reload_before_rollback_boundary()
     {
@@ -275,4 +387,100 @@ public sealed class ApplicationBootstrapTests
 
         Assert.Null(exception);
     }
+
+    private sealed class RecoverySummarySink(IReminderSink sink) :
+        IReminderRecoverySummarySink
+    {
+        public Task SendMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct) =>
+            sink.DeliverMissedSummaryAsync(reminders, ct);
+    }
+
+    private sealed class RecordingNotificationPlatform : INotificationPlatform
+    {
+        public NotificationHealth Health => NotificationHealth.Available;
+        public List<NotificationPayload> Payloads { get; } = [];
+        public Task ShowAsync(NotificationPayload payload, CancellationToken ct)
+        {
+            Payloads.Add(payload);
+            return Task.CompletedTask;
+        }
+        public Task OpenSettingsAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class ThrowingDeliverySink(Exception failure) : IReminderSink
+    {
+        public Task DeliverAsync(ScheduledReminder reminder, CancellationToken ct) =>
+            Task.FromException(failure);
+        public Task DeliverMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class ImmediateImportantPresenter : IImportantAlertPresenter
+    {
+        public Task<ImportantAlertAction> ShowAsync(
+            ReminderAlert alert, CancellationToken ct) =>
+            Task.FromResult(ImportantAlertAction.Ignore);
+    }
+
+    private sealed class BlockingImportantPresenter : IImportantAlertPresenter
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ActionFinished { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<ImportantAlertAction> ShowAsync(
+            ReminderAlert alert, CancellationToken ct)
+        {
+            Started.TrySetResult();
+            await _release.Task.WaitAsync(ct);
+            ActionFinished.TrySetResult();
+            return ImportantAlertAction.Ignore;
+        }
+
+        public void Release() => _release.TrySetResult();
+    }
+
+    private sealed class RecordingImportantActions : IReminderActionService
+    {
+        public List<string> Calls { get; } = [];
+        public TaskCompletionSource Called { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task CompleteAsync(Guid occurrenceId, CancellationToken ct) =>
+            RecordAsync("complete:" + occurrenceId);
+        public Task IgnoreAsync(Guid occurrenceId, CancellationToken ct) =>
+            RecordAsync("ignore:" + occurrenceId);
+        public Task<ReminderOccurrence> SnoozeAsync(
+            Guid occurrenceId, TimeSpan delay, CancellationToken ct)
+        {
+            Calls.Add("snooze" + delay.TotalMinutes + ":" + occurrenceId);
+            Called.TrySetResult();
+            return Task.FromResult(ReminderOccurrence.Schedule(
+                Guid.NewGuid(), DateTimeOffset.UtcNow));
+        }
+
+        private Task RecordAsync(string call)
+        {
+            Calls.Add(call);
+            Called.TrySetResult();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingImportantActions(Exception failure) :
+        IReminderActionService
+    {
+        public Task CompleteAsync(Guid occurrenceId, CancellationToken ct) =>
+            Task.FromException(failure);
+        public Task IgnoreAsync(Guid occurrenceId, CancellationToken ct) =>
+            Task.FromException(failure);
+        public Task<ReminderOccurrence> SnoozeAsync(
+            Guid occurrenceId, TimeSpan delay, CancellationToken ct) =>
+            Task.FromException<ReminderOccurrence>(failure);
+    }
+
 }

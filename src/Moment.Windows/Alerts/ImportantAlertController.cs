@@ -51,10 +51,19 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
 
     public async Task EnqueueAsync(ReminderAlert alert, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(alert);
+        var pending = new PendingAlert(alert, trackCompletion: true);
+        await AdmitAsync(pending, ct).ConfigureAwait(false);
+        await pending.Completion!.Task.ConfigureAwait(false);
+    }
+
+    public Task AdmitAsync(ReminderAlert alert, CancellationToken ct) =>
+        AdmitAsync(new PendingAlert(alert, trackCompletion: false), ct);
+
+    private async Task AdmitAsync(PendingAlert pending, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(pending.Alert);
         ct.ThrowIfCancellationRequested();
         _lifetime.Token.ThrowIfCancellationRequested();
-        var pending = new PendingAlert(alert);
 
         try
         {
@@ -63,8 +72,7 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
                 _lifetime.Token.ThrowIfCancellationRequested();
                 if (_queue.Writer.TryWrite(pending))
                 {
-                    // After admission, ownership is transferred to the controller; caller cancellation no longer drops it.
-                    await pending.Completion.Task.ConfigureAwait(false);
+                    // Ownership transfers at admission; later caller cancellation cannot drop it.
                     return;
                 }
             }
@@ -143,7 +151,7 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         {
             while (_queue.Reader.TryRead(out var pending))
             {
-                pending.Completion.TrySetCanceled(_lifetime.Token);
+                pending.Completion?.TrySetCanceled(_lifetime.Token);
             }
         }
     }
@@ -190,14 +198,18 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
 
         if (cancelled)
         {
-            pending.Completion.TrySetCanceled(ct);
+            pending.Completion?.TrySetCanceled(ct);
             throw new OperationCanceledException(ct);
         }
 
         if (failure is not null)
-            pending.Completion.TrySetException(failure);
+        {
+            ReportPresentationFailure(new ImportantAlertFailure(
+                pending.Alert, failure));
+            pending.Completion?.TrySetException(failure);
+        }
         else
-            pending.Completion.TrySetResult();
+            pending.Completion?.TrySetResult();
     }
 
     private async Task StartAudioAsync(ReminderAlert alert, CancellationToken ct)
@@ -233,7 +245,7 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
     {
         foreach (var pending in pendingAlerts)
         {
-            pending.Completion.TrySetCanceled(_lifetime.Token);
+            pending.Completion?.TrySetCanceled(_lifetime.Token);
         }
     }
 
@@ -252,10 +264,12 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         }
     }
 
-    private sealed class PendingAlert(ReminderAlert alert)
+    private sealed class PendingAlert(ReminderAlert alert, bool trackCompletion)
     {
         public ReminderAlert Alert { get; } = alert;
-        public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource? Completion { get; } = trackCompletion
+            ? new(TaskCreationOptions.RunContinuationsAsynchronously)
+            : null;
     }
 
     private sealed class SilentImportantAlertAudio : IImportantAlertAudio

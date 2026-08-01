@@ -61,6 +61,21 @@ public sealed class NotificationArgumentsTests
     }
 
     [Fact]
+    public async Task Important_reminder_uses_alert_admission_instead_of_action_completion()
+    {
+        var alerts = new RecordingImportantAlerts();
+        var sink = new AppNotificationSink(
+            new RecordingNotificationPlatform(), alerts, new RecordingActions());
+        var reminder = TestData.Scheduled(
+            "Important", "2026-08-01T09:30:00+08:00", ReminderImportance.Important);
+
+        await sink.DeliverAsync(reminder, CancellationToken.None);
+
+        Assert.Equal(ReminderAlert.From(reminder), Assert.Single(alerts.Admitted));
+        Assert.Equal(0, alerts.EnqueueCalls);
+    }
+
+    [Fact]
     public async Task Missed_summary_contains_count_and_at_most_three_titles()
     {
         var platform = new RecordingNotificationPlatform();
@@ -111,7 +126,18 @@ public sealed class NotificationArgumentsTests
 
     private sealed class RecordingImportantAlerts : IImportantAlertDelivery
     {
-        public Task EnqueueAsync(ReminderAlert alert, CancellationToken ct) => Task.CompletedTask;
+        public List<ReminderAlert> Admitted { get; } = [];
+        public int EnqueueCalls { get; private set; }
+        public Task AdmitAsync(ReminderAlert alert, CancellationToken ct)
+        {
+            Admitted.Add(alert);
+            return Task.CompletedTask;
+        }
+        public Task EnqueueAsync(ReminderAlert alert, CancellationToken ct)
+        {
+            EnqueueCalls++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class RecordingActions : IReminderActionService

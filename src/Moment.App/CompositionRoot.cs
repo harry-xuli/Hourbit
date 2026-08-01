@@ -42,6 +42,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     private readonly string _dataFolder;
     private readonly CancellationTokenSource _lifetime;
     private readonly EventHandler _schedulerStateChanged;
+    private readonly IDisposable _runtimeFailureReporting;
     private SettingsView? _settingsWindow;
     private bool _started;
     private int _disposed;
@@ -49,6 +50,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     private CompositionRoot(
         SqliteReminderRepository repository,
         ReminderScheduler scheduler,
+        ReminderRecoveryService reminderRecoveryService,
         TimelineRefreshCoordinator timelineRefresh,
         ReminderRecoveryCoordinator reminderRecovery,
         ImportantAlertController importantAlerts,
@@ -88,6 +90,8 @@ public sealed class CompositionRoot : IAsyncDisposable
         _lifetime = lifetime;
         _schedulerStateChanged = ComposeTimelineRefreshHandler(
             timelineRefresh, OnRuntimeError, lifetime.Token);
+        _runtimeFailureReporting = ConnectRuntimeFailureReporting(
+            reminderRecoveryService, importantAlerts, OnRuntimeError);
         _dataFolder = dataFolder;
         Settings = settings;
         Timeline = timeline;
@@ -213,7 +217,8 @@ public sealed class CompositionRoot : IAsyncDisposable
             });
 
         root = new CompositionRoot(
-            repository, scheduler, timelineRefresh, reminderRecovery,
+            repository, scheduler, reminderRecoveryService,
+            timelineRefresh, reminderRecovery,
             importantAlerts, notificationRuntime,
             resumeMonitor, hotkey, singleInstance, tray, reminders, clock,
             notificationSink, importantAlertPresenter,
@@ -331,6 +336,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         await _singleInstance.DisposeAsync();
         _scheduler.Dispose();
         await _importantAlerts.DisposeAsync();
+        _runtimeFailureReporting.Dispose();
         _lifetime.Dispose();
     }
 
@@ -370,6 +376,18 @@ public sealed class CompositionRoot : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(reportError);
         return (_, _) =>
             _ = ObserveTimelineRefreshAsync(timelineRefresh, reportError, lifetime);
+    }
+
+    internal static IDisposable ConnectRuntimeFailureReporting(
+        ReminderRecoveryService reminderRecovery,
+        ImportantAlertController importantAlerts,
+        Action<Exception> reportError)
+    {
+        ArgumentNullException.ThrowIfNull(reminderRecovery);
+        ArgumentNullException.ThrowIfNull(importantAlerts);
+        ArgumentNullException.ThrowIfNull(reportError);
+        return new RuntimeFailureSubscription(
+            reminderRecovery, importantAlerts, reportError);
     }
 
     private static async Task ObserveTimelineRefreshAsync(
@@ -535,6 +553,36 @@ public sealed class CompositionRoot : IAsyncDisposable
             IReadOnlyList<ScheduledReminder> reminders,
             CancellationToken ct) =>
             sink.DeliverMissedSummaryAsync(reminders, ct);
+    }
+
+    private sealed class RuntimeFailureSubscription : IDisposable
+    {
+        private readonly ReminderRecoveryService _reminderRecovery;
+        private readonly ImportantAlertController _importantAlerts;
+        private readonly Action<Exception> _reportError;
+        private readonly Action<ImportantAlertFailure> _reportImportantAlertFailure;
+        private int _disposed;
+
+        public RuntimeFailureSubscription(
+            ReminderRecoveryService reminderRecovery,
+            ImportantAlertController importantAlerts,
+            Action<Exception> reportError)
+        {
+            _reminderRecovery = reminderRecovery;
+            _importantAlerts = importantAlerts;
+            _reportError = reportError;
+            _reportImportantAlertFailure = failure => reportError(failure.Exception);
+            _reminderRecovery.RecoveryFailed += _reportError;
+            _importantAlerts.PresentationFailed += _reportImportantAlertFailure;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
+            _importantAlerts.PresentationFailed -= _reportImportantAlertFailure;
+            _reminderRecovery.RecoveryFailed -= _reportError;
+        }
     }
 
     private sealed class WindowNotificationNavigator(MainWindow window) : INotificationNavigator

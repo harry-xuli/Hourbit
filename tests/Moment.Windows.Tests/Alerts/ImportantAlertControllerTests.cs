@@ -8,6 +8,23 @@ namespace Moment.Windows.Tests.Alerts;
 public sealed class ImportantAlertControllerTests
 {
     [Fact]
+    public async Task Admission_completes_while_the_owned_alert_is_waiting_for_user_action()
+    {
+        var presenter = new BlockingPresenter();
+        var actions = new RecordingActions();
+        await using var controller = new ImportantAlertController(presenter, actions);
+        var alert = TestData.Alert("A", dueMinute: 1);
+
+        await controller.AdmitAsync(alert, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(1));
+        await presenter.Started.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Empty(actions.Calls);
+        presenter.Release();
+        await actions.Called.Task.WaitAsync(TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
     public async Task Important_alerts_are_presented_one_at_a_time_in_due_order()
     {
         var presenter = new RecordingPresenter(ImportantAlertAction.Ignore);
@@ -157,6 +174,25 @@ public sealed class ImportantAlertControllerTests
     }
 
     [Fact]
+    public async Task Action_failure_after_admission_is_reported()
+    {
+        var alert = TestData.Alert("A", dueMinute: 1);
+        var expected = new InvalidOperationException("action failed");
+        await using var controller = new ImportantAlertController(
+            new RecordingPresenter(ImportantAlertAction.Ignore),
+            new ThrowingActions(expected));
+        var reported = new TaskCompletionSource<ImportantAlertFailure>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        controller.PresentationFailed += failure => reported.TrySetResult(failure);
+
+        await controller.AdmitAsync(alert, CancellationToken.None);
+        var failure = await reported.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(alert, failure.Alert);
+        Assert.Same(expected, failure.Exception);
+    }
+
+    [Fact]
     public async Task Non_lifetime_cancellation_settles_the_alert_and_queue_continues()
     {
         var presenter = new CancelFirstPresenter();
@@ -279,12 +315,25 @@ public sealed class ImportantAlertControllerTests
     private sealed class RecordingActions : IReminderActionService
     {
         public List<string> Calls { get; } = [];
-        public Task CompleteAsync(Guid occurrenceId, CancellationToken ct) { Calls.Add("complete:" + occurrenceId); return Task.CompletedTask; }
-        public Task IgnoreAsync(Guid occurrenceId, CancellationToken ct) { Calls.Add("ignore:" + occurrenceId); return Task.CompletedTask; }
+        public TaskCompletionSource Called { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task CompleteAsync(Guid occurrenceId, CancellationToken ct) { Calls.Add("complete:" + occurrenceId); Called.TrySetResult(); return Task.CompletedTask; }
+        public Task IgnoreAsync(Guid occurrenceId, CancellationToken ct) { Calls.Add("ignore:" + occurrenceId); Called.TrySetResult(); return Task.CompletedTask; }
         public Task<ReminderOccurrence> SnoozeAsync(Guid occurrenceId, TimeSpan delay, CancellationToken ct)
         {
             Calls.Add("snooze" + delay.TotalMinutes + ":" + occurrenceId);
+            Called.TrySetResult();
             return Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), DateTimeOffset.UtcNow));
         }
+    }
+
+    private sealed class ThrowingActions(Exception failure) : IReminderActionService
+    {
+        public Task CompleteAsync(Guid occurrenceId, CancellationToken ct) =>
+            Task.FromException(failure);
+        public Task IgnoreAsync(Guid occurrenceId, CancellationToken ct) =>
+            Task.FromException(failure);
+        public Task<ReminderOccurrence> SnoozeAsync(
+            Guid occurrenceId, TimeSpan delay, CancellationToken ct) =>
+            Task.FromException<ReminderOccurrence>(failure);
     }
 }

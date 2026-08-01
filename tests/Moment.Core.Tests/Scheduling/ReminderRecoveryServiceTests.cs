@@ -198,17 +198,91 @@ public sealed class ReminderRecoveryServiceTests
     {
         var repository = new FakeReminderRepository();
         var summarySink = new RecordingReminderSink();
-        var sink = new ThrowFirstDeliverySink();
+        var expected = new InvalidOperationException("Delivery failed.");
+        var sink = new ThrowFirstDeliverySink(expected);
         var first = TestData.Scheduled("fails", Now.AddMinutes(-2).ToString("O"));
         var second = TestData.Scheduled("continues", Now.AddMinutes(-1).ToString("O"));
         await repository.AddAsync(first);
         await repository.AddAsync(second);
         var service = new ReminderRecoveryService(repository, sink, summarySink);
+        var reported = new List<Exception>();
+        service.RecoveryFailed += reported.Add;
 
         var result = await service.RecoverAsync(Now, CancellationToken.None);
 
         Assert.Equal(new ReminderRecoveryResult(Fired: 2, Missed: 0, Failed: 1), result);
         Assert.Equal([second], sink.Deliveries);
+        Assert.Equal([expected], reported);
+        Assert.Equal(OccurrenceState.Fired,
+            (await repository.GetScheduledReminderAsync(first.Occurrence.Id, CancellationToken.None))!
+            .Occurrence.State);
+    }
+
+    [Fact]
+    public async Task Summary_failure_is_reported_without_rolling_back_missed_state()
+    {
+        var repository = new FakeReminderRepository();
+        var reminderSink = new RecordingReminderSink();
+        var expected = new InvalidOperationException("Summary failed.");
+        var summarySink = new ThrowingSummarySink(expected);
+        var reminder = TestData.Scheduled("missed", Now.AddHours(-1).ToString("O"));
+        await repository.AddAsync(reminder);
+        var service = new ReminderRecoveryService(repository, reminderSink, summarySink);
+        var reported = new List<Exception>();
+        service.RecoveryFailed += reported.Add;
+
+        var result = await service.RecoverAsync(Now, CancellationToken.None);
+
+        Assert.Equal(new ReminderRecoveryResult(Fired: 0, Missed: 1, Failed: 1), result);
+        Assert.Equal([expected], reported);
+        Assert.Equal([reminder], Assert.Single(summarySink.Attempts));
+        Assert.Equal(OccurrenceState.Missed,
+            (await repository.GetScheduledReminderAsync(reminder.Occurrence.Id, CancellationToken.None))!
+            .Occurrence.State);
+    }
+
+    [Fact]
+    public async Task Cancellation_during_delivery_is_not_reported_and_preserves_fired_state()
+    {
+        var repository = new FakeReminderRepository();
+        var summarySink = new RecordingReminderSink();
+        using var cancellation = new CancellationTokenSource();
+        var sink = new CancellingDeliverySink(cancellation);
+        var reminder = TestData.Scheduled("cancelled", Now.AddMinutes(-1).ToString("O"));
+        await repository.AddAsync(reminder);
+        var service = new ReminderRecoveryService(repository, sink, summarySink);
+        var reported = new List<Exception>();
+        service.RecoveryFailed += reported.Add;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.RecoverAsync(Now, cancellation.Token));
+
+        Assert.Empty(reported);
+        Assert.Equal(OccurrenceState.Fired,
+            (await repository.GetScheduledReminderAsync(reminder.Occurrence.Id, CancellationToken.None))!
+            .Occurrence.State);
+    }
+
+    [Fact]
+    public async Task Cancellation_during_summary_is_not_reported_and_preserves_missed_state()
+    {
+        var repository = new FakeReminderRepository();
+        var reminderSink = new RecordingReminderSink();
+        using var cancellation = new CancellationTokenSource();
+        var summarySink = new CancellingSummarySink(cancellation);
+        var reminder = TestData.Scheduled("missed", Now.AddHours(-1).ToString("O"));
+        await repository.AddAsync(reminder);
+        var service = new ReminderRecoveryService(repository, reminderSink, summarySink);
+        var reported = new List<Exception>();
+        service.RecoveryFailed += reported.Add;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.RecoverAsync(Now, cancellation.Token));
+
+        Assert.Empty(reported);
+        Assert.Equal(OccurrenceState.Missed,
+            (await repository.GetScheduledReminderAsync(reminder.Occurrence.Id, CancellationToken.None))!
+            .Occurrence.State);
     }
 
     [Fact]
@@ -259,7 +333,7 @@ public sealed class ReminderRecoveryServiceTests
         }
     }
 
-    private sealed class ThrowFirstDeliverySink : IReminderSink
+    private sealed class ThrowFirstDeliverySink(Exception failure) : IReminderSink
     {
         private bool _throw = true;
         private readonly List<ScheduledReminder> _deliveries = [];
@@ -272,7 +346,7 @@ public sealed class ReminderRecoveryServiceTests
             if (_throw)
             {
                 _throw = false;
-                throw new InvalidOperationException("Delivery failed.");
+                throw failure;
             }
 
             _deliveries.Add(reminder);
@@ -282,5 +356,43 @@ public sealed class ReminderRecoveryServiceTests
         public Task DeliverMissedSummaryAsync(
             IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct) =>
             Task.CompletedTask;
+    }
+
+    private sealed class ThrowingSummarySink(Exception failure) : IReminderRecoverySummarySink
+    {
+        private readonly List<IReadOnlyList<ScheduledReminder>> _attempts = [];
+        public IReadOnlyList<IReadOnlyList<ScheduledReminder>> Attempts => _attempts;
+
+        public Task SendMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct)
+        {
+            _attempts.Add(reminders);
+            return Task.FromException(failure);
+        }
+    }
+
+    private sealed class CancellingDeliverySink(
+        CancellationTokenSource cancellation) : IReminderSink
+    {
+        public Task DeliverAsync(ScheduledReminder reminder, CancellationToken ct)
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled(ct);
+        }
+
+        public Task DeliverMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class CancellingSummarySink(
+        CancellationTokenSource cancellation) : IReminderRecoverySummarySink
+    {
+        public Task SendMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct)
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled(ct);
+        }
     }
 }

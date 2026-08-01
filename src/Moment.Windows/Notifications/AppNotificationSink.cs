@@ -58,6 +58,8 @@ public interface INotificationNavigator { Task NavigateAsync(NotificationNavigat
 public interface IImportantAlertDelivery
 {
     Task EnqueueAsync(ReminderAlert alert, CancellationToken ct);
+    Task AdmitAsync(ReminderAlert alert, CancellationToken ct) =>
+        EnqueueAsync(alert, ct);
 }
 
 /// <summary>Windows App SDK boundary; tests use <see cref="INotificationPlatform"/> fakes instead.</summary>
@@ -155,7 +157,7 @@ public sealed class AppNotificationSink(INotificationPlatform platform, IImporta
     {
         if (reminder.Item.Importance == ReminderImportance.Important)
         {
-            return importantAlerts.EnqueueAsync(ReminderAlert.From(reminder), ct);
+            return importantAlerts.AdmitAsync(ReminderAlert.From(reminder), ct);
         }
 
         var id = reminder.Occurrence.Id;

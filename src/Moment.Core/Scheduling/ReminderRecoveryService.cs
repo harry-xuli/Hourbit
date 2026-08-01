@@ -14,6 +14,8 @@ public sealed class ReminderRecoveryService
     private readonly IReminderRecoverySummarySink _summarySink;
     private readonly SemaphoreSlim _recoveryGate = new(1, 1);
 
+    public event Action<Exception>? RecoveryFailed;
+
     public ReminderRecoveryService(
         IReminderRepository repository,
         IReminderSink reminderSink,
@@ -77,9 +79,10 @@ public sealed class ReminderRecoveryService
                 {
                     throw;
                 }
-                catch
+                catch (Exception exception)
                 {
                     failed++;
+                    ReportFailure(exception);
                 }
             }
 
@@ -95,9 +98,10 @@ public sealed class ReminderRecoveryService
                 {
                     throw;
                 }
-                catch
+                catch (Exception exception)
                 {
                     failed++;
+                    ReportFailure(exception);
                 }
             }
 
@@ -129,5 +133,21 @@ public sealed class ReminderRecoveryService
         }
 
         return null;
+    }
+
+    private void ReportFailure(Exception exception)
+    {
+        foreach (Action<Exception> observer in
+                 RecoveryFailed?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                observer(exception);
+            }
+            catch
+            {
+                // Faulting observers cannot stop recovery of later reminders.
+            }
+        }
     }
 }
