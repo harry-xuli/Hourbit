@@ -168,6 +168,7 @@ public sealed class ReminderSchedulerTests
         repository.ReleaseFirstQuery.TrySetResult();
         await stop;
         await restart;
+        await repository.SecondQueryEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(2, repository.QueryCount);
     }
 
@@ -296,16 +297,23 @@ public sealed class ReminderSchedulerTests
         public int QueryCount => Volatile.Read(ref _queries);
         public TaskCompletionSource FirstQueryEntered { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SecondQueryEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseFirstQuery { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public override async Task<IReadOnlyList<ScheduledReminder>>
             GetScheduledAsync(CancellationToken ct)
         {
-            if (Interlocked.Increment(ref _queries) == 1)
+            var query = Interlocked.Increment(ref _queries);
+            if (query == 1)
             {
                 FirstQueryEntered.TrySetResult();
                 await ReleaseFirstQuery.Task;
+            }
+            else if (query == 2)
+            {
+                SecondQueryEntered.TrySetResult();
             }
             return await base.GetScheduledAsync(ct);
         }

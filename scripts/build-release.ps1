@@ -1,0 +1,180 @@
+[CmdletBinding()]
+param(
+    [string]$InnoCompiler,
+    [switch]$ValidateOnly,
+    [string]$ValidationProbePath
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$repositoryRoot = [System.IO.Path]::GetFullPath(
+    (Join-Path $PSScriptRoot '..'))
+$artifactsRoot = [System.IO.Path]::GetFullPath(
+    (Join-Path $repositoryRoot 'artifacts'))
+$publishDirectory = [System.IO.Path]::GetFullPath(
+    (Join-Path $artifactsRoot 'publish'))
+$portableDirectory = [System.IO.Path]::GetFullPath(
+    (Join-Path $artifactsRoot 'portable'))
+$portableArchive = Join-Path $artifactsRoot 'Moment-Portable-x64.zip'
+$installerArtifact = Join-Path $artifactsRoot 'Moment-Setup-x64.exe'
+$applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
+$solution = Join-Path $repositoryRoot 'Moment.slnx'
+$installerScript = Join-Path $repositoryRoot 'installer\Moment.iss'
+
+function Assert-ExactStagingDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Candidate,
+        [Parameter(Mandatory = $true)]
+        [string]$Expected
+    )
+
+    $candidatePath = [System.IO.Path]::GetFullPath($Candidate)
+    $expectedPath = [System.IO.Path]::GetFullPath($Expected)
+    $artifactPrefix = $artifactsRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar) +
+        [System.IO.Path]::DirectorySeparatorChar
+
+    if (-not $candidatePath.StartsWith(
+            $artifactPrefix,
+            [System.StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals(
+            $candidatePath,
+            $expectedPath,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing release cleanup outside the exact staging directory: $candidatePath"
+    }
+}
+
+function Remove-ExactStagingDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Candidate,
+        [Parameter(Mandatory = $true)]
+        [string]$Expected
+    )
+
+    Assert-ExactStagingDirectory -Candidate $Candidate -Expected $Expected
+    if (Test-Path -LiteralPath $Candidate) {
+        Remove-Item -LiteralPath $Candidate -Recurse -Force
+    }
+}
+
+function Resolve-InnoCompiler {
+    if (-not [string]::IsNullOrWhiteSpace($InnoCompiler)) {
+        $explicitPath = [System.IO.Path]::GetFullPath($InnoCompiler)
+        if (-not (Test-Path -LiteralPath $explicitPath -PathType Leaf)) {
+            throw "The explicit Inno Setup compiler does not exist: $explicitPath"
+        }
+        return $explicitPath
+    }
+
+    $candidates = @(
+        'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+        'C:\Program Files\Inno Setup 6\ISCC.exe',
+        (Join-Path ([Environment]::GetFolderPath(
+            [Environment+SpecialFolder]::LocalApplicationData
+        )) 'Programs\Inno Setup 6\ISCC.exe')
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    throw 'Inno Setup 6 was not found in any approved deterministic location. Use -InnoCompiler with an official installation.'
+}
+
+function Write-Sha256File {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    $hash = Get-FileHash -LiteralPath $Path -Algorithm SHA256
+    $line = '{0}  {1}' -f
+        $hash.Hash.ToLowerInvariant(),
+        [System.IO.Path]::GetFileName($Path)
+    Set-Content -LiteralPath ($Path + '.sha256') -Value $line -Encoding Ascii -NoNewline
+}
+
+$publishProbe = if ($ValidateOnly -and
+    -not [string]::IsNullOrWhiteSpace($ValidationProbePath)) {
+    $ValidationProbePath
+} else {
+    $publishDirectory
+}
+Assert-ExactStagingDirectory -Candidate $publishProbe -Expected $publishDirectory
+Assert-ExactStagingDirectory -Candidate $portableDirectory -Expected $portableDirectory
+
+if ($ValidateOnly) {
+    Write-Output "Validated cleanup target: $publishDirectory"
+    Write-Output "Validated cleanup target: $portableDirectory"
+    exit 0
+}
+if (-not [string]::IsNullOrWhiteSpace($ValidationProbePath)) {
+    throw '-ValidationProbePath can only be used with -ValidateOnly.'
+}
+
+$resolvedCompiler = Resolve-InnoCompiler
+New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
+
+Push-Location $repositoryRoot
+try {
+    & dotnet test $solution -c Release
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release tests failed with exit code $LASTEXITCODE."
+    }
+
+    Remove-ExactStagingDirectory `
+        -Candidate $publishDirectory `
+        -Expected $publishDirectory
+    Remove-ExactStagingDirectory `
+        -Candidate $portableDirectory `
+        -Expected $portableDirectory
+
+    & dotnet publish $applicationProject `
+        -c Release `
+        -r win-x64 `
+        --self-contained true `
+        -p:PublishSingleFile=true `
+        -o $publishDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release publish failed with exit code $LASTEXITCODE."
+    }
+
+    Copy-Item -LiteralPath $publishDirectory -Destination $portableDirectory -Recurse
+    New-Item -Path (Join-Path $portableDirectory 'portable.flag') `
+        -ItemType File -Force | Out-Null
+
+    Compress-Archive `
+        -Path (Join-Path $portableDirectory '*') `
+        -DestinationPath $portableArchive `
+        -CompressionLevel Optimal `
+        -Force
+
+    & $resolvedCompiler `
+        "/DPublishDir=$publishDirectory" `
+        "/DArtifactsDir=$artifactsRoot" `
+        '/DAppVersion=0.1.0' `
+        $installerScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup failed with exit code $LASTEXITCODE."
+    }
+
+    if (-not (Test-Path -LiteralPath $portableArchive -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $installerArtifact -PathType Leaf)) {
+        throw 'One or more expected release artifacts were not created.'
+    }
+
+    Write-Sha256File -Path $portableArchive
+    Write-Sha256File -Path $installerArtifact
+
+    Get-Item -LiteralPath $portableArchive, $installerArtifact |
+        Select-Object FullName, Length
+    Get-FileHash -LiteralPath $portableArchive, $installerArtifact -Algorithm SHA256
+}
+finally {
+    Pop-Location
+}

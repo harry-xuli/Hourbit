@@ -5,6 +5,29 @@ using System.IO;
 public sealed class ApplicationBootstrapTests
 {
     [Fact]
+    public void Windows_app_runtime_base_directory_is_set_for_single_file_startup()
+    {
+        const string variableName = "MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY";
+        var original = Environment.GetEnvironmentVariable(
+            variableName, EnvironmentVariableTarget.Process);
+        try
+        {
+            Environment.SetEnvironmentVariable(
+                variableName, @"D:\StaleRuntimeLocation", EnvironmentVariableTarget.Process);
+
+            ApplicationBootstrap.EnsureWindowsDirectoryEnvironment();
+
+            Assert.Equal(AppContext.BaseDirectory, Environment.GetEnvironmentVariable(
+                variableName, EnvironmentVariableTarget.Process));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(
+                variableName, original, EnvironmentVariableTarget.Process);
+        }
+    }
+
+    [Fact]
     public void Existing_process_windows_directory_is_not_overwritten()
     {
         var original = Environment.GetEnvironmentVariable("windir", EnvironmentVariableTarget.Process);

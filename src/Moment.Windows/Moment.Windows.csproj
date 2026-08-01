@@ -9,6 +9,7 @@
     <ProjectReference Include="..\Moment.Core\Moment.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Remove="Assets\default-alert.wav" />
     <EmbeddedResource Include="Assets\default-alert.wav" />
   </ItemGroup>
 </Project>

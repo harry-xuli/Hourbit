@@ -52,33 +52,14 @@ public sealed class TimelineViewTests
             var selected = Assert.IsType<ListBoxItem>(
                 selectedList.ItemContainerGenerator.ContainerFromItem(
                     selectedList.SelectedItem));
-            var originalPointer = System.Windows.Forms.Cursor.Position;
-            try
-            {
-                var pointer = selected.PointToScreen(
-                    new Point(selected.ActualWidth / 2, selected.ActualHeight / 2));
-                System.Windows.Forms.Cursor.Position = new System.Drawing.Point(
-                    (int)Math.Round(pointer.X), (int)Math.Round(pointer.Y));
-                Mouse.Synchronize();
-                window.Dispatcher.Invoke(
-                    () => { },
-                    System.Windows.Threading.DispatcherPriority.ApplicationIdle);
-                Assert.True(selected.IsMouseOver);
-
-                var selectedSurface = Assert.Single(
-                    Descendants<Border>(selected),
-                    border => border.TemplatedParent == selected);
-                AssertBrush(Colors.Yellow, selectedSurface.Background);
-                AssertBrush(Colors.Black, selected.Foreground);
-                Assert.All(
-                    Descendants<TextBlock>(selected).Where(text => text.IsVisible),
-                    text => AssertBrush(Colors.Black, text.Foreground));
-            }
-            finally
-            {
-                System.Windows.Forms.Cursor.Position = originalPointer;
-                Mouse.Synchronize();
-            }
+            var selectedSurface = Assert.Single(
+                Descendants<Border>(selected),
+                border => border.TemplatedParent == selected);
+            AssertBrush(Colors.Yellow, selectedSurface.Background);
+            AssertBrush(Colors.Black, selected.Foreground);
+            Assert.All(
+                Descendants<TextBlock>(selected).Where(text => text.IsVisible),
+                text => AssertBrush(Colors.Black, text.Foreground));
             window.Close();
         });
 

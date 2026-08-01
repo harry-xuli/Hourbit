@@ -5,15 +5,24 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling Condition="'$(PublishSingleFile)' == 'true'">true</EnableMsixTooling>
+    <WindowsAppSDKSelfContained Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSDKSelfContained>
+    <WindowsAppSdkUndockedRegFreeWinRTInitialize Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSdkUndockedRegFreeWinRTInitialize>
     <StartupObject>Moment.App.Program</StartupObject>
+    <Version>0.1.0</Version>
+    <Product>时刻</Product>
+    <Description>本地优先的 Windows 11 提醒工具</Description>
     <ReleasePageUrl Condition="'$(ReleasePageUrl)' == ''"></ReleasePageUrl>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Moment.Core\Moment.Core.csproj" />
     <ProjectReference Include="..\Moment.Infrastructure\Moment.Infrastructure.csproj" />
-    <ProjectReference Include="..\Moment.Windows\Moment.Windows.csproj" />
+    <ProjectReference Include="..\Moment.Windows\Moment.Windows.csproj">
+      <AdditionalProperties Condition="'$(PublishSingleFile)' == 'true'">EnableMsixTooling=true;RuntimeIdentifier=$(RuntimeIdentifier);WindowsAppSDKSingleFileVerifyConfiguration=false</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <None Remove="Assets\default-alert.wav" />
     <EmbeddedResource Include="Assets\default-alert.wav" />
     <AssemblyMetadata Include="ReleasePageUrl" Value="$(ReleasePageUrl)" />
   </ItemGroup>

@@ -4,6 +4,11 @@ public static class ApplicationBootstrap
 {
     public static void EnsureWindowsDirectoryEnvironment()
     {
+        Environment.SetEnvironmentVariable(
+            "MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY",
+            AppContext.BaseDirectory,
+            EnvironmentVariableTarget.Process);
+
         var processValue = Environment.GetEnvironmentVariable(
             "windir", EnvironmentVariableTarget.Process);
         if (!string.IsNullOrWhiteSpace(processValue))

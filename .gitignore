@@ -2,6 +2,7 @@
 .worktrees/
 bin/
 obj/
+artifacts/
 .vs/
 *.user
 *.suo
