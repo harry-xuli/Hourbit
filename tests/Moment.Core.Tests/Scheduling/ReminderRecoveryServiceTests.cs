@@ -122,7 +122,7 @@ public sealed class ReminderRecoveryServiceTests
     [Fact]
     public async Task Concurrent_recovery_services_deliver_each_occurrence_only_once()
     {
-        var repository = new ConcurrentQueryRepository(expectedQueries: 2);
+        var repository = new CapturedSnapshotRepository(expectedSnapshots: 2);
         var sink = new RecordingReminderSink();
         var reminder = TestData.Scheduled("once", Now.AddMinutes(-1).ToString("O"));
         await repository.AddAsync(reminder);
@@ -137,6 +137,26 @@ public sealed class ReminderRecoveryServiceTests
         Assert.Equal(0, results.Sum(result => result.Missed));
         Assert.Equal(0, results.Sum(result => result.Failed));
         Assert.Equal([reminder], sink.Deliveries);
+    }
+
+    [Fact]
+    public async Task Concurrent_recovery_services_summarize_each_missed_occurrence_only_once()
+    {
+        var repository = new CapturedSnapshotRepository(expectedSnapshots: 2);
+        var sink = new RecordingReminderSink();
+        var reminder = TestData.Scheduled("once", Now.AddHours(-1).ToString("O"));
+        await repository.AddAsync(reminder);
+        var first = new ReminderRecoveryService(repository, sink, sink);
+        var second = new ReminderRecoveryService(repository, sink, sink);
+
+        var results = await Task.WhenAll(
+            first.RecoverAsync(Now, CancellationToken.None),
+            second.RecoverAsync(Now, CancellationToken.None));
+
+        Assert.Equal(0, results.Sum(result => result.Fired));
+        Assert.Equal(1, results.Sum(result => result.Missed));
+        Assert.Equal(0, results.Sum(result => result.Failed));
+        Assert.Equal([reminder], Assert.Single(sink.MissedSummaries));
     }
 
     [Fact]
@@ -219,22 +239,23 @@ public sealed class ReminderRecoveryServiceTests
             }
         };
 
-    private sealed class ConcurrentQueryRepository(int expectedQueries) : FakeReminderRepository
+    private sealed class CapturedSnapshotRepository(int expectedSnapshots) : FakeReminderRepository
     {
-        private readonly TaskCompletionSource _allQueriesEntered =
+        private readonly TaskCompletionSource _allSnapshotsCaptured =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _queryCount;
+        private int _snapshotCount;
 
         public override async Task<IReadOnlyList<ScheduledReminder>> GetRecoverableAsync(
             DateTimeOffset through, CancellationToken ct)
         {
-            if (Interlocked.Increment(ref _queryCount) == expectedQueries)
+            var snapshot = await base.GetRecoverableAsync(through, ct);
+            if (Interlocked.Increment(ref _snapshotCount) == expectedSnapshots)
             {
-                _allQueriesEntered.TrySetResult();
+                _allSnapshotsCaptured.TrySetResult();
             }
 
-            await _allQueriesEntered.Task.WaitAsync(ct);
-            return await base.GetRecoverableAsync(through, ct);
+            await _allSnapshotsCaptured.Task.WaitAsync(ct);
+            return snapshot;
         }
     }
 
