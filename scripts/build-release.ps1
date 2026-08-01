@@ -20,6 +20,50 @@ $applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.cspro
 $windowsProject = Join-Path $repositoryRoot 'src\Moment.Windows\Moment.Windows.csproj'
 $solution = Join-Path $repositoryRoot 'Moment.slnx'
 $installerScript = Join-Path $repositoryRoot 'installer\Moment.iss'
+$installerValidationScript = Join-Path $repositoryRoot 'scripts\validate-installer.ps1'
+
+function Test-SemanticVersion {
+    param([AllowEmptyString()][string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) {
+        return $false
+    }
+    $pattern =
+        '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)' +
+        '(?:-(?:(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)' +
+        '(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?' +
+        '(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+    return $Value -cmatch $pattern
+}
+
+function Assert-SemVerValidationContract {
+    $valid = @(
+        '0.2.0',
+        '0.2.0-alpha',
+        '0.2.0-alpha.1',
+        '0.2.0-0',
+        '0.2.0-rc.1+build.001',
+        '1.2.3+001'
+    )
+    $invalid = @(
+        '0.2',
+        '01.2.3',
+        '0.2.0-01',
+        '0.2.0-alpha.01',
+        '0.2.0-',
+        '0.2.0+'
+    )
+    foreach ($candidate in $valid) {
+        if (-not (Test-SemanticVersion $candidate)) {
+            throw "SemVer validator rejected valid probe '$candidate'."
+        }
+    }
+    foreach ($candidate in $invalid) {
+        if (Test-SemanticVersion $candidate) {
+            throw "SemVer validator accepted invalid probe '$candidate'."
+        }
+    }
+}
 
 function Get-RequiredProperty {
     param(
@@ -58,11 +102,7 @@ function Get-ReleaseMetadata {
     $product = Get-RequiredProperty $properties 'Product'
     $releaseDate = Get-RequiredProperty $properties 'ReleaseDate'
 
-    $semVerPattern =
-        '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)' +
-        '(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?' +
-        '(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
-    if ($semanticVersion -cnotmatch $semVerPattern) {
+    if (-not (Test-SemanticVersion $semanticVersion)) {
         throw "Evaluated SemanticVersion '$semanticVersion' is not valid semantic versioning."
     }
     if ($version -cne $semanticVersion) {
@@ -94,6 +134,7 @@ function Get-ReleaseMetadata {
     }
 }
 
+Assert-SemVerValidationContract
 $releaseMetadata = Get-ReleaseMetadata
 $portableArchive = Join-Path $artifactsRoot (
     $releaseMetadata.AssemblyName + '-Portable-x64.zip')
@@ -186,7 +227,15 @@ $publishProbe = if ($ValidateOnly -and
 Assert-ExactStagingDirectory -Candidate $publishProbe -Expected $publishDirectory
 Assert-ExactStagingDirectory -Candidate $portableDirectory -Expected $portableDirectory
 
+& powershell -NoProfile -ExecutionPolicy Bypass `
+    -File $installerValidationScript `
+    -InstallerScript $installerScript
+if ($LASTEXITCODE -ne 0) {
+    throw "Installer upgrade validation failed with exit code $LASTEXITCODE."
+}
+
 if ($ValidateOnly) {
+    Write-Output 'Validated strict SemVer 2.0 probe matrix.'
     Write-Output "Validated product: $($releaseMetadata.Product)"
     Write-Output "Validated executable: $($releaseMetadata.AssemblyName).exe"
     Write-Output "Validated semantic version: $($releaseMetadata.Version)"
