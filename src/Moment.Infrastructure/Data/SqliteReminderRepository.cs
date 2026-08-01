@@ -45,6 +45,18 @@ public sealed class SqliteReminderRepository : IReminderRepository
             command.Parameters.AddWithValue("$throughUtc", FormatUtcKey(through));
         }, ct);
 
+    public async Task<IReadOnlyList<ScheduledReminder>> GetRecoverableAsync(DateTimeOffset through, CancellationToken ct) =>
+        await GetScheduledRemindersAsync("""
+            (o.state = $scheduled AND o.due_at_utc <= $throughUtc)
+            OR (o.state = $fired AND i.importance = $normal)
+            """, command =>
+        {
+            command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
+            command.Parameters.AddWithValue("$throughUtc", FormatUtcKey(through));
+            command.Parameters.AddWithValue("$fired", (int)OccurrenceState.Fired);
+            command.Parameters.AddWithValue("$normal", (int)ReminderImportance.Normal);
+        }, ct);
+
     public async Task<ScheduledReminder?> GetScheduledReminderAsync(Guid occurrenceId, CancellationToken ct)
     {
         await using var connection = await OpenConnectionAsync(ct);
@@ -95,6 +107,23 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.Parameters.AddWithValue("$firedAt", Format(firedAt));
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
         command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    public async Task<bool> TryTransitionAsync(Guid occurrenceId, OccurrenceState expected,
+        OccurrenceState next, DateTimeOffset handledAt, CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE occurrences
+            SET state = $next, handled_at = $handledAt
+            WHERE id = $id AND state = $expected;
+            """;
+        command.Parameters.AddWithValue("$next", (int)next);
+        command.Parameters.AddWithValue("$handledAt", Format(handledAt));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$expected", (int)expected);
         return await command.ExecuteNonQueryAsync(ct) == 1;
     }
 

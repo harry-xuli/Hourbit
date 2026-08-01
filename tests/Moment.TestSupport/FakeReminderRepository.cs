@@ -47,6 +47,17 @@ public class FakeReminderRepository : IReminderRepository
         }
     }
 
+    public virtual Task<IReadOnlyList<ScheduledReminder>> GetRecoverableAsync(DateTimeOffset through, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<ScheduledReminder>>(GetMatching(occurrence =>
+                (occurrence.State == OccurrenceState.Scheduled && occurrence.DueAt <= through)
+                || (occurrence.State == OccurrenceState.Fired
+                    && _items[occurrence.ItemId].Importance == ReminderImportance.Normal)));
+        }
+    }
+
     public virtual Task<ScheduledReminder?> GetScheduledReminderAsync(Guid occurrenceId, CancellationToken ct)
     {
         lock (_gate)
@@ -97,6 +108,21 @@ public class FakeReminderRepository : IReminderRepository
             }
 
             _occurrences[occurrenceId] = occurrence with { State = OccurrenceState.Fired, HandledAt = firedAt };
+            return Task.FromResult(true);
+        }
+    }
+
+    public virtual Task<bool> TryTransitionAsync(Guid occurrenceId, OccurrenceState expected,
+        OccurrenceState next, DateTimeOffset handledAt, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (!_occurrences.TryGetValue(occurrenceId, out var occurrence) || occurrence.State != expected)
+            {
+                return Task.FromResult(false);
+            }
+
+            _occurrences[occurrenceId] = occurrence with { State = next, HandledAt = handledAt };
             return Task.FromResult(true);
         }
     }

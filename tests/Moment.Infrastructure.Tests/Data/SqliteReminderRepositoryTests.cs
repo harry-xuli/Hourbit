@@ -236,6 +236,60 @@ public sealed class SqliteReminderRepositoryTests
     }
 
     [Fact]
+    public async Task GetRecoverableAsync_returns_due_scheduled_and_normal_fired_occurrences_in_due_time_and_id_order()
+    {
+        using var temp = new TempDirectory();
+        var repository = await SqliteReminderRepository.OpenAsync(Path.Combine(temp.Path, "moment.db"), CancellationToken.None);
+        var through = new DateTimeOffset(2026, 8, 15, 9, 0, 0, TimeSpan.FromHours(8));
+        var normalItem = ReminderItem.Create("普通", ReminderKind.Plan, ReminderImportance.Normal, through.AddDays(-1), through);
+        var importantItem = ReminderItem.Create("重要", ReminderKind.Plan, ReminderImportance.Important, through.AddDays(-1), through);
+        var fired = new ReminderOccurrence(Guid.Parse("00000000-0000-0000-0000-000000000001"), normalItem.Id,
+            through.AddHours(-1), OccurrenceState.Fired, through.AddHours(-1), null);
+        var firstScheduled = new ReminderOccurrence(Guid.Parse("00000000-0000-0000-0000-000000000002"), importantItem.Id,
+            through, OccurrenceState.Scheduled, null, null);
+        var secondScheduled = new ReminderOccurrence(Guid.Parse("00000000-0000-0000-0000-000000000003"), normalItem.Id,
+            through, OccurrenceState.Scheduled, null, null);
+        var importantFired = new ReminderOccurrence(Guid.NewGuid(), importantItem.Id,
+            through.AddHours(-2), OccurrenceState.Fired, through.AddHours(-2), null);
+        var future = ReminderOccurrence.Schedule(normalItem.Id, through.AddMinutes(1));
+        var completed = new ReminderOccurrence(Guid.NewGuid(), normalItem.Id,
+            through.AddHours(-3), OccurrenceState.Completed, through.AddHours(-3), null);
+        await repository.SaveItemWithOccurrenceAsync(normalItem, fired, CancellationToken.None);
+        await repository.SaveItemWithOccurrenceAsync(importantItem, firstScheduled, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(secondScheduled, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(importantFired, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(future, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(completed, CancellationToken.None);
+
+        var recoverable = await repository.GetRecoverableAsync(through, CancellationToken.None);
+
+        Assert.Collection(recoverable,
+            reminder => Assert.Equal(fired.Id, reminder.Occurrence.Id),
+            reminder => Assert.Equal(firstScheduled.Id, reminder.Occurrence.Id),
+            reminder => Assert.Equal(secondScheduled.Id, reminder.Occurrence.Id));
+    }
+
+    [Fact]
+    public async Task TryTransitionAsync_allows_only_one_concurrent_caller_to_claim_the_expected_state()
+    {
+        using var temp = new TempDirectory();
+        var repository = await SqliteReminderRepository.OpenAsync(Path.Combine(temp.Path, "moment.db"), CancellationToken.None);
+        var due = new DateTimeOffset(2026, 8, 16, 9, 0, 0, TimeSpan.FromHours(8));
+        var item = ReminderItem.Create("原子认领", ReminderKind.Plan, ReminderImportance.Normal, due.AddHours(-1), due);
+        var occurrence = ReminderOccurrence.Schedule(item.Id, due);
+        await repository.SaveItemWithOccurrenceAsync(item, occurrence, CancellationToken.None);
+
+        var results = await Task.WhenAll(
+            repository.TryTransitionAsync(occurrence.Id, OccurrenceState.Scheduled, OccurrenceState.Fired, due, CancellationToken.None),
+            repository.TryTransitionAsync(occurrence.Id, OccurrenceState.Scheduled, OccurrenceState.Fired, due, CancellationToken.None));
+
+        Assert.Equal(1, results.Count(static result => result));
+        var stored = await repository.GetScheduledReminderAsync(occurrence.Id, CancellationToken.None);
+        Assert.Equal(OccurrenceState.Fired, stored!.Occurrence.State);
+        Assert.Equal(due, stored.Occurrence.HandledAt);
+    }
+
+    [Fact]
     public async Task OpenAsync_migrates_version_one_database_and_backfills_the_utc_due_key()
     {
         using var temp = new TempDirectory();

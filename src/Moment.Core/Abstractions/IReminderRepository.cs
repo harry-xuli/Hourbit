@@ -7,11 +7,19 @@ public interface IReminderRepository
     Task SaveItemWithOccurrenceAsync(ReminderItem item, ReminderOccurrence occurrence, CancellationToken ct);
     Task<IReadOnlyList<ScheduledReminder>> GetScheduledAsync(CancellationToken ct);
     Task<IReadOnlyList<ScheduledReminder>> GetDueAsync(DateTimeOffset through, CancellationToken ct);
+    Task<IReadOnlyList<ScheduledReminder>> GetRecoverableAsync(
+        DateTimeOffset through, CancellationToken ct);
     Task<ScheduledReminder?> GetScheduledReminderAsync(Guid occurrenceId, CancellationToken ct);
     Task<ReminderItem?> GetItemAsync(Guid itemId, CancellationToken ct);
     Task SetOccurrenceStateAsync(Guid occurrenceId, OccurrenceState state, DateTimeOffset handledAt, CancellationToken ct);
     Task SaveOccurrenceAsync(ReminderOccurrence occurrence, CancellationToken ct);
     Task<bool> TryMarkFiredAsync(Guid occurrenceId, DateTimeOffset firedAt, CancellationToken ct);
+    Task<bool> TryTransitionAsync(
+        Guid occurrenceId,
+        OccurrenceState expected,
+        OccurrenceState next,
+        DateTimeOffset handledAt,
+        CancellationToken ct);
     Task ApplyActionAsync(Guid occurrenceId, OccurrenceState state,
         DateTimeOffset handledAt, ReminderOccurrence? nextOccurrence, CancellationToken ct);
     Task EditAsync(Guid occurrenceId, ReminderItem item,
