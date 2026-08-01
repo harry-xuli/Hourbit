@@ -9,6 +9,7 @@
     <WindowsAppSDKSelfContained Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSDKSelfContained>
     <WindowsAppSdkUndockedRegFreeWinRTInitialize Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSdkUndockedRegFreeWinRTInitialize>
     <StartupObject>Moment.App.Program</StartupObject>
+    <ApplicationIcon>Assets\moment.ico</ApplicationIcon>
     <Version>0.1.0</Version>
     <Product>时刻</Product>
     <Description>本地优先的 Windows 11 提醒工具</Description>
@@ -22,6 +23,10 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <Content Remove="Assets\moment-logo-master.png" />
+    <Content Remove="Assets\moment-logo-rgba.png" />
+    <None Include="Assets\moment-logo-master.png" />
+    <None Include="Assets\moment-logo-rgba.png" />
     <None Remove="Assets\default-alert.wav" />
     <EmbeddedResource Include="Assets\default-alert.wav" />
     <AssemblyMetadata Include="ReleasePageUrl" Value="$(ReleasePageUrl)" />
