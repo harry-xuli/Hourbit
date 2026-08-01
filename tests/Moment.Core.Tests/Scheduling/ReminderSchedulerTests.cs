@@ -265,16 +265,13 @@ public sealed class ReminderSchedulerTests
     [InlineData("ignore")]
     [InlineData("snooze")]
     [InlineData("delete")]
-    [InlineData("important")]
-    public async Task Action_or_importance_prevents_fired_occurrence_from_becoming_missed(
-        string prevention)
+    public async Task Action_or_deletion_wins_against_captured_expiration_snapshot(
+        string action)
     {
         var clock = new FakeClock("2026-07-29T09:00:00+08:00");
         var repository = new ObservingReminderRepository();
-        var importance = prevention == "important"
-            ? ReminderImportance.Important
-            : ReminderImportance.Normal;
-        var fired = TestData.Scheduled("protected", clock.Now.ToString("O"), importance);
+        repository.BlockNextMissedTransition();
+        var fired = TestData.Scheduled("protected", clock.Now.ToString("O"));
         fired = fired with
         {
             Occurrence = fired.Occurrence with
@@ -291,7 +288,10 @@ public sealed class ReminderSchedulerTests
         await scheduler.StartAsync(CancellationToken.None);
         await repository.WaitForRecoverableQueryCountAsync(1);
 
-        switch (prevention)
+        clock.AdvanceBy(TimeSpan.FromMinutes(5) + TimeSpan.FromTicks(1));
+        await repository.WaitForBlockedMissedTransitionAsync();
+
+        switch (action)
         {
             case "complete":
                 await repository.ApplyActionAsync(
@@ -314,17 +314,19 @@ public sealed class ReminderSchedulerTests
                 break;
         }
 
-        clock.AdvanceBy(TimeSpan.FromMinutes(6));
+        repository.ReleaseBlockedMissedTransition();
+        Assert.False(await repository.WaitForMissedTransitionResultAsync());
+
+        clock.AdvanceBy(TimeSpan.FromMinutes(1) - TimeSpan.FromTicks(1));
         await sink.WaitForCountAsync(1);
 
         var protectedOccurrence = await repository.GetScheduledReminderAsync(
             fired.Occurrence.Id, CancellationToken.None);
-        var expectedState = prevention switch
+        var expectedState = action switch
         {
             "complete" => OccurrenceState.Completed,
             "ignore" => OccurrenceState.Ignored,
             "snooze" => OccurrenceState.Snoozed,
-            "important" => OccurrenceState.Fired,
             _ => (OccurrenceState?)null
         };
         Assert.Equal(expectedState, protectedOccurrence?.Occurrence.State);
@@ -333,9 +335,44 @@ public sealed class ReminderSchedulerTests
     }
 
     [Fact]
-    public async Task Each_committed_transition_raises_state_changed_once_and_observer_failure_does_not_stop_loop()
+    public async Task Important_fired_occurrence_never_enters_missed_transition()
     {
         var clock = new FakeClock("2026-07-29T09:00:00+08:00");
+        var repository = new ObservingReminderRepository();
+        var fired = TestData.Scheduled(
+            "important", clock.Now.ToString("O"), ReminderImportance.Important);
+        fired = fired with
+        {
+            Occurrence = fired.Occurrence with
+            {
+                State = OccurrenceState.Fired,
+                HandledAt = clock.Now
+            }
+        };
+        var probe = TestData.Scheduled("probe", clock.Now.AddMinutes(6).ToString("O"));
+        await repository.AddAsync(fired);
+        await repository.AddAsync(probe);
+        var sink = new RecordingReminderSink();
+        using var scheduler = new ReminderScheduler(repository, sink, clock);
+        await scheduler.StartAsync(CancellationToken.None);
+        await repository.WaitForRecoverableQueryCountAsync(1);
+
+        clock.AdvanceBy(TimeSpan.FromMinutes(6));
+        await sink.WaitForCountAsync(1);
+
+        Assert.Equal(
+            OccurrenceState.Fired,
+            (await repository.GetScheduledReminderAsync(
+                fired.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
+        Assert.False(repository.MissedTransitionCommitted);
+        Assert.Equal("probe", Assert.Single(sink.Deliveries).Item.Title);
+    }
+
+    [Fact]
+    public async Task Each_committed_transition_raises_state_changed_once_and_observer_failure_does_not_stop_loop()
+    {
+        var startedAt = DateTimeOffset.Parse("2026-07-29T09:00:00+08:00");
+        var clock = new ObservingClock(startedAt);
         var repository = new ObservingReminderRepository();
         var sink = new RecordingReminderSink();
         var first = TestData.Scheduled("first", clock.Now.AddMinutes(1).ToString("O"));
@@ -343,33 +380,34 @@ public sealed class ReminderSchedulerTests
         await repository.AddAsync(first);
         await repository.AddAsync(later);
         using var scheduler = new ReminderScheduler(repository, sink, clock);
-        var stateChanges = 0;
-        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stateChanges = new StateChangeObserver();
         scheduler.StateChanged += (_, _) => throw new InvalidOperationException("observer failed");
-        scheduler.StateChanged += (_, _) =>
-        {
-            if (Interlocked.Increment(ref stateChanges) >= 3)
-            {
-                changed.TrySetResult();
-            }
-        };
+        scheduler.StateChanged += stateChanges.OnStateChanged;
         await scheduler.StartAsync(CancellationToken.None);
 
         clock.AdvanceBy(TimeSpan.FromMinutes(1));
         await sink.WaitForCountAsync(1);
-        Assert.Equal(1, Volatile.Read(ref stateChanges));
+        await stateChanges.WaitForCountAsync(1);
+        Assert.Equal(1, stateChanges.Count);
 
         clock.AdvanceBy(TimeSpan.FromMinutes(5));
         clock.AdvanceBy(TimeSpan.FromTicks(1));
         await repository.WaitForMissedTransitionAsync();
+        await stateChanges.WaitForCountAsync(2);
+        Assert.Equal(2, stateChanges.Count);
 
         clock.AdvanceBy(TimeSpan.FromMinutes(1) - TimeSpan.FromTicks(1));
         await sink.WaitForCountAsync(2);
-        await changed.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        scheduler.Refresh();
-        scheduler.Refresh();
+        await stateChanges.WaitForCountAsync(3);
+        Assert.Equal(3, stateChanges.Count);
 
-        Assert.Equal(3, Volatile.Read(ref stateChanges));
+        var laterGraceDeadline = startedAt.AddMinutes(12);
+        await clock.WaitForDelayRequestCountAsync(laterGraceDeadline, 1);
+        scheduler.Refresh();
+        scheduler.Refresh();
+        await clock.WaitForDelayRequestCountAsync(laterGraceDeadline, 2);
+
+        Assert.Equal(3, stateChanges.Count);
         Assert.Equal(
             OccurrenceState.Missed,
             (await repository.GetScheduledReminderAsync(
@@ -477,8 +515,13 @@ public sealed class ReminderSchedulerTests
         private readonly object _signalGate = new();
         private TaskCompletionSource _recoverableQueryChanged = NewSignal();
         private readonly TaskCompletionSource _missedTransition = NewSignal();
+        private readonly TaskCompletionSource _blockedMissedTransition = NewSignal();
+        private readonly TaskCompletionSource _releaseMissedTransition = NewSignal();
+        private readonly TaskCompletionSource<bool> _missedTransitionResult =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _recoverableQueries;
         private int _missedTransitionCommitted;
+        private int _blockMissedTransition;
 
         public bool MissedTransitionCommitted =>
             Volatile.Read(ref _missedTransitionCommitted) != 0;
@@ -504,12 +547,24 @@ public sealed class ReminderSchedulerTests
             DateTimeOffset handledAt,
             CancellationToken ct)
         {
+            if (expected == OccurrenceState.Fired
+                && next == OccurrenceState.Missed
+                && Interlocked.Exchange(ref _blockMissedTransition, 0) != 0)
+            {
+                _blockedMissedTransition.TrySetResult();
+                await _releaseMissedTransition.Task.WaitAsync(ct);
+            }
+
             var committed = await base.TryTransitionAsync(
                 occurrenceId, expected, next, handledAt, ct);
-            if (committed && next == OccurrenceState.Missed)
+            if (next == OccurrenceState.Missed)
             {
-                Interlocked.Exchange(ref _missedTransitionCommitted, 1);
-                _missedTransition.TrySetResult();
+                _missedTransitionResult.TrySetResult(committed);
+                if (committed)
+                {
+                    Interlocked.Exchange(ref _missedTransitionCommitted, 1);
+                    _missedTransition.TrySetResult();
+                }
             }
 
             return committed;
@@ -536,6 +591,105 @@ public sealed class ReminderSchedulerTests
 
         public Task WaitForMissedTransitionAsync() =>
             _missedTransition.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        public void BlockNextMissedTransition() =>
+            Interlocked.Exchange(ref _blockMissedTransition, 1);
+
+        public Task WaitForBlockedMissedTransitionAsync() =>
+            _blockedMissedTransition.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        public void ReleaseBlockedMissedTransition() =>
+            _releaseMissedTransition.TrySetResult();
+
+        public Task<bool> WaitForMissedTransitionResultAsync() =>
+            _missedTransitionResult.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        private static TaskCompletionSource NewSignal() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class StateChangeObserver
+    {
+        private readonly object _gate = new();
+        private TaskCompletionSource _changed = NewSignal();
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void OnStateChanged(object? sender, EventArgs args)
+        {
+            lock (_gate)
+            {
+                Interlocked.Increment(ref _count);
+                _changed.TrySetResult();
+                _changed = NewSignal();
+            }
+        }
+
+        public async Task WaitForCountAsync(int count)
+        {
+            while (true)
+            {
+                Task changed;
+                lock (_gate)
+                {
+                    if (Count >= count)
+                    {
+                        return;
+                    }
+
+                    changed = _changed.Task;
+                }
+
+                await changed.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
+
+        private static TaskCompletionSource NewSignal() =>
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class ObservingClock(DateTimeOffset now) : IClock
+    {
+        private readonly FakeClock _clock = new(now);
+        private readonly object _gate = new();
+        private readonly Dictionary<DateTimeOffset, int> _delayRequests = [];
+        private TaskCompletionSource _delayRequested = NewSignal();
+
+        public DateTimeOffset Now => _clock.Now;
+
+        public Task DelayUntilAsync(DateTimeOffset dueAt, CancellationToken ct)
+        {
+            lock (_gate)
+            {
+                _delayRequests[dueAt] = _delayRequests.GetValueOrDefault(dueAt) + 1;
+                _delayRequested.TrySetResult();
+                _delayRequested = NewSignal();
+            }
+
+            return _clock.DelayUntilAsync(dueAt, ct);
+        }
+
+        public void AdvanceBy(TimeSpan duration) => _clock.AdvanceBy(duration);
+
+        public async Task WaitForDelayRequestCountAsync(DateTimeOffset dueAt, int count)
+        {
+            while (true)
+            {
+                Task requested;
+                lock (_gate)
+                {
+                    if (_delayRequests.GetValueOrDefault(dueAt) >= count)
+                    {
+                        return;
+                    }
+
+                    requested = _delayRequested.Task;
+                }
+
+                await requested.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
 
         private static TaskCompletionSource NewSignal() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
