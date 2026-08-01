@@ -57,7 +57,10 @@ public partial class QuickAddWindow : System.Windows.Window, IQuickAddWindow
         }
 
         UpdateLayout();
-        DetailTitleBox.Focus();
+        if (viewModel.IsTodoDetailsVisible)
+            TodoDetailTitleBox.Focus();
+        else
+            DetailTitleBox.Focus();
         return true;
     }
 

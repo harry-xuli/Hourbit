@@ -29,6 +29,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <TextBox x:Name="InputBox"
@@ -96,7 +97,7 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="3"
+        <Border Grid.Row="4"
                 Margin="22,0,22,12"
                 Padding="14,10"
                 Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
@@ -126,7 +127,7 @@
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1"
                 CornerRadius="5"
-                Visibility="{Binding AreDetailsVisible, Converter={StaticResource BooleanToVisibility}}">
+                Visibility="{Binding IsReminderDetailsVisible, Converter={StaticResource BooleanToVisibility}}">
             <StackPanel>
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
@@ -204,8 +205,62 @@
             </StackPanel>
         </Border>
 
+        <Border Grid.Row="3"
+                Margin="22,0,22,12"
+                Padding="16,14"
+                Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
+                BorderThickness="1"
+                CornerRadius="5"
+                Visibility="{Binding IsTodoDetailsVisible, Converter={StaticResource BooleanToVisibility}}">
+            <StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="内容" VerticalAlignment="Center" />
+                    <TextBox x:Name="TodoDetailTitleBox"
+                             Grid.Column="1"
+                             Text="{Binding TodoDetails.Title, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="详细待办内容" />
+                </Grid>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="132" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="日期时间" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="1"
+                             Text="{Binding TodoDetails.DateText, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="详细待办日期，可留空" />
+                    <TextBox Grid.Column="3"
+                             Text="{Binding TodoDetails.TimeText, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="详细提醒时间，可留空" />
+                </Grid>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="74" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="重要性" VerticalAlignment="Center" />
+                    <ComboBox Grid.Column="1" MinHeight="40"
+                              ItemsSource="{Binding TodoDetails.Importances}"
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Value"
+                              SelectedValue="{Binding TodoDetails.SelectedImportance}"
+                              automation:AutomationProperties.Name="详细待办重要性" />
+                </Grid>
+                <TextBlock Text="填写时间将创建定时提醒；时间统一使用 HH:mm。"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           Margin="74,10,0,0" />
+            </StackPanel>
+        </Border>
+
         <Border x:Name="QuickAddFooter"
-                Grid.Row="4"
+                Grid.Row="5"
                 Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="0,1,0,0"

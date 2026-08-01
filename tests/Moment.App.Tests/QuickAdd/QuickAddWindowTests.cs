@@ -9,6 +9,7 @@ using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
 using Moment.TestSupport;
+using System.Globalization;
 
 namespace Moment.App.Tests.QuickAdd;
 
@@ -37,6 +38,29 @@ public sealed class QuickAddWindowTests
             Assert.False(window.TryExpandDetailsFromTab());
             Assert.True(title.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next)));
             Assert.Same(date, Keyboard.FocusedElement);
+            window.Close();
+        });
+
+    [Fact]
+    public Task First_Tab_on_a_todo_opens_the_todo_fields_and_focuses_its_title() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var vm = Create(new ParseResult.Success(
+                new TodoDraft("提交报告", new DateOnly(2026, 8, 5), ReminderImportance.Normal)));
+            vm.Text = "8月5日提交报告";
+            var window = new QuickAddWindow { DataContext = vm };
+            window.Show();
+            window.Activate();
+            window.UpdateLayout();
+            var input = Assert.IsType<TextBox>(window.FindName("InputBox"));
+            var todoTitle = Assert.IsType<TextBox>(window.FindName("TodoDetailTitleBox"));
+            Assert.True(input.Focus());
+
+            Assert.True(window.TryExpandDetailsFromTab());
+
+            Assert.True(vm.IsTodoDetailsVisible);
+            Assert.False(vm.IsReminderDetailsVisible);
+            Assert.Same(todoTitle, Keyboard.FocusedElement);
             window.Close();
         });
 
@@ -166,16 +190,19 @@ public sealed class QuickAddWindowTests
         return new QuickAddViewModel(
             new StubParser(new ParseResult.Success(draft)),
             new ReminderServiceStub(),
+            new TodoServiceStub(),
             new LocalClock(due.AddDays(-1)),
             TimeZoneInfo.CreateCustomTimeZone(
-                "UTC+08-hc", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
+                "UTC+08-hc", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+            CultureInfo.GetCultureInfo("zh-CN"));
     }
 
     private static QuickAddViewModel Create(ParseResult result) =>
-        new(new StubParser(result), new ReminderServiceStub(),
+        new(new StubParser(result), new ReminderServiceStub(), new TodoServiceStub(),
             new FakeClock("2026-07-29T09:00:00+08:00"),
             TimeZoneInfo.CreateCustomTimeZone(
-                "UTC+08-window", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
+                "UTC+08-window", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+            CultureInfo.GetCultureInfo("zh-CN"));
 
     private sealed class StubParser(ParseResult result) : IChineseTimeParser
     {
@@ -193,6 +220,25 @@ public sealed class QuickAddWindowTests
         public Task EditAsync(Guid occurrenceId, ReminderDraft draft, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
         public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class TodoServiceStub : ITodoService
+    {
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
+            Task.FromResult(new TodoItem(
+                Guid.NewGuid(), draft.Title, DateTimeOffset.UtcNow,
+                draft.DueDate, draft.Importance, false, null));
+        public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task CompleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task DeleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToReminderAsync(
+            Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
     }
 

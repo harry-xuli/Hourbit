@@ -4,6 +4,7 @@ using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
 using Moment.TestSupport;
+using System.Globalization;
 
 namespace Moment.App.Tests.Composition;
 
@@ -23,7 +24,9 @@ public sealed class QuickAddTimelineCompositionTests
         var quickAdd = CompositionRoot.ComposeQuickAdd(
             new ParserStub(new ParseResult.Success(
                 TestData.Draft("项目复盘", "2026-07-29T10:00:00+08:00"))),
-            service, new FakeClock("2026-07-29T09:00:00+08:00"), Zone, timeline);
+            service, new TodoServiceStub(),
+            new FakeClock("2026-07-29T09:00:00+08:00"), Zone,
+            CultureInfo.GetCultureInfo("zh-CN"), timeline);
         quickAdd.Text = "上午10点项目复盘";
         var hides = 0;
         string? titleObservedAtHide = null;
@@ -62,7 +65,9 @@ public sealed class QuickAddTimelineCompositionTests
         var quickAdd = CompositionRoot.ComposeQuickAdd(
             new ParserStub(new ParseResult.Success(
                 TestData.Draft("项目复盘", "2026-07-29T10:00:00+08:00"))),
-            service, new FakeClock("2026-07-29T09:00:00+08:00"), Zone, timeline);
+            service, new TodoServiceStub(),
+            new FakeClock("2026-07-29T09:00:00+08:00"), Zone,
+            CultureInfo.GetCultureInfo("zh-CN"), timeline);
         quickAdd.Text = "上午10点项目复盘";
         var hides = 0;
         quickAdd.HideRequested += (_, _) => hides++;
@@ -140,6 +145,25 @@ public sealed class QuickAddTimelineCompositionTests
         public Task<ReminderOccurrence> SnoozeAsync(
             Guid occurrenceId, TimeSpan delay, CancellationToken ct) =>
             Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), DateTimeOffset.UtcNow));
+    }
+
+    private sealed class TodoServiceStub : ITodoService
+    {
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
+            Task.FromResult(new TodoItem(
+                Guid.NewGuid(), draft.Title, DateTimeOffset.UtcNow,
+                draft.DueDate, draft.Importance, false, null));
+        public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task CompleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task DeleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToReminderAsync(
+            Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 
     private sealed class DialogStub : ITimelineDialogService

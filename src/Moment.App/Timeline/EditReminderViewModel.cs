@@ -2,6 +2,7 @@ using System.Globalization;
 using Moment.App.Commands;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
+using Moment.Core.Services;
 
 namespace Moment.App.Timeline;
 
@@ -30,6 +31,12 @@ public sealed class EditReminderViewModel : ObservableObject
         };
 
     private readonly TimeZoneInfo _zone;
+    private IReminderService? _reminderService;
+    private ITodoService? _todoService;
+    private SeriesScope _editScope;
+    private bool _sourceIsRecurring;
+    private Func<CancellationToken, Task<SeriesScope?>>? _selectConversionScope;
+    private Func<CancellationToken, Task> _afterSaved = _ => Task.CompletedTask;
     private string _title;
     private string _dateText;
     private string _timeText;
@@ -38,6 +45,7 @@ public sealed class EditReminderViewModel : ObservableObject
     private EditRecurrenceMode _selectedRecurrence;
     private string _weeklyDaysText;
     private string? _errorMessage;
+    private bool _persistenceCompleted;
 
     public EditReminderViewModel(TimelineItemViewModel item, TimeZoneInfo zone)
         : this(CreateDraft(item), zone)
@@ -65,7 +73,36 @@ public sealed class EditReminderViewModel : ObservableObject
         _weeklyDaysText = string.Join("、", DayLabels
             .Where(pair => draft.Recurrence?.DaysOfWeek.Contains(pair.Value) == true)
             .Select(pair => pair.Key));
+        SaveCommand = new AsyncCommand((_, ct) => SaveAsync(ct));
     }
+
+    public EditReminderViewModel(
+        TimelineItemViewModel item,
+        TimeZoneInfo zone,
+        IReminderService reminderService,
+        ITodoService todoService,
+        SeriesScope editScope,
+        Func<CancellationToken, Task<SeriesScope?>>? selectConversionScope = null,
+        Func<CancellationToken, Task>? afterSaved = null)
+        : this(item, zone)
+    {
+        _reminderService = reminderService ??
+            throw new ArgumentNullException(nameof(reminderService));
+        _todoService = todoService ??
+            throw new ArgumentNullException(nameof(todoService));
+        if (!Enum.IsDefined(editScope))
+            throw new ArgumentOutOfRangeException(nameof(editScope));
+        _editScope = editScope;
+        _sourceIsRecurring = item.IsRecurring;
+        _selectConversionScope = selectConversionScope;
+        _afterSaved = afterSaved ?? (_ => Task.CompletedTask);
+        OccurrenceId = item.OccurrenceId;
+    }
+
+    public event EventHandler? CloseRequested;
+
+    public Guid OccurrenceId { get; }
+    public IAsyncCommand SaveCommand { get; }
 
     public IReadOnlyList<EditOption<ReminderKind>> Kinds { get; } =
     [
@@ -103,7 +140,11 @@ public sealed class EditReminderViewModel : ObservableObject
     public string TimeText
     {
         get => _timeText;
-        set => SetProperty(ref _timeText, value ?? string.Empty);
+        set
+        {
+            if (SetProperty(ref _timeText, value ?? string.Empty))
+                OnPropertyChanged(nameof(ConvertsToTodo));
+        }
     }
 
     public ReminderKind SelectedKind
@@ -135,6 +176,7 @@ public sealed class EditReminderViewModel : ObservableObject
     }
 
     public bool IsWeekly => SelectedRecurrence == EditRecurrenceMode.Weekly;
+    public bool ConvertsToTodo => string.IsNullOrWhiteSpace(TimeText);
 
     public string? ErrorMessage
     {
@@ -201,6 +243,125 @@ public sealed class EditReminderViewModel : ObservableObject
         draft = new ReminderDraft(title, dueAt, SelectedKind, SelectedImportance, recurrence);
         ErrorMessage = null;
         return true;
+    }
+
+    public Task SaveAsync() => SaveAsync(CancellationToken.None);
+
+    public async Task SaveAsync(CancellationToken ct)
+    {
+        if (_reminderService is null || _todoService is null)
+        {
+            throw new InvalidOperationException(
+                "This reminder editor is not connected to persistence.");
+        }
+
+        if (!ConvertsToTodo)
+        {
+            if (!TryBuildDraft(out var reminderDraft))
+                return;
+            await PersistAndCloseAsync(
+                token => _reminderService.EditAsync(
+                    OccurrenceId, reminderDraft!, _editScope, token),
+                ct);
+            return;
+        }
+
+        if (!TryBuildTodoDraft(out var todoDraft))
+            return;
+
+        SeriesScope conversionScope = SeriesScope.OccurrenceOnly;
+        if (_sourceIsRecurring)
+        {
+            if (_selectConversionScope is null)
+            {
+                ErrorMessage = "请选择重复提醒的转换范围。";
+                return;
+            }
+
+            try
+            {
+                var selectedScope = await _selectConversionScope(ct);
+                if (selectedScope is null)
+                {
+                    ErrorMessage = "请选择重复提醒的转换范围。";
+                    return;
+                }
+                conversionScope = selectedScope.Value;
+            }
+            catch (Exception exception)
+            {
+                ErrorMessage = exception.Message;
+                return;
+            }
+        }
+
+        await PersistAndCloseAsync(
+            token => _todoService.ConvertToTodoAsync(
+                OccurrenceId, todoDraft!, conversionScope, token),
+            ct);
+    }
+
+    private bool TryBuildTodoDraft(out TodoDraft? draft)
+    {
+        draft = null;
+        var title = Title.Trim();
+        if (title.Length == 0)
+        {
+            ErrorMessage = "请输入提醒内容。";
+            return false;
+        }
+        if (title.Length > 200)
+        {
+            ErrorMessage = "提醒内容不能超过 200 个字符。";
+            return false;
+        }
+        if (!Enum.IsDefined(SelectedImportance))
+        {
+            ErrorMessage = "请选择有效的重要性。";
+            return false;
+        }
+
+        DateOnly? dueDate = null;
+        if (!string.IsNullOrWhiteSpace(DateText))
+        {
+            if (!DateOnly.TryParseExact(
+                    DateText.Trim(),
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var parsedDate))
+            {
+                ErrorMessage = "请输入有效的日期，或留空表示无日期。";
+                return false;
+            }
+            dueDate = parsedDate;
+        }
+
+        draft = new TodoDraft(title, dueDate, SelectedImportance);
+        ErrorMessage = null;
+        return true;
+    }
+
+    private async Task PersistAndCloseAsync(
+        Func<CancellationToken, Task> persist,
+        CancellationToken ct)
+    {
+        try
+        {
+            ErrorMessage = null;
+            if (!_persistenceCompleted)
+            {
+                await persist(ct);
+                _persistenceCompleted = true;
+            }
+            await _afterSaved(ct);
+            _persistenceCompleted = false;
+            CloseRequested?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = exception.Message;
+        }
     }
 
     private DateTimeOffset ResolveLocal(DateTime local)

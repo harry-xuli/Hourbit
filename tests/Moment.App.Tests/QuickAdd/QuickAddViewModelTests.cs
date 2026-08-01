@@ -4,6 +4,7 @@ using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
 using Moment.TestSupport;
+using System.Globalization;
 
 namespace Moment.App.Tests.QuickAdd;
 
@@ -39,12 +40,95 @@ public sealed class QuickAddViewModelTests
         await vm.ChooseAsync(vm.Choices[0]);
 
         Assert.False(vm.IsChoicePanelVisible);
-        Assert.Equal("2026年7月30日 09:00 · 单次 · 普通提醒", vm.PreviewText);
+        Assert.Equal("提醒 · 2026-07-30 09:00", vm.PreviewText);
         Assert.Empty(service.Created);
 
         await vm.SubmitAsync();
 
         Assert.Equal(draft, Assert.Single(service.Created));
+    }
+
+    [Theory]
+    [MemberData(nameof(TypeSpecificDrafts))]
+    public async Task Successful_draft_shows_type_specific_preview_and_dispatches_to_its_service(
+        ItemDraft draft,
+        string expectedPreview,
+        bool createsReminder)
+    {
+        var reminders = new RecordingReminderService();
+        var todos = new RecordingTodoService();
+        var vm = Create(new ParseResult.Success(draft), reminders, todos);
+        vm.Text = "输入保留到创建完成";
+
+        Assert.Equal(expectedPreview, vm.PreviewText);
+
+        await vm.SubmitAsync();
+
+        if (createsReminder)
+        {
+            Assert.Equal(draft, Assert.Single(reminders.Created));
+            Assert.Empty(todos.Created);
+        }
+        else
+        {
+            Assert.Equal(draft, Assert.Single(todos.Created));
+            Assert.Empty(reminders.Created);
+        }
+    }
+
+    public static TheoryData<ItemDraft, string, bool> TypeSpecificDrafts => new()
+    {
+        {
+            new TodoDraft("整理房间", null, ReminderImportance.Normal),
+            "待办 · 无日期",
+            false
+        },
+        {
+            new TodoDraft("提交报告", new DateOnly(2026, 8, 5), ReminderImportance.Important),
+            "待办 · 截止 2026-08-05",
+            false
+        },
+        {
+            TestData.Draft("开会", "2026-08-05T14:30:00+08:00"),
+            "提醒 · 2026-08-05 14:30",
+            true
+        }
+    };
+
+    [Fact]
+    public void Parse_receives_the_injected_active_Windows_culture()
+    {
+        var parser = new CapturingParser(new ParseResult.Success(
+            new TodoDraft("提交报告", new DateOnly(2026, 8, 5), ReminderImportance.Normal)));
+        var culture = CultureInfo.GetCultureInfo("en-GB");
+        var vm = Create(parser, new RecordingReminderService(), new RecordingTodoService(), culture);
+
+        vm.Text = "submit report 05/08/2026";
+
+        Assert.Same(culture, parser.ReceivedCulture);
+    }
+
+    [Fact]
+    public async Task Todo_persistence_failure_preserves_input_and_shows_actionable_error()
+    {
+        var todos = new RecordingTodoService
+        {
+            CreateFailure = new InvalidOperationException("无法保存待办，请重试。")
+        };
+        var vm = Create(
+            new ParseResult.Success(new TodoDraft("提交报告", null, ReminderImportance.Normal)),
+            new RecordingReminderService(),
+            todos);
+        vm.Text = "提交报告";
+        var hides = 0;
+        vm.HideRequested += (_, _) => hides++;
+
+        await vm.SubmitAsync();
+
+        Assert.Equal("提交报告", vm.Text);
+        Assert.Equal("无法保存待办，请重试。", vm.ErrorMessage);
+        Assert.Equal(0, hides);
+        Assert.Empty(todos.Created);
     }
 
     [Fact]
@@ -130,10 +214,22 @@ public sealed class QuickAddViewModelTests
         Assert.False(vm.SubmitCommand.IsRunning);
     }
 
-    private static QuickAddViewModel Create(ParseResult result, RecordingReminderService service) =>
-        new(new StubParser(result), service,
+    private static QuickAddViewModel Create(
+        ParseResult result,
+        RecordingReminderService service,
+        RecordingTodoService? todos = null) =>
+        Create(new StubParser(result), service, todos ?? new RecordingTodoService(),
+            CultureInfo.GetCultureInfo("zh-CN"));
+
+    private static QuickAddViewModel Create(
+        IChineseTimeParser parser,
+        RecordingReminderService reminders,
+        RecordingTodoService todos,
+        CultureInfo culture) =>
+        new(parser, reminders, todos,
             new FakeClock("2026-07-29T09:00:00+08:00"),
-            TimeZoneInfo.CreateCustomTimeZone("UTC+08-quick", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
+            TimeZoneInfo.CreateCustomTimeZone("UTC+08-quick", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+            culture);
 
     private sealed class StubParser(ParseResult result) : IChineseTimeParser
     {
@@ -142,6 +238,21 @@ public sealed class QuickAddViewModelTests
             DateTimeOffset now,
             TimeZoneInfo zone,
             System.Globalization.CultureInfo culture) => result;
+    }
+
+    private sealed class CapturingParser(ParseResult result) : IChineseTimeParser
+    {
+        public CultureInfo? ReceivedCulture { get; private set; }
+
+        public ParseResult Parse(
+            string text,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            CultureInfo culture)
+        {
+            ReceivedCulture = culture;
+            return result;
+        }
     }
 
     private sealed class RecordingReminderService(bool blockCreate = false) : IReminderService
@@ -163,6 +274,35 @@ public sealed class QuickAddViewModelTests
         public Task EditAsync(Guid occurrenceId, ReminderDraft draft, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
         public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class RecordingTodoService : ITodoService
+    {
+        public List<TodoDraft> Created { get; } = [];
+        public Exception? CreateFailure { get; init; }
+
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct)
+        {
+            if (CreateFailure is not null)
+                throw CreateFailure;
+            Created.Add(draft);
+            return Task.FromResult(new TodoItem(
+                Guid.NewGuid(), draft.Title,
+                DateTimeOffset.Parse("2026-07-29T09:00:00+08:00"),
+                draft.DueDate, draft.Importance, false, null));
+        }
+
+        public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task CompleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task DeleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToReminderAsync(
+            Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
     }
 }

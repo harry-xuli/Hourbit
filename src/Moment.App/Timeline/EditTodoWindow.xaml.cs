@@ -1,10 +1,10 @@
 namespace Moment.App.Timeline;
 
-public partial class EditReminderWindow : System.Windows.Window
+public partial class EditTodoWindow : System.Windows.Window
 {
-    private EditReminderViewModel? _viewModel;
+    private EditTodoViewModel? _viewModel;
 
-    public EditReminderWindow()
+    public EditTodoWindow()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
@@ -23,7 +23,7 @@ public partial class EditReminderWindow : System.Windows.Window
     {
         if (_viewModel is not null)
             _viewModel.CloseRequested -= OnCloseRequested;
-        _viewModel = e.NewValue as EditReminderViewModel;
+        _viewModel = e.NewValue as EditTodoViewModel;
         if (_viewModel is not null)
             _viewModel.CloseRequested += OnCloseRequested;
     }

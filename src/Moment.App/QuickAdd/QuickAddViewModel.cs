@@ -13,38 +13,45 @@ public enum QuickAddState { Empty, Success, Ambiguous, Invalid }
 
 public sealed class QuickAddChoiceViewModel(ParseChoice choice)
 {
-    internal ReminderDraft Draft { get; } = choice.Draft as ReminderDraft ??
-        throw new ArgumentException("Quick Add choices must be reminder drafts.", nameof(choice));
+    internal ItemDraft Draft { get; } = choice.Draft;
     public string Label { get; } = choice.Label;
 }
 
 public sealed class QuickAddViewModel : ObservableObject
 {
     private readonly IChineseTimeParser _parser;
-    private readonly IReminderService _service;
+    private readonly IReminderService _reminderService;
+    private readonly ITodoService _todoService;
     private readonly IClock _clock;
     private readonly TimeZoneInfo _zone;
+    private readonly CultureInfo _culture;
     private readonly Func<CancellationToken, Task> _afterCreated;
     private string _text = string.Empty;
     private string? _previewText;
     private string? _errorMessage;
-    private ReminderDraft? _draft;
+    private ItemDraft? _draft;
     private QuickAddState _state;
     private bool _areDetailsVisible;
     private EditReminderViewModel? _details;
+    private EditTodoViewModel? _todoDetails;
     private bool _creationPersisted;
 
     public QuickAddViewModel(
         IChineseTimeParser parser,
-        IReminderService service,
+        IReminderService reminderService,
+        ITodoService todoService,
         IClock clock,
         TimeZoneInfo zone,
+        CultureInfo culture,
         Func<CancellationToken, Task>? afterCreated = null)
     {
-        _parser = parser;
-        _service = service;
-        _clock = clock;
-        _zone = zone;
+        _parser = parser ?? throw new ArgumentNullException(nameof(parser));
+        _reminderService = reminderService ??
+            throw new ArgumentNullException(nameof(reminderService));
+        _todoService = todoService ?? throw new ArgumentNullException(nameof(todoService));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
+        _zone = zone ?? throw new ArgumentNullException(nameof(zone));
+        _culture = culture ?? throw new ArgumentNullException(nameof(culture));
         _afterCreated = afterCreated ?? (_ => Task.CompletedTask);
         SubmitCommand = new AsyncCommand((_, ct) => SubmitAsync(ct));
         ChooseCommand = new AsyncCommand((choice, _) =>
@@ -92,13 +99,26 @@ public sealed class QuickAddViewModel : ObservableObject
     public bool AreDetailsVisible
     {
         get => _areDetailsVisible;
-        private set => SetProperty(ref _areDetailsVisible, value);
+        private set
+        {
+            if (!SetProperty(ref _areDetailsVisible, value))
+                return;
+            OnPropertyChanged(nameof(IsReminderDetailsVisible));
+            OnPropertyChanged(nameof(IsTodoDetailsVisible));
+        }
     }
     public EditReminderViewModel? Details
     {
         get => _details;
         private set => SetProperty(ref _details, value);
     }
+    public EditTodoViewModel? TodoDetails
+    {
+        get => _todoDetails;
+        private set => SetProperty(ref _todoDetails, value);
+    }
+    public bool IsReminderDetailsVisible => AreDetailsVisible && Details is not null;
+    public bool IsTodoDetailsVisible => AreDetailsVisible && TodoDetails is not null;
     public string Text
     {
         get => _text;
@@ -111,7 +131,7 @@ public sealed class QuickAddViewModel : ObservableObject
 
     public bool ShowDetails()
     {
-        if (Details is null || AreDetailsVisible)
+        if ((Details is null && TodoDetails is null) || AreDetailsVisible)
             return false;
         AreDetailsVisible = true;
         return true;
@@ -129,15 +149,34 @@ public sealed class QuickAddViewModel : ObservableObject
             var draft = _draft;
             if (AreDetailsVisible && Details is not null)
             {
-                if (!Details.TryBuildDraft(out draft))
+                if (!Details.TryBuildDraft(out var reminderDraft))
                 {
                     ErrorMessage = Details.ErrorMessage;
+                    return;
+                }
+                draft = reminderDraft;
+            }
+            else if (AreDetailsVisible && TodoDetails is not null)
+            {
+                if (!TodoDetails.TryBuildDraft(out draft))
+                {
+                    ErrorMessage = TodoDetails.ErrorMessage;
                     return;
                 }
             }
             if (!_creationPersisted)
             {
-                await _service.CreateAsync(draft!, ct);
+                switch (draft)
+                {
+                    case ReminderDraft reminderDraft:
+                        await _reminderService.CreateAsync(reminderDraft, ct);
+                        break;
+                    case TodoDraft todoDraft:
+                        await _todoService.CreateAsync(todoDraft, ct);
+                        break;
+                    default:
+                        throw new InvalidOperationException("不支持的快速创建类型。");
+                }
                 _creationPersisted = true;
             }
             await _afterCreated(ct);
@@ -154,7 +193,7 @@ public sealed class QuickAddViewModel : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(choice);
         _draft = choice.Draft;
-        Details = new EditReminderViewModel(_draft, _zone);
+        SetDetails(_draft);
         Choices.Clear();
         PreviewText = FormatPreview(_draft);
         ErrorMessage = null;
@@ -167,6 +206,7 @@ public sealed class QuickAddViewModel : ObservableObject
         _draft = null;
         _creationPersisted = false;
         Details = null;
+        TodoDetails = null;
         PreviewText = null;
         ErrorMessage = null;
         Choices.Clear();
@@ -176,17 +216,19 @@ public sealed class QuickAddViewModel : ObservableObject
             return;
         }
 
-        switch (_parser.Parse(Text, _clock.Now, _zone, CultureInfo.CurrentCulture))
+        switch (_parser.Parse(Text, _clock.Now, _zone, _culture))
         {
             case ParseResult.Success { Draft: ReminderDraft reminderDraft }:
                 _draft = reminderDraft;
-                Details = new EditReminderViewModel(reminderDraft, _zone);
+                SetDetails(reminderDraft);
                 PreviewText = FormatPreview(reminderDraft);
                 State = QuickAddState.Success;
                 break;
-            case ParseResult.Success:
-                ErrorMessage = "待办事项将在后续界面更新中启用。";
-                State = QuickAddState.Invalid;
+            case ParseResult.Success { Draft: TodoDraft todoDraft }:
+                _draft = todoDraft;
+                SetDetails(todoDraft);
+                PreviewText = FormatPreview(todoDraft);
+                State = QuickAddState.Success;
                 break;
             case ParseResult.Ambiguous ambiguous:
                 foreach (var choice in ambiguous.Choices)
@@ -200,16 +242,30 @@ public sealed class QuickAddViewModel : ObservableObject
         }
     }
 
-    private string FormatPreview(ReminderDraft draft)
+    private void SetDetails(ItemDraft draft)
+    {
+        Details = draft is ReminderDraft reminderDraft
+            ? new EditReminderViewModel(reminderDraft, _zone)
+            : null;
+        TodoDetails = draft is TodoDraft todoDraft
+            ? new EditTodoViewModel(todoDraft, _zone)
+            : null;
+        OnPropertyChanged(nameof(IsReminderDetailsVisible));
+        OnPropertyChanged(nameof(IsTodoDetailsVisible));
+    }
+
+    private string FormatPreview(ItemDraft draft) => draft switch
+    {
+        TodoDraft { DueDate: null } => "待办 · 无日期",
+        TodoDraft todo => $"待办 · 截止 {todo.DueDate!.Value.ToString(
+            "yyyy-MM-dd", CultureInfo.InvariantCulture)}",
+        ReminderDraft reminder => FormatReminderPreview(reminder),
+        _ => throw new ArgumentOutOfRangeException(nameof(draft))
+    };
+
+    private string FormatReminderPreview(ReminderDraft draft)
     {
         var local = TimeZoneInfo.ConvertTime(draft.DueAt, _zone);
-        var recurrence = draft.Recurrence is null ? "单次" : draft.Recurrence.Kind switch
-        {
-            RecurrenceKind.Daily => "每天",
-            RecurrenceKind.Weekdays => "工作日",
-            _ => "每周"
-        };
-        var importance = draft.Importance == ReminderImportance.Important ? "重要提醒" : "普通提醒";
-        return $"{local.Year}年{local.Month}月{local.Day}日 {local:HH:mm} · {recurrence} · {importance}";
+        return $"提醒 · {local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
     }
 }

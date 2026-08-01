@@ -18,6 +18,7 @@ using Moment.Windows.Lifecycle;
 using Moment.Windows.Notifications;
 using Moment.Windows.Startup;
 using System.IO;
+using System.Globalization;
 using System.Reflection;
 
 namespace Moment.App;
@@ -128,6 +129,8 @@ public sealed class CompositionRoot : IAsyncDisposable
             return null;
 
         var repository = await SqliteReminderRepository.OpenAsync(databasePath, ct);
+        var todoRepository = await SqliteTodoRepository.OpenAsync(databasePath, ct);
+        var conversionStore = await SqliteItemConversionStore.OpenAsync(databasePath, ct);
         var settingsStore = new SqliteSettingsStore(databasePath);
         var hotkey = new GlobalHotkeyService();
         var executablePath = Environment.ProcessPath
@@ -165,16 +168,40 @@ public sealed class CompositionRoot : IAsyncDisposable
         var scheduler = new ReminderScheduler(repository, notificationSink, clock);
         schedulerSignal.Target = scheduler;
         var reminders = new ReminderService(repository, scheduler, clock);
+        var todos = new TodoService(
+            todoRepository,
+            repository,
+            conversionStore,
+            recurrence,
+            schedulerSignal,
+            clock,
+            zone);
 
         var parser = new ChineseTimeParser();
         QuickAddViewModel? quickAdd = null;
         var quickWindow = new QuickAddWindowController(
             () => new QuickAddWindow { DataContext = quickAdd! },
             System.Windows.Application.Current.Dispatcher);
-        var dialogs = new TimelineDialogService(quickWindow.ShowAndFocus, zone);
+        TimelineViewModel? timelineForDialogs = null;
+        var dialogs = new TimelineDialogService(
+            quickWindow.ShowAndFocus,
+            zone,
+            reminders,
+            todos,
+            async refreshCancellation =>
+            {
+                refreshCancellation.ThrowIfCancellationRequested();
+                var currentTimeline = timelineForDialogs ??
+                    throw new InvalidOperationException("时间轴尚未初始化。");
+                await currentTimeline.LoadAsync();
+                refreshCancellation.ThrowIfCancellationRequested();
+                if (!string.IsNullOrWhiteSpace(currentTimeline.ErrorMessage))
+                    throw new InvalidOperationException(currentTimeline.ErrorMessage);
+            });
         var timelineQuery = new SqliteTimelineQuery(databasePath);
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, dialogs, zone);
+        timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);
         var lifetime = new CancellationTokenSource();
@@ -189,7 +216,14 @@ public sealed class CompositionRoot : IAsyncDisposable
             timelineRefresh,
             lifetime.Token);
         restoreLifecycle.Configure(scheduler, timelineRefresh);
-        quickAdd = ComposeQuickAdd(parser, reminders, clock, zone, timeline);
+        quickAdd = ComposeQuickAdd(
+            parser,
+            reminders,
+            todos,
+            clock,
+            zone,
+            CultureInfo.CurrentCulture,
+            timeline);
         var mainWindow = new MainWindow { DataContext = timeline };
         var navigator = new WindowNotificationNavigator(mainWindow);
         var notificationRuntime = new WindowsNotificationRuntime(actions, navigator);
@@ -231,10 +265,12 @@ public sealed class CompositionRoot : IAsyncDisposable
     internal static QuickAddViewModel ComposeQuickAdd(
         IChineseTimeParser parser,
         IReminderService reminders,
+        ITodoService todos,
         IClock clock,
         TimeZoneInfo zone,
+        CultureInfo culture,
         TimelineViewModel timeline) =>
-        new(parser, reminders, clock, zone, async ct =>
+        new(parser, reminders, todos, clock, zone, culture, async ct =>
         {
             ct.ThrowIfCancellationRequested();
             await timeline.LoadAsync();

@@ -21,6 +21,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Text="编辑提醒" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,18" />
@@ -102,7 +103,13 @@
                      ToolTip="例如：周一、周三" />
         </Grid>
 
-        <Grid Grid.Row="6">
+        <TextBlock Grid.Row="6"
+                   Text="清空时间后将转换为待办；日期可留空。"
+                   Foreground="{DynamicResource SecondaryTextBrush}"
+                   Margin="92,0,0,12"
+                   Visibility="{Binding ConvertsToTodo, Converter={StaticResource BooleanToVisibility}}" />
+
+        <Grid Grid.Row="7">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -114,7 +121,8 @@
             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Style="{StaticResource SecondaryButton}" Content="取消"
                         IsCancel="True" Margin="0,0,10,0" />
-                <Button Content="保存" Click="OnSave" IsDefault="True"
+                <Button x:Name="SaveReminderButton"
+                        Content="保存" Command="{Binding SaveCommand}" IsDefault="True"
                         automation:AutomationProperties.Name="保存提醒修改" />
             </StackPanel>
         </Grid>
