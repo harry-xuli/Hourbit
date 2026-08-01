@@ -1,9 +1,10 @@
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
+using Moment.Core.Scheduling;
 
 namespace Moment.TestSupport;
 
-public sealed class RecordingReminderSink : IReminderSink
+public sealed class RecordingReminderSink : IReminderSink, IReminderRecoverySummarySink
 {
     private readonly object _gate = new();
     private readonly List<ScheduledReminder> _deliveries = [];
@@ -40,6 +41,9 @@ public sealed class RecordingReminderSink : IReminderSink
     }
 
     public Task DeliverMissedSummaryAsync(IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct)
+        => SendMissedSummaryAsync(reminders, ct);
+
+    public Task SendMissedSummaryAsync(IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         Record(() => _missedSummaries.Add(reminders.ToArray()));
