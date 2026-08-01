@@ -68,6 +68,25 @@ const
   LegacyExecutableName = 'Moment.App.exe';
   StartupApprovedDataLength = 12;
   StartupApprovedEnabledState = 2;
+  WinErrorSuccess = 0;
+  WinErrorFileNotFound = 2;
+  WinRegBinary = 3;
+  RRF_RT_REG_BINARY = 8;
+  RRF_SUBKEY_WOW6464KEY = 65536;
+  RRF_ZEROONFAILURE = 536870912;
+
+type
+  TStartupApprovalData = record
+    State: Cardinal;
+    TimestampLow: Cardinal;
+    TimestampHigh: Cardinal;
+  end;
+
+function RegGetValueNative(
+  RootKey: Integer; SubKey, ValueName: String; Flags: Cardinal;
+  var ValueType: Cardinal; var Data: TStartupApprovalData;
+  var DataSize: Cardinal): Longint;
+  external 'RegGetValueW@advapi32.dll stdcall';
 
 function IsLegacyStartupCommand(const Command: String): Boolean;
 var
@@ -82,40 +101,60 @@ begin
     (CompareText(Normalized, '"' + LegacyPath + '" --background') = 0);
 end;
 
-function IsRecognizedEnabledApproval(const ApprovalData: AnsiString): Boolean;
-var
-  Index: Integer;
+function IsRecognizedEnabledApproval(
+  const ApprovalData: TStartupApprovalData): Boolean;
 begin
-  Result := False;
-  if Length(ApprovalData) <> StartupApprovedDataLength then
-    exit;
-  if Ord(ApprovalData[1]) <> StartupApprovedEnabledState then
-    exit;
-
   { The canonical enabled value is 02 followed by eleven zero bytes. Treat
     every other present encoding conservatively because this format is not
     publicly documented by Windows. }
-  for Index := 2 to StartupApprovedDataLength do
-    if Ord(ApprovalData[Index]) <> 0 then
-      exit;
-  Result := True;
+  Result :=
+    (ApprovalData.State = StartupApprovedEnabledState) and
+    (ApprovalData.TimestampLow = 0) and
+    (ApprovalData.TimestampHigh = 0);
+end;
+
+function StartupApprovedQueryFlags(): Cardinal;
+begin
+  Result := RRF_RT_REG_BINARY or RRF_ZEROONFAILURE;
+  if IsWin64 then
+    Result := Result or RRF_SUBKEY_WOW6464KEY;
 end;
 
 function IsStartupApprovedForMigration(): Boolean;
 var
-  ApprovalData: AnsiString;
+  ApprovalData: TStartupApprovalData;
+  DataSize: Cardinal;
+  QueryResult: Longint;
+  ValueType: Cardinal;
 begin
-  { A missing override uses normal Run-key startup semantics. A present value
-    must be the canonical enabled state; disabled, malformed, or unreadable
-    values block migration. Never write or delete StartupApproved here. }
-  if not RegValueExists(
-      HKCU, StartupApprovedSubkey, LegacyStartupValueName) then
+  { RegGetValueW preserves the exact Win32 status and needs no opened handle.
+    The fixed-size buffer plus RRF_ZEROONFAILURE prevents use of partial data.
+    On 64-bit Windows, query Explorer's 64-bit view explicitly. }
+  ApprovalData.State := 0;
+  ApprovalData.TimestampLow := 0;
+  ApprovalData.TimestampHigh := 0;
+  DataSize := SizeOf(ApprovalData);
+  ValueType := 0;
+  QueryResult := RegGetValueNative(
+    HKCU, StartupApprovedSubkey, LegacyStartupValueName,
+    StartupApprovedQueryFlags(), ValueType,
+    ApprovalData, DataSize);
+
+  { Only a verified missing key/value uses normal Run-key semantics. Access
+    denial, wrong type/size, malformed data, and every unexpected error fail
+    closed. Never write or delete StartupApproved here. }
+  if QueryResult = WinErrorFileNotFound then
   begin
     Result := True;
     exit;
   end;
-  if not RegQueryBinaryValue(
-      HKCU, StartupApprovedSubkey, LegacyStartupValueName, ApprovalData) then
+  if QueryResult <> WinErrorSuccess then
+  begin
+    Result := False;
+    exit;
+  end;
+  if (ValueType <> WinRegBinary) or
+      (DataSize <> StartupApprovedDataLength) then
   begin
     Result := False;
     exit;

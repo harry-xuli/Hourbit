@@ -63,10 +63,27 @@ $requiredCode = @(
     "LegacyPath := ExpandConstant('{app}\') + LegacyExecutableName;",
     "(CompareText(Normalized, LegacyPath + ' --background') = 0) or",
     '(CompareText(Normalized, ''"'' + LegacyPath + ''" --background'') = 0);',
-    'if not RegValueExists(',
-    'HKCU, StartupApprovedSubkey, LegacyStartupValueName) then',
-    'if not RegQueryBinaryValue(',
-    'HKCU, StartupApprovedSubkey, LegacyStartupValueName, ApprovalData) then',
+    "external 'RegGetValueW@advapi32.dll stdcall';",
+    'RRF_RT_REG_BINARY = 8;',
+    'RRF_SUBKEY_WOW6464KEY = 65536;',
+    'RRF_ZEROONFAILURE = 536870912;',
+    'WinErrorSuccess = 0;',
+    'WinErrorFileNotFound = 2;',
+    'WinRegBinary = 3;',
+    'TStartupApprovalData = record',
+    'State: Cardinal;',
+    'TimestampLow: Cardinal;',
+    'TimestampHigh: Cardinal;',
+    'if IsWin64 then',
+    'Result := Result or RRF_SUBKEY_WOW6464KEY;',
+    'DataSize := SizeOf(ApprovalData);',
+    'QueryResult := RegGetValueNative(',
+    'StartupApprovedSubkey, LegacyStartupValueName,',
+    'ApprovalData, DataSize);',
+    'if QueryResult = WinErrorFileNotFound then',
+    'if QueryResult <> WinErrorSuccess then',
+    '(ValueType <> WinRegBinary) or',
+    '(DataSize <> StartupApprovedDataLength) then',
     'Result := IsRecognizedEnabledApproval(ApprovalData);',
     'if not RegQueryStringValue(',
     'HKCU, LegacyStartupSubkey, LegacyStartupValueName, ExistingCommand) then',
@@ -80,6 +97,9 @@ foreach ($fragment in $requiredCode) {
 }
 if ($source -match '(?i)RegDeleteValue|UninstallDelete') {
     throw 'Installer compatibility logic must not delete registry values or user data.'
+}
+if ($source -match '(?i)RegValueExists|RegQueryBinaryValue') {
+    throw 'StartupApproved migration must use an error-code-preserving native query, not boolean registry helpers.'
 }
 if ($source.Contains('(CompareText(Normalized, LegacyPath) = 0)') -or
     $source.Contains('(CompareText(Normalized, ''"'' + LegacyPath + ''"'') = 0)')) {
@@ -121,14 +141,17 @@ foreach ($command in $matchingCommands) {
 
 function Test-StartupApprovedContract {
     param(
-        [Parameter(Mandatory = $true)][bool]$Present,
+        [Parameter(Mandatory = $true)][int]$ErrorCode,
+        [Parameter(Mandatory = $true)][int]$ValueType,
+        [Parameter(Mandatory = $true)][int]$DataSize,
         [AllowNull()][byte[]]$Data
     )
 
-    if (-not $Present) {
+    if ($ErrorCode -eq 2) {
         return $true
     }
-    if ($null -eq $Data -or $Data.Length -ne 12 -or $Data[0] -ne 2) {
+    if ($ErrorCode -ne 0 -or $ValueType -ne 3 -or $DataSize -ne 12 -or
+        $null -eq $Data -or $Data.Length -ne 12 -or $Data[0] -ne 2) {
         return $false
     }
     return @($Data[1..11] | Where-Object { $_ -ne 0 }).Count -eq 0
@@ -136,17 +159,22 @@ function Test-StartupApprovedContract {
 
 $enabledState = [byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 $approvalCases = @(
-    @{ Name = 'absent'; Present = $false; Data = $null; Expected = $true },
-    @{ Name = 'canonical enabled'; Present = $true; Data = $enabledState; Expected = $true },
-    @{ Name = 'disabled 03'; Present = $true; Data = [byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8); Expected = $false },
-    @{ Name = 'disabled 07'; Present = $true; Data = [byte[]](7, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8); Expected = $false },
-    @{ Name = 'short unknown'; Present = $true; Data = [byte[]](2); Expected = $false },
-    @{ Name = 'nonzero enabled payload'; Present = $true; Data = [byte[]](2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); Expected = $false },
-    @{ Name = 'unknown state 04'; Present = $true; Data = [byte[]](4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); Expected = $false },
-    @{ Name = 'empty present value'; Present = $true; Data = [byte[]]@(); Expected = $false }
+    @{ Name = 'verified absent'; ErrorCode = 2; ValueType = 0; DataSize = 0; Data = $null; Expected = $true },
+    @{ Name = 'canonical enabled'; ErrorCode = 0; ValueType = 3; DataSize = 12; Data = $enabledState; Expected = $true },
+    @{ Name = 'access denied'; ErrorCode = 5; ValueType = 0; DataSize = 0; Data = $null; Expected = $false },
+    @{ Name = 'buffer too small'; ErrorCode = 234; ValueType = 3; DataSize = 24; Data = $enabledState; Expected = $false },
+    @{ Name = 'unexpected error'; ErrorCode = 87; ValueType = 0; DataSize = 0; Data = $null; Expected = $false },
+    @{ Name = 'wrong value type'; ErrorCode = 0; ValueType = 1; DataSize = 12; Data = $enabledState; Expected = $false },
+    @{ Name = 'disabled 03'; ErrorCode = 0; ValueType = 3; DataSize = 12; Data = [byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8); Expected = $false },
+    @{ Name = 'disabled 07'; ErrorCode = 0; ValueType = 3; DataSize = 12; Data = [byte[]](7, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8); Expected = $false },
+    @{ Name = 'short unknown'; ErrorCode = 0; ValueType = 3; DataSize = 1; Data = [byte[]](2); Expected = $false },
+    @{ Name = 'nonzero enabled payload'; ErrorCode = 0; ValueType = 3; DataSize = 12; Data = [byte[]](2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); Expected = $false },
+    @{ Name = 'unknown state 04'; ErrorCode = 0; ValueType = 3; DataSize = 12; Data = [byte[]](4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0); Expected = $false },
+    @{ Name = 'empty present value'; ErrorCode = 0; ValueType = 3; DataSize = 0; Data = [byte[]]@(); Expected = $false }
 )
 foreach ($case in $approvalCases) {
-    $actual = Test-StartupApprovedContract -Present $case.Present -Data $case.Data
+    $actual = Test-StartupApprovedContract -ErrorCode $case.ErrorCode `
+        -ValueType $case.ValueType -DataSize $case.DataSize -Data $case.Data
     if ($actual -ne $case.Expected) {
         throw "StartupApproved contract failed for $($case.Name): expected $($case.Expected), got $actual"
     }
@@ -162,4 +190,5 @@ Write-Output 'Validated cleanup: {app}\Moment.App.exe'
 Write-Output 'Validated cleanup: legacy start-menu and desktop shortcuts only'
 Write-Output 'Validated startup migration: existing HKCU Moment value, old executable only'
 Write-Output 'Validated startup command matrix: --background required; quoted/unquoted, case and separator forms'
-Write-Output 'Validated StartupApproved matrix: absent or canonical 12-byte enabled state only'
+Write-Output 'Validated StartupApproved matrix: verified ERROR_FILE_NOT_FOUND or canonical enabled state only'
+Write-Output 'Validated StartupApproved failures: access denied, wrong type/size, malformed, and unexpected errors fail closed'
