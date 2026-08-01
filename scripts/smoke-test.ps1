@@ -19,8 +19,17 @@ $expectedEvents = @(
 )
 $repositoryRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $PSScriptRoot '..'))
+$applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
+$evaluatedProperties = (& dotnet msbuild $applicationProject `
+    -nologo `
+    '-getProperty:AssemblyName,Product' | Out-String | ConvertFrom-Json).Properties
+$assemblyName = [string]$evaluatedProperties.AssemblyName
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($assemblyName)) {
+    throw 'Could not evaluate the application AssemblyName for smoke testing.'
+}
 if ([string]::IsNullOrWhiteSpace($PortableArchive)) {
-    $PortableArchive = Join-Path $repositoryRoot 'artifacts\Moment-Portable-x64.zip'
+    $PortableArchive = Join-Path $repositoryRoot (
+        "artifacts\$assemblyName-Portable-x64.zip")
 } elseif (-not [System.IO.Path]::IsPathFullyQualified($PortableArchive)) {
     $PortableArchive = Join-Path $repositoryRoot $PortableArchive
 }
@@ -90,7 +99,8 @@ if (-not (Test-Path -LiteralPath $PortableArchive -PathType Leaf)) {
 $temporaryRoot = [System.IO.Path]::GetFullPath(
     [System.IO.Path]::GetTempPath()).TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar)
-$runName = 'Moment-Smoke-' + [Guid]::NewGuid().ToString('N')
+$runPrefix = $assemblyName + '-Smoke-'
+$runName = $runPrefix + [Guid]::NewGuid().ToString('N')
 $runRoot = Join-Path $temporaryRoot $runName
 $portableDirectory = Join-Path $runRoot 'portable'
 $outputDirectory = Join-Path $runRoot 'self-test-output'
@@ -104,7 +114,7 @@ try {
         -LiteralPath $PortableArchive `
         -DestinationPath $portableDirectory `
         -Force
-    $executable = Join-Path $portableDirectory 'Moment.App.exe'
+    $executable = Join-Path $portableDirectory ($assemblyName + '.exe')
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         throw "Published executable is missing from the portable archive: $executable"
     }
@@ -151,7 +161,7 @@ finally {
             $temporaryRoot,
             [System.StringComparison]::OrdinalIgnoreCase) -or
         -not $resolvedLeaf.StartsWith(
-            'Moment-Smoke-',
+            $runPrefix,
             [System.StringComparison]::Ordinal)) {
         throw "Refusing to clean an unexpected smoke-test path: $resolvedRunRoot"
     }

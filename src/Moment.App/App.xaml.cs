@@ -28,7 +28,7 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             System.Windows.MessageBox.Show(
-                exception.Message, "时刻", System.Windows.MessageBoxButton.OK,
+                exception.Message, "Hourbit 日程", System.Windows.MessageBoxButton.OK,
                 System.Windows.MessageBoxImage.Error);
             Shutdown(-1);
         }

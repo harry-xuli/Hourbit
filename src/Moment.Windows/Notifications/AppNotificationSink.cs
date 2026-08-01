@@ -151,7 +151,7 @@ public sealed class AppNotificationSink(INotificationPlatform platform, IImporta
     public Task OpenWindowsNotificationSettingsAsync(CancellationToken ct) => platform.OpenSettingsAsync(ct);
 
     public Task SendTestNotificationAsync(CancellationToken ct) => platform.ShowAsync(new NotificationPayload(
-        "时刻", "这是一条测试通知。", "moment-test", "moment-reminders", "section=timeline", []), ct);
+        "Hourbit 日程", "这是一条测试通知。", "moment-test", "moment-reminders", "section=timeline", []), ct);
 
     public Task DeliverAsync(ScheduledReminder reminder, CancellationToken ct)
     {

@@ -1,13 +1,13 @@
-# 时刻 0.1.0 发布检查表
+# Hourbit 日程 0.2.0 发布检查表
 
 - 检查日期：2026-08-01
 - 目标：Windows 11 x64，安装版与便携版
 - 签名状态：未签名测试发行版
-- 总体状态：**自动发布门通过；物理 Windows 11 矩阵仍待人工验证**
+- 总体状态：**0.2.0 元数据门通过；完整打包与物理 Windows 11 矩阵待验证**
 
-最终 `build-release.ps1` 与 `smoke-test.ps1` 均在 Windows PowerShell 5.1 下退出 0。
-安装包、便携 ZIP 及相邻 SHA-256 文件已生成；未执行的物理 Windows 场景仍明确
-保留为待验证，不能由自动证据替代。
+`build-release.ps1 -ValidateOnly` 从已求值的 MSBuild 属性验证产品名、可执行文件名、
+SemVer 与发布日期。完整安装包、便携 ZIP 和 SHA-256 文件应在 0.2.0 所有核心功能
+合入后重新生成；未执行的物理 Windows 场景不能由自动证据替代。
 
 ## 已完成的自动证据
 
@@ -39,26 +39,22 @@
 最终便携 ZIP 的 2026-08-01 冒烟运行再次产生相同六类事件且各一次；时间戳因每次
 运行而变化。
 
-## 已完成的自动门禁
+## 自动门禁命令
 
 在
 `D:\Coding\window alert tool\.worktrees\moment-development` 中执行：
 
 ```powershell
 dotnet test Moment.slnx -c Release
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-test.ps1
-Get-FileHash artifacts\Moment-Portable-x64.zip -Algorithm SHA256
-Get-FileHash artifacts\Moment-Setup-x64.exe -Algorithm SHA256
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -ValidateOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-test.ps1 -ValidateOnly
+Get-FileHash artifacts\Hourbit-Portable-x64.zip -Algorithm SHA256
+Get-FileHash artifacts\Hourbit-Setup-x64.exe -Algorithm SHA256
 ```
 
-实际结果为 317/317 测试通过，构建和烟雾脚本退出 0，四个发行文件存在。新算哈希
-与相邻 `.sha256` 内容一致：
-
-- `Moment-Portable-x64.zip`：123,211,792 字节，
-  `BEA5FFB11F7E9026C7B4E8257B37A1E504B3184E6BCFFA1E54B0DF663DC70198`
-- `Moment-Setup-x64.exe`：87,147,889 字节，
-  `FBB4840B9691E2706E9B70A611048B1E3A68E36E84D9AE799D7E88AE00B5F8BC`
+`ValidateOnly` 必须先显示 `Hourbit.exe`、版本 `0.2.0`、发布日期
+`2026-08-01` 以及两个 Hourbit 发行文件名。只有完整打包和烟雾测试实际退出 0 后，
+才能在此记录新生成文件的大小与 SHA-256；不得沿用旧版本产物的结果。
 
 ## 手动 Windows 11 矩阵
 
@@ -88,6 +84,13 @@ Get-FileHash artifacts\Moment-Setup-x64.exe -Algorithm SHA256
 `%LOCALAPPDATA%\Programs\Moment`。脚本不包含 `UninstallDelete` 或针对
 `%LOCALAPPDATA%\Moment\data` 的删除操作；应用设置仍独占开机启动注册。
 这项静态检查不能替代实际安装/升级/卸载测试。
+
+## 版本一致性检查
+
+发布前只修改仓库根目录的 `Version.props`，再运行
+`scripts/build-release.ps1 -ValidateOnly`。确认 `Hourbit.exe` 的程序集属性、
+安装程序版本、设置页页脚以及 `Hourbit-Portable-x64.zip` 与
+`Hourbit-Setup-x64.exe` 的名称均来自同一组已求值的 MSBuild 属性。
 
 ## Release 截图待办
 

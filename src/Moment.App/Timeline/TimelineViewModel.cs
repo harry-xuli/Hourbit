@@ -62,7 +62,7 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand DeleteCommand { get; }
     public IAsyncCommand CompleteCommand { get; }
     public IAsyncCommand OpenQuickAddCommand { get; }
-    public string ProductName => "时刻";
+    public string ProductName => "Hourbit 日程";
     public string DateText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString(
         "yyyy年M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
     public string MonthText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString("M月",

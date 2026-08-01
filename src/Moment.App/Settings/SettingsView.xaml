@@ -10,7 +10,7 @@
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
-        automation:AutomationProperties.Name="时刻设置"
+        automation:AutomationProperties.Name="Hourbit 日程设置"
         Loaded="OnLoaded"
         Closed="OnClosed">
     <ScrollViewer x:Name="SettingsScrollViewer"
@@ -57,7 +57,7 @@
 
             <GroupBox Header="系统启动" Margin="0,18,0,0" Padding="18">
                 <CheckBox x:Name="StartupCheckBox"
-                          Content="登录 Windows 后启动时刻（默认关闭）"
+                          Content="登录 Windows 后启动 Hourbit 日程（默认关闭）"
                           IsChecked="{Binding StartWithWindows, Mode=TwoWay}"
                           TabIndex="3"
                           MinHeight="36"
@@ -274,6 +274,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="VersionText"
+                           Text="{Binding VersionText}"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
                 <StackPanel Grid.Column="1"

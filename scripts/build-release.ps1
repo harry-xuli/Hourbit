@@ -16,12 +16,89 @@ $publishDirectory = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot 'publish'))
 $portableDirectory = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot 'portable'))
-$portableArchive = Join-Path $artifactsRoot 'Moment-Portable-x64.zip'
-$installerArtifact = Join-Path $artifactsRoot 'Moment-Setup-x64.exe'
 $applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
 $windowsProject = Join-Path $repositoryRoot 'src\Moment.Windows\Moment.Windows.csproj'
 $solution = Join-Path $repositoryRoot 'Moment.slnx'
 $installerScript = Join-Path $repositoryRoot 'installer\Moment.iss'
+
+function Get-RequiredProperty {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$Properties,
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $value = [string]$Properties.$Name
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        throw "Evaluated MSBuild property '$Name' is missing."
+    }
+    return $value
+}
+
+function Get-ReleaseMetadata {
+    $output = & dotnet msbuild $applicationProject `
+        -nologo `
+        '-getProperty:AssemblyName,Version,Product,ReleaseDate,SemanticVersion'
+    if ($LASTEXITCODE -ne 0) {
+        throw "MSBuild property evaluation failed with exit code $LASTEXITCODE."
+    }
+
+    try {
+        $properties = (($output -join [Environment]::NewLine) |
+            ConvertFrom-Json).Properties
+    }
+    catch {
+        throw "MSBuild property evaluation returned invalid JSON: $($_.Exception.Message)"
+    }
+
+    $assemblyName = Get-RequiredProperty $properties 'AssemblyName'
+    $semanticVersion = Get-RequiredProperty $properties 'SemanticVersion'
+    $version = Get-RequiredProperty $properties 'Version'
+    $product = Get-RequiredProperty $properties 'Product'
+    $releaseDate = Get-RequiredProperty $properties 'ReleaseDate'
+
+    $semVerPattern =
+        '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)' +
+        '(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?' +
+        '(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+    if ($semanticVersion -cnotmatch $semVerPattern) {
+        throw "Evaluated SemanticVersion '$semanticVersion' is not valid semantic versioning."
+    }
+    if ($version -cne $semanticVersion) {
+        throw "Evaluated Version '$version' does not match SemanticVersion '$semanticVersion'."
+    }
+
+    $parsedDate = [DateTime]::MinValue
+    if (-not [DateTime]::TryParseExact(
+            $releaseDate,
+            'yyyy-MM-dd',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::None,
+            [ref]$parsedDate) -or
+        $parsedDate.ToString(
+            'yyyy-MM-dd',
+            [Globalization.CultureInfo]::InvariantCulture) -cne $releaseDate) {
+        throw "Evaluated ReleaseDate '$releaseDate' is not a valid ISO date (yyyy-MM-dd)."
+    }
+
+    if ($assemblyName.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+        throw "Evaluated AssemblyName '$assemblyName' is not safe for release filenames."
+    }
+
+    return [pscustomobject]@{
+        AssemblyName = $assemblyName
+        Version = $semanticVersion
+        Product = $product
+        ReleaseDate = $releaseDate
+    }
+}
+
+$releaseMetadata = Get-ReleaseMetadata
+$portableArchive = Join-Path $artifactsRoot (
+    $releaseMetadata.AssemblyName + '-Portable-x64.zip')
+$installerArtifact = Join-Path $artifactsRoot (
+    $releaseMetadata.AssemblyName + '-Setup-x64.exe')
 
 function Assert-ExactStagingDirectory {
     param(
@@ -110,6 +187,12 @@ Assert-ExactStagingDirectory -Candidate $publishProbe -Expected $publishDirector
 Assert-ExactStagingDirectory -Candidate $portableDirectory -Expected $portableDirectory
 
 if ($ValidateOnly) {
+    Write-Output "Validated product: $($releaseMetadata.Product)"
+    Write-Output "Validated executable: $($releaseMetadata.AssemblyName).exe"
+    Write-Output "Validated semantic version: $($releaseMetadata.Version)"
+    Write-Output "Validated release date: $($releaseMetadata.ReleaseDate)"
+    Write-Output "Validated artifact: $portableArchive"
+    Write-Output "Validated artifact: $installerArtifact"
     Write-Output "Validated cleanup target: $publishDirectory"
     Write-Output "Validated cleanup target: $portableDirectory"
     exit 0
@@ -170,7 +253,9 @@ try {
     & $resolvedCompiler `
         "/DPublishDir=$publishDirectory" `
         "/DArtifactsDir=$artifactsRoot" `
-        '/DAppVersion=0.1.0' `
+        "/DAppVersion=$($releaseMetadata.Version)" `
+        "/DAppProductName=$($releaseMetadata.Product)" `
+        "/DAppAssemblyName=$($releaseMetadata.AssemblyName)" `
         $installerScript
     if ($LASTEXITCODE -ne 0) {
         throw "Inno Setup failed with exit code $LASTEXITCODE."

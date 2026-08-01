@@ -41,7 +41,7 @@ internal sealed class WpfPreCompositionRecoveryDialog :
             + $"损坏数据已原样保存在：\n{corruptCopyPath}\n\n"
             + "选择“是”可选择一个 .moment-backup 文件恢复；"
             + "选择“否”将退出且不会替换当前数据库。",
-            "时刻 - 数据恢复",
+            "Hourbit 日程 - 数据恢复",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning,
             System.Windows.MessageBoxResult.No);
@@ -49,8 +49,8 @@ internal sealed class WpfPreCompositionRecoveryDialog :
             return null;
         var picker = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "选择时刻备份",
-            Filter = "时刻备份 (*.moment-backup)|*.moment-backup",
+            Title = "选择 Hourbit 日程备份",
+            Filter = "Hourbit 日程备份 (*.moment-backup)|*.moment-backup",
             CheckFileExists = true,
             Multiselect = false
         };

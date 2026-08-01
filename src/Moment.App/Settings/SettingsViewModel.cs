@@ -93,6 +93,10 @@ public sealed class SettingsViewModel : ObservableObject
     }
 
     public bool HasReleasePage => _releasePage?.Url is not null;
+    public string VersionText =>
+        (_releasePage?.Metadata ??
+         ProductMetadata.FromAssembly(typeof(SettingsViewModel).Assembly))
+        .SettingsFooterText;
 
     public async Task LoadAsync(CancellationToken ct = default)
     {

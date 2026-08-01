@@ -9,9 +9,11 @@
     <WindowsAppSDKSelfContained Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSDKSelfContained>
     <WindowsAppSdkUndockedRegFreeWinRTInitialize Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSdkUndockedRegFreeWinRTInitialize>
     <StartupObject>Moment.App.Program</StartupObject>
+    <RootNamespace>Moment.App</RootNamespace>
+    <AssemblyName>$(ExecutableName)</AssemblyName>
     <ApplicationIcon>Assets\moment.ico</ApplicationIcon>
-    <Version>0.1.0</Version>
-    <Product>时刻</Product>
+    <Version>$(SemanticVersion)</Version>
+    <Product>$(ProductName)</Product>
     <Description>本地优先的 Windows 11 提醒工具</Description>
     <ReleasePageUrl Condition="'$(ReleasePageUrl)' == ''"></ReleasePageUrl>
   </PropertyGroup>
@@ -32,6 +34,10 @@
                       LogicalName="Moment.App.Assets.moment.ico" />
     <None Remove="Assets\default-alert.wav" />
     <EmbeddedResource Include="Assets\default-alert.wav" />
+    <AssemblyMetadata Include="ProductName" Value="$(Product)" />
+    <AssemblyMetadata Include="ExecutableName" Value="$(AssemblyName)" />
+    <AssemblyMetadata Include="SemanticVersion" Value="$(Version)" />
+    <AssemblyMetadata Include="ReleaseDate" Value="$(ReleaseDate)" />
     <AssemblyMetadata Include="ReleasePageUrl" Value="$(ReleasePageUrl)" />
   </ItemGroup>
 </Project>

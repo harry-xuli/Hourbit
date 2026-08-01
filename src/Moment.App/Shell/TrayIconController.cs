@@ -112,7 +112,7 @@ public sealed class MessageBoxExitConfirmationService : IExitConfirmationService
         ct.ThrowIfCancellationRequested();
         var result = System.Windows.MessageBox.Show(
             "退出后，尚未到期的提醒将不会触发。确定退出吗？",
-            "退出时刻",
+            "退出 Hourbit 日程",
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning,
             System.Windows.MessageBoxResult.No);
@@ -136,7 +136,7 @@ public sealed class WindowsFormsTrayMenuHost : ITrayMenuHost
         try
         {
             icon.Icon = _applicationIcon;
-            icon.Text = "时刻";
+            icon.Text = "Hourbit 日程";
             icon.Visible = true;
             _icon = icon;
         }

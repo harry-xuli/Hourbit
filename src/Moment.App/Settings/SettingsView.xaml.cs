@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
 using System.Windows;
 using Microsoft.Win32;
 using Moment.Windows.Alerts;
@@ -24,8 +23,6 @@ public partial class SettingsView : Window
     public SettingsView()
     {
         InitializeComponent();
-        VersionText.Text =
-            $"当前版本 {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "未知"}";
     }
 
     public SettingsView(
@@ -253,7 +250,7 @@ public partial class SettingsView : Window
         var picker = new Microsoft.Win32.SaveFileDialog
         {
             Title = "导出备份",
-            Filter = "时刻备份 (*.moment-backup)|*.moment-backup",
+            Filter = "Hourbit 日程备份 (*.moment-backup)|*.moment-backup",
             AddExtension = true,
             DefaultExt = ".moment-backup",
             FileName = $"moment-export-{DateTimeOffset.UtcNow:yyyyMMdd'T'HHmmss'Z'}.moment-backup"
@@ -266,7 +263,7 @@ public partial class SettingsView : Window
         var picker = new Microsoft.Win32.OpenFileDialog
         {
             Title = "从备份恢复",
-            Filter = "时刻备份 (*.moment-backup)|*.moment-backup",
+            Filter = "Hourbit 日程备份 (*.moment-backup)|*.moment-backup",
             CheckFileExists = true,
             Multiselect = false
         };

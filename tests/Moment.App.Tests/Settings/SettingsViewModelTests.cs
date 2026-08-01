@@ -11,6 +11,20 @@ namespace Moment.App.Tests.Settings;
 public sealed class SettingsViewModelTests
 {
     [Fact]
+    public void Settings_footer_comes_from_the_application_release_metadata()
+    {
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            new RecordingSettingsStore(),
+            releasePage: ReleasePageService.FromAssembly(
+                typeof(SettingsViewModel).Assembly));
+
+        Assert.Equal(
+            "版本 0.2.0 · 发布于 2026-08-01",
+            vm.VersionText);
+    }
+
+    [Fact]
     public async Task Backup_actions_delegate_only_explicit_paths_to_the_backup_service()
     {
         var backup = new RecordingBackupService();

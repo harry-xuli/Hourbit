@@ -5,25 +5,31 @@
   #define ArtifactsDir AddBackslash(SourcePath) + "..\artifacts"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #error AppVersion must be provided by build-release.ps1
+#endif
+#ifndef AppProductName
+  #error AppProductName must be provided by build-release.ps1
+#endif
+#ifndef AppAssemblyName
+  #error AppAssemblyName must be provided by build-release.ps1
 #endif
 
 [Setup]
 AppId={{8E5D37F4-A701-4B84-A71E-B7C0A8E46D51}
-AppName=时刻
+AppName={#AppProductName}
 AppVersion={#AppVersion}
-AppPublisher=Moment
+AppPublisher={#AppAssemblyName}
 DefaultDirName={localappdata}\Programs\Moment
-DefaultGroupName=时刻
+DefaultGroupName={#AppProductName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayName=时刻
+UninstallDisplayName={#AppProductName}
 SetupIconFile=..\src\Moment.App\Assets\moment.ico
-UninstallDisplayIcon={app}\Moment.App.exe
+UninstallDisplayIcon={app}\{#AppAssemblyName}.exe
 OutputDir={#ArtifactsDir}
-OutputBaseFilename=Moment-Setup-x64
+OutputBaseFilename={#AppAssemblyName}-Setup-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -40,8 +46,8 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\时刻"; Filename: "{app}\Moment.App.exe"
-Name: "{autodesktop}\时刻"; Filename: "{app}\Moment.App.exe"; Tasks: desktopicon
+Name: "{group}\{#AppProductName}"; Filename: "{app}\{#AppAssemblyName}.exe"
+Name: "{autodesktop}\{#AppProductName}"; Filename: "{app}\{#AppAssemblyName}.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\Moment.App.exe"; Description: "启动时刻"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppAssemblyName}.exe"; Description: "启动 {#AppProductName}"; Flags: nowait postinstall skipifsilent
