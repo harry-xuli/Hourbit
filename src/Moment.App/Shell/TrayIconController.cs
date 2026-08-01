@@ -122,12 +122,31 @@ public sealed class MessageBoxExitConfirmationService : IExitConfirmationService
 
 public sealed class WindowsFormsTrayMenuHost : ITrayMenuHost
 {
-    private readonly System.Windows.Forms.NotifyIcon _icon = new()
+    private const string ApplicationIconResourceName =
+        "Moment.App.Assets.moment.ico";
+
+    private readonly System.Drawing.Icon _applicationIcon;
+    private readonly System.Windows.Forms.NotifyIcon _icon;
+    private int _disposed;
+
+    public WindowsFormsTrayMenuHost()
     {
-        Icon = System.Drawing.SystemIcons.Application,
-        Text = "时刻",
-        Visible = true
-    };
+        _applicationIcon = LoadApplicationIcon();
+        var icon = new System.Windows.Forms.NotifyIcon();
+        try
+        {
+            icon.Icon = _applicationIcon;
+            icon.Text = "时刻";
+            icon.Visible = true;
+            _icon = icon;
+        }
+        catch
+        {
+            icon.Dispose();
+            _applicationIcon.Dispose();
+            throw;
+        }
+    }
 
     public void SetItems(IReadOnlyList<TrayMenuItem> items)
     {
@@ -140,9 +159,34 @@ public sealed class WindowsFormsTrayMenuHost : ITrayMenuHost
 
     public void Dispose()
     {
-        _icon.Visible = false;
-        _icon.ContextMenuStrip?.Dispose();
-        _icon.Dispose();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+        try
+        {
+            _icon.Visible = false;
+            _icon.ContextMenuStrip?.Dispose();
+        }
+        finally
+        {
+            try
+            {
+                _icon.Dispose();
+            }
+            finally
+            {
+                _applicationIcon.Dispose();
+            }
+        }
+    }
+
+    private static System.Drawing.Icon LoadApplicationIcon()
+    {
+        using var stream = typeof(WindowsFormsTrayMenuHost).Assembly
+            .GetManifestResourceStream(ApplicationIconResourceName)
+            ?? throw new InvalidOperationException(
+                $"Missing tray icon resource: {ApplicationIconResourceName}");
+        using var embeddedIcon = new System.Drawing.Icon(stream);
+        return (System.Drawing.Icon)embeddedIcon.Clone();
     }
 
     private static System.Windows.Forms.ToolStripMenuItem Create(TrayMenuItem item)

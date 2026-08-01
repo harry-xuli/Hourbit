@@ -27,6 +27,9 @@
     <Content Remove="Assets\moment-logo-rgba.png" />
     <None Include="Assets\moment-logo-master.png" />
     <None Include="Assets\moment-logo-rgba.png" />
+    <None Remove="Assets\moment.ico" />
+    <EmbeddedResource Include="Assets\moment.ico"
+                      LogicalName="Moment.App.Assets.moment.ico" />
     <None Remove="Assets\default-alert.wav" />
     <EmbeddedResource Include="Assets\default-alert.wav" />
     <AssemblyMetadata Include="ReleasePageUrl" Value="$(ReleasePageUrl)" />
