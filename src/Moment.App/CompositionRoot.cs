@@ -26,6 +26,7 @@ public sealed class CompositionRoot : IAsyncDisposable
 {
     private readonly SqliteReminderRepository _repository;
     private readonly ReminderScheduler _scheduler;
+    private readonly ReminderRecoveryCoordinator _reminderRecovery;
     private readonly ImportantAlertController _importantAlerts;
     private readonly WindowsNotificationRuntime _notificationRuntime;
     private readonly SystemResumeMonitor _resumeMonitor;
@@ -38,6 +39,8 @@ public sealed class CompositionRoot : IAsyncDisposable
     private readonly ImportantAlertWindowPresenter _importantAlertPresenter;
     private readonly WindowPlacementService _windowPlacement;
     private readonly string _dataFolder;
+    private readonly CancellationTokenSource _lifetime;
+    private readonly EventHandler _schedulerStateChanged;
     private SettingsView? _settingsWindow;
     private bool _started;
     private int _disposed;
@@ -45,6 +48,8 @@ public sealed class CompositionRoot : IAsyncDisposable
     private CompositionRoot(
         SqliteReminderRepository repository,
         ReminderScheduler scheduler,
+        TimelineRefreshCoordinator timelineRefresh,
+        ReminderRecoveryCoordinator reminderRecovery,
         ImportantAlertController importantAlerts,
         WindowsNotificationRuntime notificationRuntime,
         SystemResumeMonitor resumeMonitor,
@@ -56,6 +61,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         AppNotificationSink notificationSink,
         ImportantAlertWindowPresenter importantAlertPresenter,
         WindowPlacementService windowPlacement,
+        CancellationTokenSource lifetime,
         string dataFolder,
         SettingsViewModel settings,
         TimelineViewModel timeline,
@@ -65,6 +71,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     {
         _repository = repository;
         _scheduler = scheduler;
+        _reminderRecovery = reminderRecovery;
         _importantAlerts = importantAlerts;
         _notificationRuntime = notificationRuntime;
         _resumeMonitor = resumeMonitor;
@@ -76,6 +83,9 @@ public sealed class CompositionRoot : IAsyncDisposable
         _notificationSink = notificationSink;
         _importantAlertPresenter = importantAlertPresenter;
         _windowPlacement = windowPlacement;
+        _lifetime = lifetime;
+        _schedulerStateChanged = ComposeTimelineRefreshHandler(
+            timelineRefresh, OnRuntimeError, lifetime.Token);
         _dataFolder = dataFolder;
         Settings = settings;
         Timeline = timeline;
@@ -159,16 +169,27 @@ public sealed class CompositionRoot : IAsyncDisposable
         var timelineQuery = new SqliteTimelineQuery(databasePath);
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, dialogs, zone);
-        restoreLifecycle.Configure(scheduler, timeline);
+        var timelineRefresh = new TimelineRefreshCoordinator(
+            System.Windows.Application.Current.Dispatcher, timeline);
+        var lifetime = new CancellationTokenSource();
+        var reminderRecoveryService = new ReminderRecoveryService(
+            repository,
+            notificationSink,
+            new ReminderRecoverySummarySink(notificationSink));
+        var reminderRecovery = new ReminderRecoveryCoordinator(
+            scheduler,
+            reminderRecoveryService,
+            clock,
+            timelineRefresh,
+            lifetime.Token);
+        restoreLifecycle.Configure(scheduler, timelineRefresh);
         quickAdd = ComposeQuickAdd(parser, reminders, clock, zone, timeline);
         var mainWindow = new MainWindow { DataContext = timeline };
         var navigator = new WindowNotificationNavigator(mainWindow);
         var notificationRuntime = new WindowsNotificationRuntime(actions, navigator);
-        var resumeMonitor = new SystemResumeMonitor((_, _) =>
-        {
-            scheduler.Refresh();
-            return timeline.LoadAsync();
-        });
+        var resumeMonitor = new SystemResumeMonitor(
+            (_, resumeCancellation) =>
+                reminderRecovery.RecoverAndRefreshAsync(resumeCancellation));
         var singleInstance = new SingleInstanceCoordinator();
 
         CompositionRoot? root = null;
@@ -190,10 +211,11 @@ public sealed class CompositionRoot : IAsyncDisposable
             });
 
         root = new CompositionRoot(
-            repository, scheduler, importantAlerts, notificationRuntime,
+            repository, scheduler, timelineRefresh, reminderRecovery,
+            importantAlerts, notificationRuntime,
             resumeMonitor, hotkey, singleInstance, tray, reminders, clock,
             notificationSink, importantAlertPresenter,
-            windowPlacement,
+            windowPlacement, lifetime,
             dataFolder,
             settings, timeline, quickAdd, mainWindow, quickWindow);
         return root;
@@ -244,11 +266,18 @@ public sealed class CompositionRoot : IAsyncDisposable
         _singleInstance.ActivationReceived += OnActivationReceivedAsync;
         _hotkey.Pressed += OnHotkeyPressed;
         _scheduler.DeliveryFailed += OnDeliveryFailed;
+        _scheduler.StateChanged += _schedulerStateChanged;
+        _resumeMonitor.RecoveryFailed += OnRuntimeError;
         _tray.ErrorOccurred += OnRuntimeError;
 
-        await _scheduler.StartAsync(ct);
-        TryStart(_notificationRuntime.Start);
-        TryStart(_resumeMonitor.Start);
+        await RecoverBeforeStartingRuntimeAsync(
+            _reminderRecovery,
+            () =>
+            {
+                TryStart(_notificationRuntime.Start);
+                TryStart(_resumeMonitor.Start);
+            },
+            ct);
         try
         {
             await Settings.SaveHotkeyAsync(Settings.Hotkey, ct);
@@ -257,7 +286,6 @@ public sealed class CompositionRoot : IAsyncDisposable
         {
             OnRuntimeError(exception);
         }
-        await Timeline.LoadAsync();
         if (activation.Kind == InstanceActivationKind.ShowQuickAdd)
             QuickAddWindow.ShowAndFocus();
         else
@@ -273,15 +301,20 @@ public sealed class CompositionRoot : IAsyncDisposable
         _singleInstance.ActivationReceived -= OnActivationReceivedAsync;
         _hotkey.Pressed -= OnHotkeyPressed;
         _scheduler.DeliveryFailed -= OnDeliveryFailed;
+        _scheduler.StateChanged -= _schedulerStateChanged;
+        _resumeMonitor.RecoveryFailed -= OnRuntimeError;
         _tray.ErrorOccurred -= OnRuntimeError;
+        _lifetime.Cancel();
         _tray.Dispose();
         _settingsWindow?.Close();
         _hotkey.Dispose();
         await _resumeMonitor.DisposeAsync();
+        await _reminderRecovery.DisposeAsync();
         await _notificationRuntime.DisposeAsync();
         await _singleInstance.DisposeAsync();
         _scheduler.Dispose();
         await _importantAlerts.DisposeAsync();
+        _lifetime.Dispose();
     }
 
     private Task OnActivationReceivedAsync(InstanceActivation activation)
@@ -299,6 +332,53 @@ public sealed class CompositionRoot : IAsyncDisposable
         QuickAddWindow.ShowAndFocus();
 
     private void OnDeliveryFailed(SchedulerDeliveryFailure failure) => OnRuntimeError(failure.Exception);
+
+    internal static async Task RecoverBeforeStartingRuntimeAsync(
+        ReminderRecoveryCoordinator reminderRecovery,
+        Action startRuntimeSignals,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(reminderRecovery);
+        ArgumentNullException.ThrowIfNull(startRuntimeSignals);
+        await reminderRecovery.RecoverAndRefreshAsync(ct);
+        startRuntimeSignals();
+    }
+
+    internal static EventHandler ComposeTimelineRefreshHandler(
+        TimelineRefreshCoordinator timelineRefresh,
+        Action<Exception> reportError,
+        CancellationToken lifetime)
+    {
+        ArgumentNullException.ThrowIfNull(timelineRefresh);
+        ArgumentNullException.ThrowIfNull(reportError);
+        return (_, _) =>
+            _ = ObserveTimelineRefreshAsync(timelineRefresh, reportError, lifetime);
+    }
+
+    private static async Task ObserveTimelineRefreshAsync(
+        TimelineRefreshCoordinator timelineRefresh,
+        Action<Exception> reportError,
+        CancellationToken lifetime)
+    {
+        try
+        {
+            await timelineRefresh.RequestAsync(lifetime);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                reportError(exception);
+            }
+            catch
+            {
+                // Runtime error observers must not fault the scheduler callback.
+            }
+        }
+    }
 
     private void OnRuntimeError(Exception exception) => RuntimeError?.Invoke(exception);
 
@@ -393,14 +473,14 @@ public sealed class CompositionRoot : IAsyncDisposable
         IBackupRestoreLifecycle
     {
         private ReminderScheduler? _scheduler;
-        private TimelineViewModel? _timeline;
+        private TimelineRefreshCoordinator? _timelineRefresh;
 
         internal void Configure(
             ReminderScheduler scheduler,
-            TimelineViewModel timeline)
+            TimelineRefreshCoordinator timelineRefresh)
         {
             _scheduler = scheduler;
-            _timeline = timeline;
+            _timelineRefresh = timelineRefresh;
         }
 
         public Task StopAsync(CancellationToken ct) =>
@@ -413,19 +493,25 @@ public sealed class CompositionRoot : IAsyncDisposable
         {
             ct.ThrowIfCancellationRequested();
             Scheduler.Refresh();
-            await Timeline.LoadAsync();
-            ct.ThrowIfCancellationRequested();
-            if (!string.IsNullOrWhiteSpace(Timeline.ErrorMessage))
-                throw new InvalidOperationException(Timeline.ErrorMessage);
+            await TimelineRefresh.RequestAsync(ct);
         }
 
         private ReminderScheduler Scheduler =>
             _scheduler ?? throw new InvalidOperationException(
                 "Backup restore lifecycle is not initialized.");
 
-        private TimelineViewModel Timeline =>
-            _timeline ?? throw new InvalidOperationException(
+        private TimelineRefreshCoordinator TimelineRefresh =>
+            _timelineRefresh ?? throw new InvalidOperationException(
                 "Backup restore lifecycle is not initialized.");
+    }
+
+    private sealed class ReminderRecoverySummarySink(IReminderSink sink) :
+        IReminderRecoverySummarySink
+    {
+        public Task SendMissedSummaryAsync(
+            IReadOnlyList<ScheduledReminder> reminders,
+            CancellationToken ct) =>
+            sink.DeliverMissedSummaryAsync(reminders, ct);
     }
 
     private sealed class WindowNotificationNavigator(MainWindow window) : INotificationNavigator
