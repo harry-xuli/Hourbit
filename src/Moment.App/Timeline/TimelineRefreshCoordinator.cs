@@ -40,8 +40,15 @@ public sealed class TimelineRefreshCoordinator : IAsyncDisposable
 
     internal Task RequestAndDrainAsync(CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
         return AwaitOwnedAsync(Admit(), ct);
+    }
+
+    internal Task DrainAsync(CancellationToken ct)
+    {
+        Task drain;
+        lock (_gate)
+            drain = _drain?.Task ?? Task.CompletedTask;
+        return AwaitOwnedAsync(drain, ct);
     }
 
     public ValueTask DisposeAsync()
@@ -97,8 +104,9 @@ public sealed class TimelineRefreshCoordinator : IAsyncDisposable
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             await drain.ConfigureAwait(false);
-            ct.ThrowIfCancellationRequested();
         }
+
+        ct.ThrowIfCancellationRequested();
     }
 
     private async Task ReloadUntilDrainedAsync(TaskCompletionSource drain)

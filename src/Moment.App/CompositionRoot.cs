@@ -379,6 +379,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     {
         try
         {
+            lifetime.ThrowIfCancellationRequested();
             await timelineRefresh.RequestAndDrainAsync(lifetime);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -508,7 +509,12 @@ public sealed class CompositionRoot : IAsyncDisposable
 
         public async Task RefreshAsync(CancellationToken ct)
         {
-            ct.ThrowIfCancellationRequested();
+            if (ct.IsCancellationRequested)
+            {
+                await TimelineRefresh.DrainAsync(ct);
+                return;
+            }
+
             Scheduler.Refresh();
             await TimelineRefresh.RequestAndDrainAsync(ct);
         }

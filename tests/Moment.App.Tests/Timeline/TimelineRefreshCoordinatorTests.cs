@@ -5,6 +5,30 @@ namespace Moment.App.Tests.Timeline;
 public sealed class TimelineRefreshCoordinatorTests
 {
     [Fact]
+    public async Task Pre_cancelled_owned_drain_rethrows_without_starting_reload()
+    {
+        await WpfTestHost.RunAsync(async () =>
+        {
+            var reloads = 0;
+            var coordinator = new TimelineRefreshCoordinator(
+                System.Windows.Threading.Dispatcher.CurrentDispatcher,
+                () =>
+                {
+                    Interlocked.Increment(ref reloads);
+                    return Task.CompletedTask;
+                });
+            using var cancellation = new CancellationTokenSource();
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => coordinator.DrainAsync(cancellation.Token));
+
+            Assert.Equal(0, Volatile.Read(ref reloads));
+            await coordinator.DisposeAsync();
+        });
+    }
+
+    [Fact]
     public async Task Disposal_after_waiter_cancellation_drains_active_and_trailing_reloads()
     {
         await WpfTestHost.RunAsync(async () =>
