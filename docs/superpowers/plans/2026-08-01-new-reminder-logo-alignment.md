@@ -4,9 +4,9 @@
 
 **Goal:** Align the “新建提醒” vector plus with its label and ship the approved “时刻之环” brand mark as the Windows application and installer icon.
 
-**Architecture:** Generate one high-resolution GPT-Image-2 master mark, remove its flat chroma-key background, and deterministically derive a multi-size Windows ICO. Keep the button change local to `TimelineView.xaml`; verify alignment through rendered WPF geometry instead of source-text assertions, then validate the Release application through Computer Use.
+**Architecture:** Generate one high-resolution master mark with the built-in image-generation tool, remove its flat chroma-key background, and deterministically derive a multi-size Windows ICO. The built-in path requires no API key and does not expose a model-selection parameter. Keep the button change local to `TimelineView.xaml`; verify alignment through rendered WPF geometry instead of source-text assertions, then validate the Release application through Computer Use.
 
-**Tech Stack:** .NET 10, WPF XAML, xUnit, GPT-Image-2, Python Pillow, Inno Setup 6.7.3, Windows Computer Use.
+**Tech Stack:** .NET 10, WPF XAML, xUnit, built-in image generation, Python Pillow, Inno Setup 6.7.3, Windows Computer Use.
 
 ## Global Constraints
 
@@ -34,9 +34,11 @@
 - Consumes: approved visual specification in `docs/superpowers/specs/2026-08-01-new-reminder-logo-alignment-design.md`
 - Produces: `scripts/build-app-icon.py <rgba-png> <ico-path>` and a multi-size `moment.ico` consumed by MSBuild and Inno Setup
 
-- [ ] **Step 1: Generate the logo master with GPT-Image-2**
+- [ ] **Step 1: Generate the logo master with the built-in image tool**
 
-Use the image-generation tool with this exact production prompt:
+Use the built-in image-generation tool directly; do not require
+`OPENAI_API_KEY` and do not switch to the CLI merely to select a model. Use
+this exact production prompt:
 
 ```text
 Use case: logo-brand
