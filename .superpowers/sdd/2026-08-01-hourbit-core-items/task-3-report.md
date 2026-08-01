@@ -335,3 +335,55 @@ No schema-validation concern remains for quoted literals. Quoted identifiers are
 SQLite syntax but intentionally non-canonical for this exact application-owned schema and
 are rejected. The unrelated scheduler test remains sensitive to parallel solution load;
 serial full-suite verification is clean.
+
+## Fix Round 3: Case-insensitive unquoted PK identifiers
+
+### Finding and RED
+
+The quote-aware tokenizer and `table_info` comparison correctly treated unquoted SQLite
+identifiers case-insensitively, but the final `PRAGMA index_info(todos)` assertion compared
+the primary-key column to `id` with `StringComparison.Ordinal`. Canonical-equivalent
+`ID TEXT PRIMARY KEY` definitions therefore reached the index check and were rejected.
+
+Positive migration and backup controls rebuild the otherwise canonical table with unquoted
+uppercase `ID`. The focused RED run failed both cases at
+`The todos primary-key index must contain only id.` A separate malformed-schema fixture
+moves the primary key to `completed_at`, preserving negative coverage for a genuinely wrong
+PK column.
+
+### Implementation
+
+- The `index_info` column-name comparison now uses `OrdinalIgnoreCase`.
+- Both `sqlite_master` table lookups use `COLLATE NOCASE`, keeping table-name structural
+  lookup consistent with SQLite's unquoted identifier semantics.
+- Existing `table_info` column normalization and token comparison remain case-insensitive
+  for unquoted identifiers.
+- Quoted identifiers remain distinct tokenizer tokens and deliberately non-canonical.
+
+### GREEN
+
+Focused regression controls:
+
+```text
+dotnet test tests/Moment.Infrastructure.Tests/Moment.Infrastructure.Tests.csproj -c Release --filter "FullyQualifiedName~uppercase_unquoted_primary_key"
+Passed: 2, Failed: 0, Skipped: 0
+```
+
+Complete requested todo/migration/backup suite:
+
+```text
+dotnet test tests/Moment.Infrastructure.Tests/Moment.Infrastructure.Tests.csproj -c Release --filter "FullyQualifiedName~Todo|FullyQualifiedName~Migration|FullyQualifiedName~Backup"
+Passed: 57, Failed: 0, Skipped: 0
+```
+
+### Files changed in this round
+
+- `src/Moment.Infrastructure/Data/DatabaseSchemaValidator.cs`
+- `tests/Moment.Infrastructure.Tests/Data/SqliteTodoRepositoryTests.cs`
+- `tests/Moment.Infrastructure.Tests/Backup/BackupServiceTests.cs`
+- `.superpowers/sdd/2026-08-01-hourbit-core-items/task-3-report.md`
+
+### Remaining concerns
+
+None specific to this fix. The change only aligns structural comparisons of unquoted
+identifiers; quoted-identifier policy and all schema constraints are unchanged.

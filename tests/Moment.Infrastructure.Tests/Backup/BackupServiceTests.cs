@@ -127,6 +127,38 @@ public sealed class BackupServiceTests
     }
 
     [Fact]
+    public async Task Export_accepts_uppercase_unquoted_primary_key_identifier()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var databasePath = TestBackupFactory.DatabasePath(temp.Path);
+        await using (var connection =
+                     await DatabaseMigrator.OpenConnectionAsync(databasePath, default))
+        {
+            string canonicalSql;
+            await using (var select = connection.CreateCommand())
+            {
+                select.CommandText = """
+                    SELECT sql FROM sqlite_master
+                    WHERE type = 'table' AND name = 'todos';
+                    """;
+                canonicalSql = (string)(await select.ExecuteScalarAsync())!;
+            }
+            var mixedCaseSql = canonicalSql
+                .Replace("id TEXT PRIMARY KEY", "ID TEXT PRIMARY KEY",
+                    StringComparison.Ordinal);
+            await using var rebuild = connection.CreateCommand();
+            rebuild.CommandText = $"DROP TABLE todos; {mixedCaseSql};";
+            await rebuild.ExecuteNonQueryAsync();
+        }
+        var destination = Path.Combine(temp.Path, "mixed-case.moment-backup");
+
+        await TestBackupFactory.Create(temp.Path).ExportAsync(destination, default);
+
+        Assert.True(File.Exists(destination));
+    }
+
+    [Fact]
     public async Task Automatic_backups_keep_the_seven_newest_successful_packages()
     {
         using var temp = new TempDirectory();

@@ -268,6 +268,13 @@ public sealed class SqliteTodoRepositoryTests
             CanonicalTodosSql.Replace(
                 "id TEXT PRIMARY KEY", "id TEXT",
                 StringComparison.Ordinal),
+            CanonicalTodosSql
+                .Replace(
+                    "id TEXT PRIMARY KEY", "id TEXT",
+                    StringComparison.Ordinal)
+                .Replace(
+                    "completed_at TEXT NULL", "completed_at TEXT PRIMARY KEY",
+                    StringComparison.Ordinal),
             CanonicalTodosSql.Replace(
                 "created_at TEXT NOT NULL", "created_at BLOB NOT NULL",
                 StringComparison.Ordinal),
@@ -400,6 +407,29 @@ public sealed class SqliteTodoRepositoryTests
             DELETE FROM schema_info WHERE version = 3;
             DROP TABLE todos;
             {reformattedSql}
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
+    [Fact]
+    public async Task Migration_accepts_uppercase_unquoted_primary_key_identifier()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        var mixedCaseSql = CanonicalTodosSql
+            .Replace("id TEXT PRIMARY KEY", "ID TEXT PRIMARY KEY",
+                StringComparison.Ordinal);
+        await ExecuteAsync(path, $"""
+            DELETE FROM schema_info WHERE version = 3;
+            DROP TABLE todos;
+            {mixedCaseSql}
             """);
 
         await using var connection =

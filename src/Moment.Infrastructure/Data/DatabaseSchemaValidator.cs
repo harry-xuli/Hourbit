@@ -63,7 +63,7 @@ internal static class DatabaseSchemaValidator
         command.CommandText = """
             SELECT COUNT(*)
             FROM sqlite_master
-            WHERE type = 'table' AND name = 'todos';
+            WHERE type = 'table' AND name = 'todos' COLLATE NOCASE;
             """;
         return Convert.ToInt32(
             await command.ExecuteScalarAsync(ct),
@@ -117,7 +117,7 @@ internal static class DatabaseSchemaValidator
         command.CommandText = """
             SELECT sql
             FROM sqlite_master
-            WHERE type = 'table' AND name = 'todos';
+            WHERE type = 'table' AND name = 'todos' COLLATE NOCASE;
             """;
         var value = await command.ExecuteScalarAsync(ct);
         if (value is not string sql || string.IsNullOrWhiteSpace(sql))
@@ -184,7 +184,7 @@ internal static class DatabaseSchemaValidator
         if (!await indexReader.ReadAsync(ct) ||
             indexReader.GetInt32(0) != 0 ||
             indexReader.GetInt32(1) != 0 ||
-            !string.Equals(indexReader.GetString(2), "id", StringComparison.Ordinal) ||
+            !string.Equals(indexReader.GetString(2), "id", StringComparison.OrdinalIgnoreCase) ||
             await indexReader.ReadAsync(ct))
         {
             throw new InvalidDataException("The todos primary-key index must contain only id.");
