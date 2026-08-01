@@ -244,3 +244,94 @@ One intermediate full-solution run timed out after ten seconds in the unchanged
 The exact test immediately passed alone in 70 ms, and a fresh full Release rerun passed all
 479 tests. No Core scheduling source or test file changed in this round; this is recorded as
 an existing timing-flake signal rather than attributed to schema validation.
+
+## Fix Round 2: Quote-aware schema SQL comparison
+
+### Finding and root cause
+
+Fix Round 1 normalized schema SQL by removing every whitespace and semicolon character
+before comparison. That also modified characters inside single-quoted SQLite literals. A
+malformed due-date GLOB containing an inserted space or semicolon therefore normalized to
+the canonical GLOB and passed migration and backup validation, even though ordinary
+`yyyy-MM-dd` writes would violate the stored CHECK.
+
+### RED
+
+Added migration and backup cases for each adversarial literal:
+
+- `'[0-9] [0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'`;
+- `'[0-9];[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'`.
+
+All four corruption cases failed because no `InvalidDataException` was thrown. Migration
+assertions also require the existing single v3 marker to remain unchanged. A positive
+control with keyword/identifier case changes and exterior whitespace additionally exposed
+that the PRAGMA column-name comparison was unnecessarily case-sensitive.
+
+### Implementation
+
+The validator now tokenizes SQL instead of deleting characters globally:
+
+- unquoted words and identifiers are tokenized and lowercased because SQLite treats them
+  case-insensitively;
+- numeric, operator, and punctuation tokens retain their boundaries, so whitespace cannot
+  join otherwise distinct tokens;
+- single-quoted string literals are preserved byte-for-character, including whitespace,
+  semicolons, letter case, and doubled single-quote escapes;
+- double-quoted, backtick-quoted, and bracket-quoted identifiers are preserved as distinct
+  quoted-identifier tokens, including doubled closing-delimiter escapes. The canonical
+  schema uses unquoted identifiers, so quoted variants are deliberately rejected rather
+  than silently rewritten;
+- insignificant whitespace is skipped only outside quoted tokens;
+- exactly one final semicolon punctuation token is ignored. Semicolons inside literals or
+  elsewhere in the statement remain significant;
+- optional `IF NOT EXISTS` tolerance remains an explicit create-prefix branch.
+
+PRAGMA column names are normalized case-insensitively to align the structural check with
+SQLite's unquoted-identifier rules. Types, nullability, defaults, order, PK shape, indexes,
+and canonical constraints remain unchanged.
+
+### GREEN and regression evidence
+
+Adversarial plus positive-control slice:
+
+```text
+dotnet test tests/Moment.Infrastructure.Tests/Moment.Infrastructure.Tests.csproj -c Release --filter "FullyQualifiedName~whitespace_or_semicolons|FullyQualifiedName~token_case"
+Passed: 5, Failed: 0, Skipped: 0
+```
+
+Complete todo/migration/backup slice:
+
+```text
+dotnet test tests/Moment.Infrastructure.Tests/Moment.Infrastructure.Tests.csproj -c Release --filter "FullyQualifiedName~Todo|FullyQualifiedName~Migration|FullyQualifiedName~Backup"
+Passed: 54, Failed: 0, Skipped: 0
+```
+
+The scheduler timing test from Fix Round 1 again timed out only during parallel
+cross-project execution. It immediately passed alone in 73 ms. Deterministic full Release
+verification was therefore run with project-level parallelism disabled:
+
+```text
+dotnet test Moment.slnx -c Release -m:1
+```
+
+Results:
+
+- Moment.Core.Tests: 185 passed;
+- Moment.Infrastructure.Tests: 79 passed;
+- Moment.Windows.Tests: 88 passed;
+- Moment.App.Tests: 132 passed;
+- total: 484 passed, 0 failed, 0 skipped.
+
+### Files changed in this round
+
+- `src/Moment.Infrastructure/Data/DatabaseSchemaValidator.cs`
+- `tests/Moment.Infrastructure.Tests/Data/SqliteTodoRepositoryTests.cs`
+- `tests/Moment.Infrastructure.Tests/Backup/BackupServiceTests.cs`
+- `.superpowers/sdd/2026-08-01-hourbit-core-items/task-3-report.md`
+
+### Remaining concerns
+
+No schema-validation concern remains for quoted literals. Quoted identifiers are valid
+SQLite syntax but intentionally non-canonical for this exact application-owned schema and
+are rejected. The unrelated scheduler test remains sensitive to parallel solution load;
+serial full-suite verification is clean.

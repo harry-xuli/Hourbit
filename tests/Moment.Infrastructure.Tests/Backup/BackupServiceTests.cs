@@ -77,6 +77,55 @@ public sealed class BackupServiceTests
         Assert.False(File.Exists(destination));
     }
 
+    public static TheoryData<string> QuotedGlobCorruptions =>
+        new()
+        {
+            "'[0-9] [0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+            "'[0-9];[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'"
+        };
+
+    [Theory]
+    [MemberData(nameof(QuotedGlobCorruptions))]
+    public async Task Export_rejects_whitespace_or_semicolons_inside_the_due_date_glob_literal(
+        string malformedGlob)
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        await using (var connection = await DatabaseMigrator.OpenConnectionAsync(
+                         TestBackupFactory.DatabasePath(temp.Path), default))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                DROP TABLE todos;
+                CREATE TABLE todos (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 200),
+                    created_at TEXT NOT NULL,
+                    due_date TEXT NULL CHECK(
+                        due_date IS NULL OR (
+                            length(due_date) = 10 AND
+                            due_date GLOB {malformedGlob}
+                        )
+                    ),
+                    importance INTEGER NOT NULL CHECK(importance IN (0, 1)),
+                    is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1)),
+                    completed_at TEXT NULL,
+                    CHECK(
+                        (is_completed = 0 AND completed_at IS NULL) OR
+                        (is_completed = 1 AND completed_at IS NOT NULL)
+                    )
+                );
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+        var destination = Path.Combine(temp.Path, "quoted-corrupt.moment-backup");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            TestBackupFactory.Create(temp.Path).ExportAsync(destination, default));
+
+        Assert.False(File.Exists(destination));
+    }
+
     [Fact]
     public async Task Automatic_backups_keep_the_seven_newest_successful_packages()
     {

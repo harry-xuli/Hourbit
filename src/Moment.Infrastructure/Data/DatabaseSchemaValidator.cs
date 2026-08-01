@@ -143,7 +143,7 @@ internal static class DatabaseSchemaValidator
                     "The todos table must not define column defaults.");
             }
             columns.Add(new ColumnShape(
-                reader.GetString(1),
+                reader.GetString(1).ToLowerInvariant(),
                 reader.GetString(2).ToUpperInvariant(),
                 reader.GetInt32(3) == 1,
                 reader.GetInt32(5) == 1));
@@ -192,29 +192,173 @@ internal static class DatabaseSchemaValidator
     }
 
     private static bool HasCanonicalCreateBody(string actualSql) =>
-        GetCreateBody(NormalizeSql(actualSql)) ==
-        GetCreateBody(NormalizeSql(CreateTodosTableSql));
+        TryGetCreateBody(TokenizeSql(actualSql), out var actualBody) &&
+        TryGetCreateBody(TokenizeSql(CreateTodosTableSql), out var canonicalBody) &&
+        actualBody.SequenceEqual(canonicalBody);
 
-    private static string NormalizeSql(string sql) =>
-        new(sql.Where(static character =>
-                !char.IsWhiteSpace(character) && character != ';')
-            .Select(char.ToLowerInvariant)
-            .ToArray());
-
-    private static string GetCreateBody(string normalizedSql)
+    private static IReadOnlyList<SqlToken> TokenizeSql(string sql)
     {
-        const string canonicalPrefix = "createtabletodos(";
-        const string idempotentPrefix = "createtableifnotexiststodos(";
-        if (normalizedSql.StartsWith(idempotentPrefix, StringComparison.Ordinal))
-            return normalizedSql[idempotentPrefix.Length..];
-        if (normalizedSql.StartsWith(canonicalPrefix, StringComparison.Ordinal))
-            return normalizedSql[canonicalPrefix.Length..];
-        return normalizedSql;
+        var tokens = new List<SqlToken>();
+        for (var index = 0; index < sql.Length;)
+        {
+            var character = sql[index];
+            if (char.IsWhiteSpace(character))
+            {
+                index++;
+                continue;
+            }
+
+            if (character is '\'' or '"' or '`' or '[')
+            {
+                var (token, nextIndex) = ReadQuotedToken(sql, index);
+                tokens.Add(token);
+                index = nextIndex;
+                continue;
+            }
+
+            if (char.IsLetter(character) || character == '_')
+            {
+                var start = index++;
+                while (index < sql.Length &&
+                       (char.IsLetterOrDigit(sql[index]) ||
+                        sql[index] is '_' or '$'))
+                {
+                    index++;
+                }
+                tokens.Add(new SqlToken(
+                    SqlTokenKind.Word,
+                    sql[start..index].ToLowerInvariant()));
+                continue;
+            }
+
+            if (char.IsDigit(character))
+            {
+                var start = index++;
+                while (index < sql.Length && char.IsDigit(sql[index]))
+                    index++;
+                tokens.Add(new SqlToken(
+                    SqlTokenKind.Number,
+                    sql[start..index]));
+                continue;
+            }
+
+            if (IsOperatorCharacter(character))
+            {
+                var start = index++;
+                while (index < sql.Length && IsOperatorCharacter(sql[index]))
+                    index++;
+                tokens.Add(new SqlToken(
+                    SqlTokenKind.Operator,
+                    sql[start..index]));
+                continue;
+            }
+
+            tokens.Add(new SqlToken(
+                SqlTokenKind.Punctuation,
+                character.ToString()));
+            index++;
+        }
+
+        if (tokens.Count > 0 &&
+            tokens[^1] == new SqlToken(SqlTokenKind.Punctuation, ";"))
+        {
+            tokens.RemoveAt(tokens.Count - 1);
+        }
+        return tokens;
     }
+
+    private static (SqlToken Token, int NextIndex) ReadQuotedToken(
+        string sql,
+        int start)
+    {
+        var opener = sql[start];
+        var closer = opener == '[' ? ']' : opener;
+        var index = start + 1;
+        var closed = false;
+        while (index < sql.Length)
+        {
+            if (sql[index] != closer)
+            {
+                index++;
+                continue;
+            }
+
+            if (index + 1 < sql.Length && sql[index + 1] == closer)
+            {
+                index += 2;
+                continue;
+            }
+
+            index++;
+            closed = true;
+            break;
+        }
+
+        if (!closed)
+            throw new InvalidDataException("The todos table contains unterminated quoted SQL.");
+
+        return (new SqlToken(
+                opener == '\''
+                    ? SqlTokenKind.StringLiteral
+                    : SqlTokenKind.QuotedIdentifier,
+                sql[start..index]),
+            index);
+    }
+
+    private static bool IsOperatorCharacter(char character) =>
+        character is '=' or '<' or '>' or '!' or '|' or '&' or
+            '+' or '-' or '*' or '/' or '%' or '~';
+
+    private static bool TryGetCreateBody(
+        IReadOnlyList<SqlToken> tokens,
+        out IReadOnlyList<SqlToken> body)
+    {
+        if (StartsWith(tokens,
+                Word("create"), Word("table"), Word("todos"),
+                Punctuation("(")))
+        {
+            body = tokens.Skip(4).ToArray();
+            return true;
+        }
+        if (StartsWith(tokens,
+                Word("create"), Word("table"), Word("if"), Word("not"),
+                Word("exists"), Word("todos"), Punctuation("(")))
+        {
+            body = tokens.Skip(7).ToArray();
+            return true;
+        }
+
+        body = [];
+        return false;
+    }
+
+    private static bool StartsWith(
+        IReadOnlyList<SqlToken> tokens,
+        params SqlToken[] prefix) =>
+        tokens.Count >= prefix.Length &&
+        tokens.Take(prefix.Length).SequenceEqual(prefix);
+
+    private static SqlToken Word(string value) =>
+        new(SqlTokenKind.Word, value);
+
+    private static SqlToken Punctuation(string value) =>
+        new(SqlTokenKind.Punctuation, value);
 
     private sealed record ColumnShape(
         string Name,
         string Type,
         bool NotNull,
         bool PrimaryKey);
+
+    private sealed record SqlToken(SqlTokenKind Kind, string Value);
+
+    private enum SqlTokenKind
+    {
+        Word,
+        Number,
+        StringLiteral,
+        QuotedIdentifier,
+        Operator,
+        Punctuation
+    }
 }

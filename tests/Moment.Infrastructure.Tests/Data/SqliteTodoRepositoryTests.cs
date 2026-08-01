@@ -291,9 +291,41 @@ public sealed class SqliteTodoRepositoryTests
                 StringComparison.Ordinal)
         };
 
+    public static TheoryData<string> QuotedLiteralCorruptions =>
+        new()
+        {
+            CanonicalTodosSql.Replace(
+                "'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+                "'[0-9] [0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "'[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+                "'[0-9];[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'",
+                StringComparison.Ordinal)
+        };
+
     [Theory]
     [MemberData(nameof(MalformedTodosSchemas))]
     public async Task Migration_rejects_a_version_three_marker_with_a_malformed_todos_table(
+        string malformedSql)
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        await ExecuteAsync(path, $"DROP TABLE todos; {malformedSql}");
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
+    [Theory]
+    [MemberData(nameof(QuotedLiteralCorruptions))]
+    public async Task Migration_rejects_whitespace_or_semicolons_inside_the_due_date_glob_literal(
         string malformedSql)
     {
         using var temp = new TempDirectory();
@@ -341,6 +373,33 @@ public sealed class SqliteTodoRepositoryTests
             DELETE FROM schema_info WHERE version = 3;
             DROP TABLE todos;
             {CanonicalTodosSql}
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
+    [Fact]
+    public async Task Migration_accepts_canonical_sql_with_token_case_and_formatting_variations()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        var reformattedSql = CanonicalTodosSql
+            .Replace("CREATE TABLE todos", "cReAtE\n\tTaBlE   todos",
+                StringComparison.Ordinal)
+            .Replace("title TEXT NOT NULL", "title\n  text\tNoT NuLl",
+                StringComparison.Ordinal)
+            .Replace("importance IN", "IMPORTANCE\n in",
+                StringComparison.Ordinal);
+        await ExecuteAsync(path, $"""
+            DELETE FROM schema_info WHERE version = 3;
+            DROP TABLE todos;
+            {reformattedSql}
             """);
 
         await using var connection =
