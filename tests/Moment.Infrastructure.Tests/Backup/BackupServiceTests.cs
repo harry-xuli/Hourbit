@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using Moment.Infrastructure.Backup;
+using Moment.Infrastructure.Data;
 using Moment.TestSupport;
 
 namespace Moment.Infrastructure.Tests.Backup;
@@ -51,6 +52,29 @@ public sealed class BackupServiceTests
         Assert.Matches(
             "^[0-9a-f]{64}$",
             document.RootElement.GetProperty("sha256").GetString());
+    }
+
+    [Theory]
+    [InlineData("DROP TABLE todos;")]
+    [InlineData("DROP TABLE todos; CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL);")]
+    public async Task Export_rejects_a_logically_corrupt_schema_version_three_database(
+        string corruptionSql)
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        await using (var connection = await DatabaseMigrator.OpenConnectionAsync(
+                         TestBackupFactory.DatabasePath(temp.Path), default))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = corruptionSql;
+            await command.ExecuteNonQueryAsync();
+        }
+        var destination = Path.Combine(temp.Path, "corrupt.moment-backup");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            TestBackupFactory.Create(temp.Path).ExportAsync(destination, default));
+
+        Assert.False(File.Exists(destination));
     }
 
     [Fact]

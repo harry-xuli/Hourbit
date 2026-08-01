@@ -9,6 +9,27 @@ namespace Moment.Infrastructure.Tests.Data;
 
 public sealed class SqliteTodoRepositoryTests
 {
+    private const string CanonicalTodosSql = """
+        CREATE TABLE todos (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 200),
+            created_at TEXT NOT NULL,
+            due_date TEXT NULL CHECK(
+                due_date IS NULL OR (
+                    length(due_date) = 10 AND
+                    due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                )
+            ),
+            importance INTEGER NOT NULL CHECK(importance IN (0, 1)),
+            is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1)),
+            completed_at TEXT NULL,
+            CHECK(
+                (is_completed = 0 AND completed_at IS NULL) OR
+                (is_completed = 1 AND completed_at IS NOT NULL)
+            )
+        );
+        """;
+
     private static readonly DateTimeOffset CreatedAt =
         new(2026, 8, 1, 9, 10, 11, TimeSpan.FromHours(8));
 
@@ -211,9 +232,161 @@ public sealed class SqliteTodoRepositoryTests
         Assert.Empty(await reminders.GetDueAsync(CreatedAt.AddYears(1), default));
     }
 
+    [Fact]
+    public async Task Migration_rejects_a_version_three_marker_when_todos_is_missing()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        await ExecuteAsync(path, "DROP TABLE todos;");
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
+    public static TheoryData<string> MalformedTodosSchemas =>
+        new()
+        {
+            CanonicalTodosSql.Replace(
+                    "completed_at TEXT NULL,", string.Empty,
+                    StringComparison.Ordinal)
+                .Replace(
+                    "CHECK(\n        (is_completed = 0 AND completed_at IS NULL) OR\n        (is_completed = 1 AND completed_at IS NOT NULL)\n    )",
+                    "CHECK(is_completed IN (0, 1))",
+                    StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "title TEXT NOT NULL", "title TEXT NULL",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "title TEXT NOT NULL", "title TEXT NOT NULL DEFAULT 'x'",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "id TEXT PRIMARY KEY", "id TEXT",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "created_at TEXT NOT NULL", "created_at BLOB NOT NULL",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                " CHECK(length(trim(title)) BETWEEN 1 AND 200)", string.Empty,
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "due_date IS NULL OR (", "1 OR (",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "importance INTEGER NOT NULL CHECK(importance IN (0, 1))",
+                "importance INTEGER NOT NULL",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1))",
+                "is_completed INTEGER NOT NULL",
+                StringComparison.Ordinal),
+            CanonicalTodosSql.Replace(
+                "CHECK(\n        (is_completed = 0 AND completed_at IS NULL) OR\n        (is_completed = 1 AND completed_at IS NOT NULL)\n    )",
+                "CHECK(1)",
+                StringComparison.Ordinal)
+        };
+
+    [Theory]
+    [MemberData(nameof(MalformedTodosSchemas))]
+    public async Task Migration_rejects_a_version_three_marker_with_a_malformed_todos_table(
+        string malformedSql)
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        await ExecuteAsync(path, $"DROP TABLE todos; {malformedSql}");
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
+    [Fact]
+    public async Task Migration_rejects_a_malformed_preexisting_todos_table_without_adding_the_marker()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        await ExecuteAsync(path, """
+            DELETE FROM schema_info WHERE version = 3;
+            DROP TABLE todos;
+            CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL);
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+
+        Assert.Equal(0, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
+    [Fact]
+    public async Task Migration_recovers_a_canonical_preexisting_todos_table_by_adding_one_marker()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        await ExecuteAsync(path, $"""
+            DELETE FROM schema_info WHERE version = 3;
+            DROP TABLE todos;
+            {CanonicalTodosSql}
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
+    [Fact]
+    public async Task Migration_rejects_duplicate_version_three_markers_without_changing_them()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionThreeAsync(path);
+        await ExecuteAsync(path, "INSERT INTO schema_info(version) VALUES (3);");
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+
+        Assert.Equal(2, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
+    }
+
     private static TodoItem PendingTodo(Guid id, string title, DateOnly? dueDate) =>
         new(id, title, CreatedAt, dueDate,
             ReminderImportance.Normal, false, null);
+
+    private static async Task InitializeVersionThreeAsync(string path)
+    {
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+    }
+
+    private static async Task ExecuteAsync(string path, string sql)
+    {
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
 
     private static async Task<(Guid ItemId, Guid OccurrenceId, Guid ActionId)>
         CreateLegacyDatabaseAsync(string path, int version)

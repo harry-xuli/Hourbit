@@ -107,34 +107,34 @@ public static class DatabaseMigrator
             await command.ExecuteNonQueryAsync(ct);
         }
 
-        command.CommandText = "SELECT COUNT(*) FROM schema_info WHERE version = 3;";
-        var versionThreeExists = Convert.ToInt32(
-            await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 0;
-        if (!versionThreeExists)
+        var versionThreeMarkers =
+            await DatabaseSchemaValidator.CountVersionMarkersAsync(
+                connection, (SqliteTransaction)transaction, 3, ct);
+        if (versionThreeMarkers > 1)
         {
-            command.CommandText = """
-                CREATE TABLE IF NOT EXISTS todos (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 200),
-                    created_at TEXT NOT NULL,
-                    due_date TEXT NULL CHECK(
-                        due_date IS NULL OR (
-                            length(due_date) = 10 AND
-                            due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
-                        )
-                    ),
-                    importance INTEGER NOT NULL CHECK(importance IN (0, 1)),
-                    is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1)),
-                    completed_at TEXT NULL,
-                    CHECK(
-                        (is_completed = 0 AND completed_at IS NULL) OR
-                        (is_completed = 1 AND completed_at IS NOT NULL)
-                    )
-                );
-                INSERT INTO schema_info(version) VALUES (3);
-                """;
+            throw new InvalidDataException(
+                $"Schema version 3 must have exactly one marker; found {versionThreeMarkers}.");
+        }
+        if (versionThreeMarkers == 0)
+        {
+            if (await DatabaseSchemaValidator.TodosTableExistsAsync(
+                    connection, (SqliteTransaction)transaction, ct))
+            {
+                await DatabaseSchemaValidator.ValidateTodosTableAsync(
+                    connection, (SqliteTransaction)transaction, ct);
+            }
+            else
+            {
+                command.CommandText = DatabaseSchemaValidator.CreateTodosTableSql;
+                await command.ExecuteNonQueryAsync(ct);
+            }
+
+            command.CommandText = "INSERT INTO schema_info(version) VALUES (3);";
             await command.ExecuteNonQueryAsync(ct);
         }
+
+        await DatabaseSchemaValidator.ValidateVersionThreeAsync(
+            connection, (SqliteTransaction)transaction, ct);
 
         await transaction.CommitAsync(ct);
     }

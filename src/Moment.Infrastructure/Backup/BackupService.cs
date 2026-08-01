@@ -573,7 +573,13 @@ internal static class BackupPackage
             var value = await command.ExecuteScalarAsync(ct);
             if (value is null or DBNull)
                 throw new InvalidDataException("Backup database has no schema version.");
-            return Convert.ToInt32(value, CultureInfo.InvariantCulture);
+            var version = Convert.ToInt32(value, CultureInfo.InvariantCulture);
+            if (version == 3)
+            {
+                await DatabaseSchemaValidator.ValidateVersionThreeAsync(
+                    connection, null, ct);
+            }
+            return version;
         }
         catch (OperationCanceledException)
         {
