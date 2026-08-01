@@ -226,6 +226,28 @@ public sealed class ChineseTimeParserTests
         Assert.False(string.IsNullOrWhiteSpace(invalid.Message));
     }
 
+    [Theory]
+    [InlineData("2026-8-055 开会")]
+    [InlineData("明天 2026-8-055 开会")]
+    [InlineData("明天 2026-008-5 开会")]
+    [InlineData("明天 12026-8-5 开会")]
+    [InlineData("明天 2026-8-5x 开会")]
+    [InlineData("明天 -2026-8-5 开会")]
+    [InlineData("明天 +2026-8-5 开会")]
+    [InlineData("明天 2026/8-5 开会")]
+    [InlineData("明天 2026--8-5 开会")]
+    [InlineData("明天 8-5-20261 开会")]
+    [InlineData("明天 08-005-2026 开会")]
+    [InlineData("明天 8/-5/2026 开会")]
+    [InlineData("2026-08-05 2026-8-055 开会")]
+    public void Rejects_every_uncovered_numeric_date_marker(string text)
+    {
+        var invalid = Assert.IsType<ParseResult.Invalid>(Parse(text));
+
+        Assert.Equal(text, invalid.OriginalText);
+        Assert.False(string.IsNullOrWhiteSpace(invalid.Message));
+    }
+
     [Fact]
     public void Ignores_quoted_and_escaped_literals_when_reading_short_date_field_order()
     {
@@ -233,16 +255,24 @@ public sealed class ChineseTimeParserTests
         dayFirst.DateTimeFormat.ShortDatePattern = "'M''/d' dd/MM/yyyy";
         var monthFirst = (CultureInfo)CultureInfo.GetCultureInfo("en-US").Clone();
         monthFirst.DateTimeFormat.ShortDatePattern = "\\d/\\M MM/dd/yyyy";
+        var doubleQuotedDayFirst = (CultureInfo)CultureInfo.GetCultureInfo("en-GB").Clone();
+        doubleQuotedDayFirst.DateTimeFormat.ShortDatePattern = "\"M/d\" dd/MM/yyyy";
 
         Assert.Equal(DateTimeOffset.Parse("2026-09-08T14:30:00+08:00"),
             Reminder("08/09/2026 14:30 复盘", dayFirst).DueAt);
         Assert.Equal(DateTimeOffset.Parse("2026-08-09T14:30:00+08:00"),
             Reminder("08/09/2026 14:30 复盘", monthFirst).DueAt);
+        Assert.Equal(DateTimeOffset.Parse("2026-09-08T14:30:00+08:00"),
+            Reminder("08/09/2026 14:30 复盘", doubleQuotedDayFirst).DueAt);
     }
 
     [Theory]
     [InlineData("发布 v1.2.3")]
     [InlineData("发布 v1.2.2026")]
+    [InlineData("发布 build2026-8-5")]
+    [InlineData("版本 2026.8")]
+    [InlineData("价格 3.14159")]
+    [InlineData("比例 1/2")]
     [InlineData("修复 M/d 格式")]
     public void Keeps_ordinary_title_text_that_is_not_a_date_or_clock_token(string text)
     {

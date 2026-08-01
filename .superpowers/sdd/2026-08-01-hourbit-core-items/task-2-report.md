@@ -187,3 +187,76 @@ Results:
 
 No new call-site changes were required in this round. The Task 5 Quick Add todo-dispatch
 handoff from the original implementation remains unchanged.
+
+## Fix Round 2
+
+### Finding addressed
+
+The Fix Round 1 date-like detector still used valid field widths and clean end boundaries.
+Malformed numeric dates such as `明天 2026-8-055 开会` could therefore evade the marker
+scan and produce a successful dated todo whose title retained the malformed token.
+
+### RED
+
+Added a table-driven matrix for:
+
+- overlong month, day, leading year, and trailing year fields;
+- signed leading dates and signed/doubled separators;
+- suffix-adjacent malformed dates;
+- mixed separators;
+- valid relative/absolute dates accompanied by a malformed date;
+- ordinary identifier, version, decimal, ratio, and `M/d` prose controls;
+- a double-quoted literal `ShortDatePattern`.
+
+Running the exact focused command:
+
+```text
+dotnet test tests/Moment.Core.Tests/Moment.Core.Tests.csproj --filter "FullyQualifiedName~ChineseTimeParserTests"
+```
+
+produced 9 expected failures out of 109 cases. Each failure was a malformed marker that
+escaped the width/boundary-shaped detector and returned `ParseResult.Success`.
+
+### GREEN
+
+After replacing the date-like detector with an independent numeric-date marker, the exact
+focused command reported:
+
+```text
+Passed: 109, Failed: 0, Skipped: 0
+```
+
+The fresh full Release command:
+
+```text
+dotnet test Moment.slnx --configuration Release
+```
+
+reported:
+
+- Moment.Core.Tests: 178 passed;
+- Moment.Infrastructure.Tests: 48 passed;
+- Moment.Windows.Tests: 88 passed;
+- Moment.App.Tests: 132 passed;
+- total failures: 0.
+
+### Implementation notes
+
+- The marker accepts arbitrary numeric field widths and one-or-more date separator
+  characters, with optional signs, when the leading or trailing year-shaped field has at
+  least four digits.
+- The marker deliberately does not require a clean suffix. A suffix-adjacent numeric date is
+  found, but cannot be wholly covered by the stricter valid numeric-date match, so parsing
+  returns actionable `Invalid`.
+- A marker cannot start inside an ASCII alphanumeric/sign-prefixed identifier. This keeps
+  `v1.2.2026` and `build2026-8-5` as ordinary todo text. Numeric prose without three fields
+  and a year-shaped endpoint (`v1.2.3`, `3.14159`, `1/2`) also remains ordinary title text.
+- Valid standalone numeric dates, including dates directly adjacent to Chinese title text,
+  are still wholly covered by the strict same-separator date token and parse normally.
+- The culture-order tests now also cover `"M/d" dd/MM/yyyy`, confirming that double-quoted
+  literal `M`/`d` text is skipped before the true DMY fields are read.
+
+### Remaining concerns
+
+No new call-site changes were required. The existing Task 5 Quick Add todo-dispatch handoff
+remains unchanged.

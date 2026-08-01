@@ -26,8 +26,8 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         "(?<![A-Za-z\\d./+-])(?=(?:\\d{4}[/.-]|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{4}(?![A-Za-z\\d./+-])))(?<first>\\d{1,4})(?<separator>[/.-])(?<second>\\d{1,2})\\k<separator>(?<third>\\d{1,4})(?![A-Za-z\\d./+-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex DateLikePattern = new(
-        "(?<![A-Za-z\\d./+-])(?:\\d{4}[/.-]\\d{1,2}[/.-]\\d{1,2}|\\d{1,2}[/.-]\\d{1,2}[/.-]\\d{4})(?![A-Za-z\\d./+-])",
+    private static readonly Regex NumericDateMarkerPattern = new(
+        "(?<![A-Za-z\\d+-])(?:[+-]?\\d{4,}[/.-]+[+-]?\\d+[/.-]+[+-]?\\d+|[+-]?\\d+[/.-]+[+-]?\\d+[/.-]+[+-]?\\d{4,})",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseClockPattern = new(
@@ -284,7 +284,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             .ToArray();
 
     private static bool HasDateToken(string text) =>
-        FindDateMatches(text).Count != 0 || DateLikePattern.IsMatch(text);
+        FindDateMatches(text).Count != 0 || NumericDateMarkerPattern.IsMatch(text);
 
     private static bool HasClockToken(string text) =>
         FindClockMatches(text).Count != 0 ||
@@ -294,7 +294,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
     private static bool HasMalformedDateToken(
         string text,
         IReadOnlyList<Match> validDateMatches) =>
-        DateLikePattern.Matches(text).Cast<Match>().Any(candidate =>
+        NumericDateMarkerPattern.Matches(text).Cast<Match>().Any(candidate =>
             !validDateMatches.Any(valid =>
                 valid.Groups["first"].Success && Covers(valid, candidate)));
 
