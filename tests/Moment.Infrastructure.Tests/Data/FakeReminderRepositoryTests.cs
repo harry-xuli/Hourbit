@@ -153,13 +153,29 @@ public sealed class FakeReminderRepositoryTests
         var occurrence = ReminderOccurrence.Schedule(item.Id, due);
         await repository.SaveItemWithOccurrenceAsync(item, occurrence, CancellationToken.None);
 
-        var results = await Task.WhenAll(
-            repository.TryTransitionAsync(occurrence.Id, OccurrenceState.Scheduled, OccurrenceState.Fired, due, CancellationToken.None),
-            repository.TryTransitionAsync(occurrence.Id, OccurrenceState.Scheduled, OccurrenceState.Fired, due, CancellationToken.None));
+        var firstHandledAt = due.AddMinutes(1);
+        var secondHandledAt = due.AddMinutes(2);
+        var start = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = new[]
+        {
+            Task.Run(async () =>
+            {
+                await start.Task;
+                return (HandledAt: firstHandledAt, Won: await repository.TryTransitionAsync(
+                    occurrence.Id, OccurrenceState.Scheduled, OccurrenceState.Fired, firstHandledAt, CancellationToken.None));
+            }),
+            Task.Run(async () =>
+            {
+                await start.Task;
+                return (HandledAt: secondHandledAt, Won: await repository.TryTransitionAsync(
+                    occurrence.Id, OccurrenceState.Scheduled, OccurrenceState.Fired, secondHandledAt, CancellationToken.None));
+            })
+        };
+        start.SetResult(true);
 
-        Assert.Equal(1, results.Count(static result => result));
+        var winner = Assert.Single(await Task.WhenAll(attempts), static attempt => attempt.Won);
         var stored = await repository.GetScheduledReminderAsync(occurrence.Id, CancellationToken.None);
         Assert.Equal(OccurrenceState.Fired, stored!.Occurrence.State);
-        Assert.Equal(due, stored.Occurrence.HandledAt);
+        Assert.Equal(winner.HandledAt, stored.Occurrence.HandledAt);
     }
 }
