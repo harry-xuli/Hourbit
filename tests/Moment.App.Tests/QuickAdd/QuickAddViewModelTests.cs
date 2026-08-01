@@ -132,6 +132,71 @@ public sealed class QuickAddViewModelTests
     }
 
     [Fact]
+    public async Task Changed_expanded_details_after_refresh_failure_persist_the_new_draft()
+    {
+        var reminders = new RecordingReminderService();
+        var refreshAttempts = 0;
+        var vm = Create(
+            new ParseResult.Success(
+                TestData.Draft("看书", "2026-07-30T09:00:00+08:00")),
+            reminders,
+            afterCreated: _ =>
+            {
+                if (++refreshAttempts == 1)
+                    throw new InvalidOperationException("时间轴刷新失败");
+                return Task.CompletedTask;
+            });
+        vm.Text = "明早9点看书";
+        await vm.ToggleDetailsCommand.ExecuteAsync(null);
+
+        await vm.SubmitAsync();
+        vm.Details!.Title = "晨间阅读";
+        await vm.SubmitAsync();
+
+        Assert.Collection(
+            reminders.Created,
+            draft => Assert.Equal("看书", draft.Title),
+            draft => Assert.Equal("晨间阅读", draft.Title));
+        Assert.Equal(2, refreshAttempts);
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData("invalid")]
+    [InlineData("ambiguous")]
+    [InlineData("")]
+    public async Task Non_successful_reparse_collapses_details_and_notifies_both_visibility_properties(
+        string nextText)
+    {
+        var parser = new SwitchingParser(text => text switch
+        {
+            "valid" => new ParseResult.Success(
+                TestData.Draft("看书", "2026-07-30T09:00:00+08:00")),
+            "ambiguous" => new ParseResult.Ambiguous(
+                text,
+                [new("今天 20:00", TestData.Draft("看书", "2026-07-30T20:00:00+08:00"))]),
+            _ => new ParseResult.Invalid(text, "请输入明确的日期或时间。")
+        });
+        var vm = Create(
+            parser,
+            new RecordingReminderService(),
+            new RecordingTodoService(),
+            CultureInfo.GetCultureInfo("zh-CN"));
+        vm.Text = "valid";
+        await vm.ToggleDetailsCommand.ExecuteAsync(null);
+        var notifications = new List<string?>();
+        vm.PropertyChanged += (_, args) => notifications.Add(args.PropertyName);
+
+        vm.Text = nextText;
+
+        Assert.False(vm.AreDetailsVisible);
+        Assert.False(vm.IsReminderDetailsVisible);
+        Assert.False(vm.IsTodoDetailsVisible);
+        Assert.Contains(nameof(QuickAddViewModel.IsReminderDetailsVisible), notifications);
+        Assert.Contains(nameof(QuickAddViewModel.IsTodoDetailsVisible), notifications);
+    }
+
+    [Fact]
     public async Task Invalid_parse_preserves_input_and_exposes_parser_message()
     {
         var service = new RecordingReminderService();
@@ -217,19 +282,22 @@ public sealed class QuickAddViewModelTests
     private static QuickAddViewModel Create(
         ParseResult result,
         RecordingReminderService service,
-        RecordingTodoService? todos = null) =>
+        RecordingTodoService? todos = null,
+        Func<CancellationToken, Task>? afterCreated = null) =>
         Create(new StubParser(result), service, todos ?? new RecordingTodoService(),
-            CultureInfo.GetCultureInfo("zh-CN"));
+            CultureInfo.GetCultureInfo("zh-CN"), afterCreated);
 
     private static QuickAddViewModel Create(
         IChineseTimeParser parser,
         RecordingReminderService reminders,
         RecordingTodoService todos,
-        CultureInfo culture) =>
+        CultureInfo culture,
+        Func<CancellationToken, Task>? afterCreated = null) =>
         new(parser, reminders, todos,
             new FakeClock("2026-07-29T09:00:00+08:00"),
             TimeZoneInfo.CreateCustomTimeZone("UTC+08-quick", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
-            culture);
+            culture,
+            afterCreated);
 
     private sealed class StubParser(ParseResult result) : IChineseTimeParser
     {
@@ -253,6 +321,15 @@ public sealed class QuickAddViewModelTests
             ReceivedCulture = culture;
             return result;
         }
+    }
+
+    private sealed class SwitchingParser(Func<string, ParseResult> parse) : IChineseTimeParser
+    {
+        public ParseResult Parse(
+            string text,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            CultureInfo culture) => parse(text);
     }
 
     private sealed class RecordingReminderService(bool blockCreate = false) : IReminderService

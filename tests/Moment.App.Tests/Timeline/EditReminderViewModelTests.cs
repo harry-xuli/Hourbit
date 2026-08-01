@@ -186,6 +186,34 @@ public sealed class EditReminderViewModelTests
         Assert.Empty(reminders.Edits);
     }
 
+    [Fact]
+    public async Task Changed_fields_after_saved_edit_with_failed_refresh_are_persisted_again()
+    {
+        var reminders = new RecordingReminderService();
+        var todos = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = CreatePersisted(
+            reminders,
+            todos,
+            afterSaved: _ =>
+            {
+                if (++refreshAttempts == 1)
+                    throw new InvalidOperationException("时间轴刷新失败");
+                return Task.CompletedTask;
+            });
+
+        await vm.SaveAsync();
+        vm.Title = "变更后的会议";
+        await vm.SaveAsync();
+
+        Assert.Collection(
+            reminders.Edits,
+            edit => Assert.Equal("会议", edit.Draft.Title),
+            edit => Assert.Equal("变更后的会议", edit.Draft.Title));
+        Assert.Equal(2, refreshAttempts);
+        Assert.Null(vm.ErrorMessage);
+    }
+
     private static EditReminderViewModel Create()
     {
         var item = new TimelineItemViewModel(

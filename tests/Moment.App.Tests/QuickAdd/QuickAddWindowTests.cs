@@ -161,6 +161,9 @@ public sealed class QuickAddWindowTests
             window.UpdateLayout();
             var input = Assert.IsType<TextBox>(
                 window.FindName("InputBox"));
+            Assert.Equal(
+                "快速创建待办或提醒输入",
+                System.Windows.Automation.AutomationProperties.GetName(input));
             Assert.True(input.Focus());
 
             Assert.True(await window.TrySubmitFromEnterAsync());

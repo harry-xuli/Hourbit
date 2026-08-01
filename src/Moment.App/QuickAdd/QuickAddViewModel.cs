@@ -34,7 +34,7 @@ public sealed class QuickAddViewModel : ObservableObject
     private bool _areDetailsVisible;
     private EditReminderViewModel? _details;
     private EditTodoViewModel? _todoDetails;
-    private bool _creationPersisted;
+    private ItemDraft? _persistedDraft;
 
     public QuickAddViewModel(
         IChineseTimeParser parser,
@@ -164,7 +164,7 @@ public sealed class QuickAddViewModel : ObservableObject
                     return;
                 }
             }
-            if (!_creationPersisted)
+            if (!Equals(_persistedDraft, draft))
             {
                 switch (draft)
                 {
@@ -177,10 +177,10 @@ public sealed class QuickAddViewModel : ObservableObject
                     default:
                         throw new InvalidOperationException("不支持的快速创建类型。");
                 }
-                _creationPersisted = true;
+                _persistedDraft = draft;
             }
             await _afterCreated(ct);
-            _creationPersisted = false;
+            _persistedDraft = null;
             HideRequested?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
@@ -204,7 +204,7 @@ public sealed class QuickAddViewModel : ObservableObject
     private void Parse()
     {
         _draft = null;
-        _creationPersisted = false;
+        _persistedDraft = null;
         Details = null;
         TodoDetails = null;
         PreviewText = null;
@@ -212,6 +212,7 @@ public sealed class QuickAddViewModel : ObservableObject
         Choices.Clear();
         if (string.IsNullOrWhiteSpace(Text))
         {
+            AreDetailsVisible = false;
             State = QuickAddState.Empty;
             return;
         }
@@ -231,11 +232,13 @@ public sealed class QuickAddViewModel : ObservableObject
                 State = QuickAddState.Success;
                 break;
             case ParseResult.Ambiguous ambiguous:
+                AreDetailsVisible = false;
                 foreach (var choice in ambiguous.Choices)
                     Choices.Add(new QuickAddChoiceViewModel(choice));
                 State = QuickAddState.Ambiguous;
                 break;
             case ParseResult.Invalid invalid:
+                AreDetailsVisible = false;
                 ErrorMessage = invalid.Message;
                 State = QuickAddState.Invalid;
                 break;

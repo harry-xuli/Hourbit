@@ -16,7 +16,7 @@ public sealed class EditTodoViewModel : ObservableObject
     private string _timeText = string.Empty;
     private ReminderImportance _selectedImportance;
     private string? _errorMessage;
-    private bool _persistenceCompleted;
+    private TodoPersistenceOperation? _persistedOperation;
 
     public EditTodoViewModel(TodoDraft draft, TimeZoneInfo zone)
     {
@@ -183,20 +183,23 @@ public sealed class EditTodoViewModel : ObservableObject
         if (!TryBuildDraft(out var draft))
             return;
 
-        await PersistAndCloseAsync(async token =>
+        TodoPersistenceOperation operation;
+        Func<CancellationToken, Task> persist;
+        switch (draft)
         {
-            switch (draft)
-            {
-                case TodoDraft todoDraft:
-                    await _service.EditAsync(TodoId, todoDraft, token);
-                    break;
-                case ReminderDraft reminderDraft:
-                    await _service.ConvertToReminderAsync(TodoId, reminderDraft, token);
-                    break;
-                default:
-                    throw new InvalidOperationException("Unsupported todo edit result.");
-            }
-        }, ct);
+            case TodoDraft todoDraft:
+                operation = new EditTodoOperation(todoDraft);
+                persist = token => _service.EditAsync(TodoId, todoDraft, token);
+                break;
+            case ReminderDraft reminderDraft:
+                operation = new ConvertTodoOperation(reminderDraft);
+                persist = token =>
+                    _service.ConvertToReminderAsync(TodoId, reminderDraft, token);
+                break;
+            default:
+                throw new InvalidOperationException("Unsupported todo edit result.");
+        }
+        await PersistAndCloseAsync(operation, persist, ct);
     }
 
     public Task CompleteAsync() => CompleteAsync(CancellationToken.None);
@@ -207,7 +210,10 @@ public sealed class EditTodoViewModel : ObservableObject
             throw new InvalidOperationException("This todo editor is not connected to persistence.");
         if (IsCompleted)
             return;
-        await PersistAndCloseAsync(token => _service.CompleteAsync(TodoId, token), ct);
+        await PersistAndCloseAsync(
+            CompleteTodoOperation.Instance,
+            token => _service.CompleteAsync(TodoId, token),
+            ct);
     }
 
     public Task DeleteAsync() => DeleteAsync(CancellationToken.None);
@@ -216,7 +222,10 @@ public sealed class EditTodoViewModel : ObservableObject
     {
         if (_service is null)
             throw new InvalidOperationException("This todo editor is not connected to persistence.");
-        await PersistAndCloseAsync(token => _service.DeleteAsync(TodoId, token), ct);
+        await PersistAndCloseAsync(
+            DeleteTodoOperation.Instance,
+            token => _service.DeleteAsync(TodoId, token),
+            ct);
     }
 
     private void InitializeCommands()
@@ -227,19 +236,20 @@ public sealed class EditTodoViewModel : ObservableObject
     }
 
     private async Task PersistAndCloseAsync(
+        TodoPersistenceOperation operation,
         Func<CancellationToken, Task> persist,
         CancellationToken ct)
     {
         try
         {
             ErrorMessage = null;
-            if (!_persistenceCompleted)
+            if (!Equals(_persistedOperation, operation))
             {
                 await persist(ct);
-                _persistenceCompleted = true;
+                _persistedOperation = operation;
             }
             await _afterSaved(ct);
-            _persistenceCompleted = false;
+            _persistedOperation = null;
             CloseRequested?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
@@ -261,4 +271,16 @@ public sealed class EditTodoViewModel : ObservableObject
 
     private static string FormatDate(DateOnly? date) =>
         date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private abstract record TodoPersistenceOperation;
+    private sealed record EditTodoOperation(TodoDraft Draft) : TodoPersistenceOperation;
+    private sealed record ConvertTodoOperation(ReminderDraft Draft) : TodoPersistenceOperation;
+    private sealed record CompleteTodoOperation : TodoPersistenceOperation
+    {
+        public static CompleteTodoOperation Instance { get; } = new();
+    }
+    private sealed record DeleteTodoOperation : TodoPersistenceOperation
+    {
+        public static DeleteTodoOperation Instance { get; } = new();
+    }
 }

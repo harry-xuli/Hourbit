@@ -45,7 +45,7 @@ public sealed class EditReminderViewModel : ObservableObject
     private EditRecurrenceMode _selectedRecurrence;
     private string _weeklyDaysText;
     private string? _errorMessage;
-    private bool _persistenceCompleted;
+    private ReminderPersistenceOperation? _persistedOperation;
 
     public EditReminderViewModel(TimelineItemViewModel item, TimeZoneInfo zone)
         : this(CreateDraft(item), zone)
@@ -260,6 +260,7 @@ public sealed class EditReminderViewModel : ObservableObject
             if (!TryBuildDraft(out var reminderDraft))
                 return;
             await PersistAndCloseAsync(
+                new EditReminderOperation(reminderDraft!, _editScope),
                 token => _reminderService.EditAsync(
                     OccurrenceId, reminderDraft!, _editScope, token),
                 ct);
@@ -272,30 +273,39 @@ public sealed class EditReminderViewModel : ObservableObject
         SeriesScope conversionScope = SeriesScope.OccurrenceOnly;
         if (_sourceIsRecurring)
         {
-            if (_selectConversionScope is null)
+            if (_persistedOperation is ConvertReminderOperation persisted &&
+                Equals(persisted.Draft, todoDraft))
             {
-                ErrorMessage = "请选择重复提醒的转换范围。";
-                return;
+                conversionScope = persisted.Scope;
             }
-
-            try
+            else
             {
-                var selectedScope = await _selectConversionScope(ct);
-                if (selectedScope is null)
+                if (_selectConversionScope is null)
                 {
                     ErrorMessage = "请选择重复提醒的转换范围。";
                     return;
                 }
-                conversionScope = selectedScope.Value;
-            }
-            catch (Exception exception)
-            {
-                ErrorMessage = exception.Message;
-                return;
+
+                try
+                {
+                    var selectedScope = await _selectConversionScope(ct);
+                    if (selectedScope is null)
+                    {
+                        ErrorMessage = "请选择重复提醒的转换范围。";
+                        return;
+                    }
+                    conversionScope = selectedScope.Value;
+                }
+                catch (Exception exception)
+                {
+                    ErrorMessage = exception.Message;
+                    return;
+                }
             }
         }
 
         await PersistAndCloseAsync(
+            new ConvertReminderOperation(todoDraft!, conversionScope),
             token => _todoService.ConvertToTodoAsync(
                 OccurrenceId, todoDraft!, conversionScope, token),
             ct);
@@ -343,19 +353,20 @@ public sealed class EditReminderViewModel : ObservableObject
     }
 
     private async Task PersistAndCloseAsync(
+        ReminderPersistenceOperation operation,
         Func<CancellationToken, Task> persist,
         CancellationToken ct)
     {
         try
         {
             ErrorMessage = null;
-            if (!_persistenceCompleted)
+            if (!Equals(_persistedOperation, operation))
             {
                 await persist(ct);
-                _persistenceCompleted = true;
+                _persistedOperation = operation;
             }
             await _afterSaved(ct);
-            _persistenceCompleted = false;
+            _persistedOperation = null;
             CloseRequested?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception exception)
@@ -399,4 +410,12 @@ public sealed class EditReminderViewModel : ObservableObject
 
         return new ReminderDraft(item.Title, item.DueAt, item.Kind, item.Importance, recurrence);
     }
+
+    private abstract record ReminderPersistenceOperation;
+    private sealed record EditReminderOperation(
+        ReminderDraft Draft,
+        SeriesScope Scope) : ReminderPersistenceOperation;
+    private sealed record ConvertReminderOperation(
+        TodoDraft Draft,
+        SeriesScope Scope) : ReminderPersistenceOperation;
 }

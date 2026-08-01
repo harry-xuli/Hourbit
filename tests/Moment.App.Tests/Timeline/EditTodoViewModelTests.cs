@@ -113,6 +113,27 @@ public sealed class EditTodoViewModelTests
         Assert.Equal(deleteVm.TodoId, Assert.Single(deleteService.Deleted));
     }
 
+    [Fact]
+    public async Task Delete_after_saved_edit_with_failed_refresh_is_not_swallowed()
+    {
+        var service = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = Create(service, _ =>
+        {
+            if (++refreshAttempts == 1)
+                throw new InvalidOperationException("时间轴刷新失败");
+            return Task.CompletedTask;
+        });
+
+        await vm.SaveAsync();
+        await vm.DeleteAsync();
+
+        Assert.Single(service.Edits);
+        Assert.Equal(vm.TodoId, Assert.Single(service.Deleted));
+        Assert.Equal(2, refreshAttempts);
+        Assert.Null(vm.ErrorMessage);
+    }
+
     private static EditTodoViewModel Create(
         RecordingTodoService service,
         Func<CancellationToken, Task>? afterSaved = null)

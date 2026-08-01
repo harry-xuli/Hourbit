@@ -39,7 +39,7 @@
                  MinHeight="66"
                  Margin="22,22,22,12"
                  VerticalContentAlignment="Center"
-                 automation:AutomationProperties.Name="快速创建提醒输入" />
+                 automation:AutomationProperties.Name="快速创建待办或提醒输入" />
 
         <Border Grid.Row="1"
                 Margin="22,0,22,12"
