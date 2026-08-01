@@ -76,6 +76,54 @@ public sealed class TodoServiceTests
     }
 
     [Fact]
+    public async Task Edit_and_complete_interleaving_preserves_both_detail_and_completion_changes()
+    {
+        var inner = new FakeTodoRepository();
+        var existing = PendingTodo("编辑前");
+        await inner.SaveAsync(existing, default);
+        var interleaving = new PauseAfterSnapshotTodoRepository(inner);
+        var editService = CreateService(todos: interleaving);
+
+        var edit = editService.EditAsync(existing.Id,
+            new TodoDraft("编辑后", new DateOnly(2026, 8, 9),
+                ReminderImportance.Important), default);
+        await interleaving.SnapshotRead;
+        await CreateService(todos: inner).CompleteAsync(existing.Id, default);
+        interleaving.ReleaseEdit();
+        await edit;
+
+        var persisted = await inner.GetAsync(existing.Id, default);
+        Assert.Equal("编辑后", persisted!.Title);
+        Assert.Equal(new DateOnly(2026, 8, 9), persisted.DueDate);
+        Assert.Equal(ReminderImportance.Important, persisted.Importance);
+        Assert.True(persisted.IsCompleted);
+        Assert.Equal(Now, persisted.CompletedAt);
+    }
+
+    [Fact]
+    public async Task Two_complete_interleaving_keeps_the_first_completion_timestamp()
+    {
+        var inner = new FakeTodoRepository();
+        var existing = PendingTodo("只完成一次");
+        await inner.SaveAsync(existing, default);
+        var interleaving = new OrderedCompleteTodoRepository(inner);
+        var first = CreateService(
+            todos: interleaving, clock: new FakeClock(Now));
+        var later = Now.AddHours(1);
+        var second = CreateService(
+            todos: interleaving, clock: new FakeClock(later));
+
+        var firstCompletion = first.CompleteAsync(existing.Id, default);
+        await interleaving.FirstSnapshotRead;
+        var secondCompletion = second.CompleteAsync(existing.Id, default);
+        await Task.WhenAll(firstCompletion, secondCompletion);
+
+        var persisted = await inner.GetAsync(existing.Id, default);
+        Assert.True(persisted!.IsCompleted);
+        Assert.Equal(Now, persisted.CompletedAt);
+    }
+
+    [Fact]
     public async Task Delete_removes_the_todo_without_signaling_the_reminder_scheduler()
     {
         var todos = new FakeTodoRepository();
@@ -296,14 +344,15 @@ public sealed class TodoServiceTests
         ITodoRepository? todos = null,
         IReminderRepository? reminders = null,
         IItemConversionStore? store = null,
-        ISchedulerSignal? signal = null) =>
+        ISchedulerSignal? signal = null,
+        IClock? clock = null) =>
         new(
             todos ?? new FakeTodoRepository(),
             reminders ?? new FakeReminderRepository(),
             store ?? new RecordingConversionStore([], new ItemConversionResult(false)),
             new RecurrenceCalculator(),
             signal ?? new RecordingSignal(),
-            new FakeClock(Now),
+            clock ?? new FakeClock(Now),
             ChinaZone);
 
     private static TodoItem PendingTodo(
@@ -419,5 +468,90 @@ public sealed class TodoServiceTests
             CallCount++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class PauseAfterSnapshotTodoRepository(
+        ITodoRepository inner) : ITodoRepository
+    {
+        private readonly TaskCompletionSource _snapshotRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task SnapshotRead => _snapshotRead.Task;
+
+        public void ReleaseEdit() => _release.TrySetResult();
+
+        public Task SaveAsync(TodoItem item, CancellationToken ct) =>
+            inner.SaveAsync(item, ct);
+
+        public async Task<TodoItem?> GetAsync(Guid id, CancellationToken ct)
+        {
+            var snapshot = await inner.GetAsync(id, ct);
+            _snapshotRead.TrySetResult();
+            await _release.Task.WaitAsync(ct);
+            return snapshot;
+        }
+
+        public Task<IReadOnlyList<TodoItem>> GetAllAsync(
+            CancellationToken ct) => inner.GetAllAsync(ct);
+        public Task UpdateAsync(TodoItem item, CancellationToken ct) =>
+            inner.UpdateAsync(item, ct);
+        public Task SetCompletedAsync(Guid id, bool isCompleted,
+            DateTimeOffset? completedAt, CancellationToken ct) =>
+            inner.SetCompletedAsync(id, isCompleted, completedAt, ct);
+        public Task DeleteAsync(Guid id, CancellationToken ct) =>
+            inner.DeleteAsync(id, ct);
+    }
+
+    private sealed class OrderedCompleteTodoRepository(
+        ITodoRepository inner) : ITodoRepository
+    {
+        private readonly TaskCompletionSource _firstSnapshotRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _secondSnapshotRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _firstCompletionWritten =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _readCount;
+        private int _writeCount;
+
+        public Task FirstSnapshotRead => _firstSnapshotRead.Task;
+
+        public Task SaveAsync(TodoItem item, CancellationToken ct) =>
+            inner.SaveAsync(item, ct);
+
+        public async Task<TodoItem?> GetAsync(Guid id, CancellationToken ct)
+        {
+            var snapshot = await inner.GetAsync(id, ct);
+            var read = Interlocked.Increment(ref _readCount);
+            if (read == 1)
+            {
+                _firstSnapshotRead.TrySetResult();
+                await _secondSnapshotRead.Task.WaitAsync(ct);
+            }
+            else if (read == 2)
+            {
+                _secondSnapshotRead.TrySetResult();
+                await _firstCompletionWritten.Task.WaitAsync(ct);
+            }
+            return snapshot;
+        }
+
+        public Task<IReadOnlyList<TodoItem>> GetAllAsync(
+            CancellationToken ct) => inner.GetAllAsync(ct);
+        public Task UpdateAsync(TodoItem item, CancellationToken ct) =>
+            inner.UpdateAsync(item, ct);
+
+        public async Task SetCompletedAsync(Guid id, bool isCompleted,
+            DateTimeOffset? completedAt, CancellationToken ct)
+        {
+            await inner.SetCompletedAsync(id, isCompleted, completedAt, ct);
+            if (Interlocked.Increment(ref _writeCount) == 1)
+                _firstCompletionWritten.TrySetResult();
+        }
+
+        public Task DeleteAsync(Guid id, CancellationToken ct) =>
+            inner.DeleteAsync(id, ct);
     }
 }

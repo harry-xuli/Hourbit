@@ -41,8 +41,17 @@ public sealed class FakeTodoRepository : ITodoRepository
     {
         lock (_gate)
         {
-            if (_items.ContainsKey(item.Id))
-                _items[item.Id] = item;
+            if (_items.TryGetValue(item.Id, out var existing))
+            {
+                _items[item.Id] = new TodoItem(
+                    existing.Id,
+                    item.Title,
+                    existing.CreatedAt,
+                    item.DueDate,
+                    item.Importance,
+                    existing.IsCompleted,
+                    existing.CompletedAt);
+            }
         }
         return Task.CompletedTask;
     }
@@ -55,7 +64,15 @@ public sealed class FakeTodoRepository : ITodoRepository
     {
         lock (_gate)
         {
-            if (_items.TryGetValue(id, out var existing))
+            if (isCompleted != completedAt.HasValue)
+            {
+                throw new ArgumentException(
+                    "Completion state and timestamp must agree.",
+                    nameof(completedAt));
+            }
+
+            if (_items.TryGetValue(id, out var existing) &&
+                existing.IsCompleted != isCompleted)
             {
                 _items[id] = new TodoItem(
                     existing.Id,

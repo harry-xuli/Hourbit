@@ -1,6 +1,9 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using Moment.Core.Abstractions;
 using Moment.Core.Domain;
+using Moment.Core.Parsing;
+using Moment.Core.Recurrence;
 using Moment.Core.Services;
 using Moment.Infrastructure.Data;
 using Moment.TestSupport;
@@ -230,6 +233,122 @@ public sealed class SqliteItemConversionStoreTests
     }
 
     [Fact]
+    public async Task ItemConversion_reminder_to_todo_rejects_a_same_state_handled_at_change()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(path, default);
+        var source = Reminder(OccurrenceState.Scheduled, null, null);
+        await reminders.SaveItemWithOccurrenceAsync(
+            source.Item, source.Occurrence, default);
+        var changedHandledAt = DueAt.AddMinutes(-5);
+        await reminders.SetOccurrenceStateAsync(
+            source.Occurrence.Id, OccurrenceState.Scheduled,
+            changedHandledAt, default);
+        var destination = new TodoItem(
+            Guid.NewGuid(), source.Item.Title, source.Item.CreatedAt, null,
+            source.Item.Importance, false, null);
+        var store = await SqliteItemConversionStore.OpenAsync(path, default);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.ConvertReminderToTodoAsync(
+                new ReminderToTodoConversion(
+                    source, destination, SeriesScope.OccurrenceOnly, null),
+                default));
+
+        var persisted = await reminders.GetScheduledReminderAsync(
+            source.Occurrence.Id, default);
+        Assert.Equal(OccurrenceState.Scheduled, persisted!.Occurrence.State);
+        Assert.Equal(changedHandledAt, persisted.Occurrence.HandledAt);
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM todos WHERE id = $id;",
+            ("$id", destination.Id.ToString("D"))));
+    }
+
+    [Fact]
+    public async Task ItemConversion_reminder_to_todo_rejects_a_changed_recurrence_rule()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(path, default);
+        var source = Reminder(
+            OccurrenceState.Scheduled, null,
+            RecurrenceRule.Daily(new TimeOnly(10, 0)));
+        await reminders.SaveItemWithOccurrenceAsync(
+            source.Item, source.Occurrence, default);
+        await ExecuteAsync(path, $"""
+            UPDATE recurrence_rules
+            SET kind = {(int)RecurrenceKind.Weekly},
+                days_of_week = '{(int)DayOfWeek.Monday}',
+                time = '11:00:00.0000000'
+            WHERE item_id = '{source.Item.Id:D}';
+            """);
+        var destination = new TodoItem(
+            Guid.NewGuid(), source.Item.Title, source.Item.CreatedAt, null,
+            source.Item.Importance, false, null);
+        var continuation = ReminderOccurrence.Schedule(
+            source.Item.Id, DueAt.AddDays(1));
+        var store = await SqliteItemConversionStore.OpenAsync(path, default);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.ConvertReminderToTodoAsync(
+                new ReminderToTodoConversion(
+                    source, destination, SeriesScope.OccurrenceOnly,
+                    continuation), default));
+
+        var persisted = await reminders.GetScheduledReminderAsync(
+            source.Occurrence.Id, default);
+        Assert.Equal(RecurrenceKind.Weekly, persisted!.Item.Recurrence!.Kind);
+        Assert.Equal(new TimeOnly(11, 0), persisted.Item.Recurrence.Time);
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM todos WHERE id = $id;",
+            ("$id", destination.Id.ToString("D"))));
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM occurrences WHERE id = $id;",
+            ("$id", continuation.Id.ToString("D"))));
+    }
+
+    [Fact]
+    public async Task ItemConversion_reminder_to_todo_rejects_changed_item_fields()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(path, default);
+        var source = Reminder(OccurrenceState.Scheduled, null, null);
+        await reminders.SaveItemWithOccurrenceAsync(
+            source.Item, source.Occurrence, default);
+        var changedCreatedAt = source.Item.CreatedAt.AddMinutes(1);
+        await ExecuteAsync(path, $"""
+            UPDATE items
+            SET title = '并发后提醒',
+                kind = {(int)ReminderKind.Alarm},
+                importance = {(int)ReminderImportance.Normal},
+                created_at = '{changedCreatedAt.ToString("O", CultureInfo.InvariantCulture)}'
+            WHERE id = '{source.Item.Id:D}';
+            """);
+        var destination = new TodoItem(
+            Guid.NewGuid(), source.Item.Title, source.Item.CreatedAt, null,
+            source.Item.Importance, false, null);
+        var store = await SqliteItemConversionStore.OpenAsync(path, default);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.ConvertReminderToTodoAsync(
+                new ReminderToTodoConversion(
+                    source, destination, SeriesScope.OccurrenceOnly, null),
+                default));
+
+        var persisted = await reminders.GetScheduledReminderAsync(
+            source.Occurrence.Id, default);
+        Assert.Equal("并发后提醒", persisted!.Item.Title);
+        Assert.Equal(ReminderKind.Alarm, persisted.Item.Kind);
+        Assert.Equal(ReminderImportance.Normal, persisted.Item.Importance);
+        Assert.Equal(changedCreatedAt, persisted.Item.CreatedAt);
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM todos WHERE id = $id;",
+            ("$id", destination.Id.ToString("D"))));
+    }
+
+    [Fact]
     public async Task ItemConversion_todo_to_reminder_rolls_back_destination_when_source_delete_fails()
     {
         using var temp = new TempDirectory();
@@ -262,6 +381,58 @@ public sealed class SqliteItemConversionStoreTests
         Assert.Equal(0, await ScalarIntAsync(path,
             "SELECT COUNT(*) FROM recurrence_rules WHERE item_id = $id;",
             ("$id", item.Id.ToString("D"))));
+    }
+
+    [Fact]
+    public async Task ItemConversion_todo_to_reminder_rejects_an_exact_source_snapshot_that_was_edited_and_completed()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var todos = await SqliteTodoRepository.OpenAsync(path, default);
+        var source = PendingTodo("并发前");
+        await todos.SaveAsync(source, default);
+        var completedAt = CreatedAt.AddMinutes(30);
+        var mutatingTodos = new SnapshotThenMutateTodoRepository(
+            todos,
+            async snapshot =>
+            {
+                await todos.UpdateAsync(new TodoItem(
+                    snapshot.Id, "并发后", snapshot.CreatedAt,
+                    new DateOnly(2026, 8, 8), ReminderImportance.Important,
+                    snapshot.IsCompleted, snapshot.CompletedAt), default);
+                await todos.SetCompletedAsync(
+                    snapshot.Id, true, completedAt, default);
+            });
+        var reminders = await SqliteReminderRepository.OpenAsync(path, default);
+        var store = await SqliteItemConversionStore.OpenAsync(path, default);
+        var signal = new RecordingSignal();
+        var service = new TodoService(
+            mutatingTodos, reminders, store, new RecurrenceCalculator(),
+            signal, new FakeClock(CreatedAt.AddMinutes(10)),
+            TimeZoneInfo.FindSystemTimeZoneById("China Standard Time"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ConvertToReminderAsync(source.Id,
+                new ReminderDraft(
+                    source.Title, DueAt, ReminderKind.Alarm,
+                    source.Importance,
+                    RecurrenceRule.Daily(new TimeOnly(10, 0))),
+                default));
+
+        var persisted = await todos.GetAsync(source.Id, default);
+        Assert.Equal("并发后", persisted!.Title);
+        Assert.Equal(new DateOnly(2026, 8, 8), persisted.DueDate);
+        Assert.Equal(ReminderImportance.Important, persisted.Importance);
+        Assert.True(persisted.IsCompleted);
+        Assert.Equal(completedAt, persisted.CompletedAt);
+        Assert.Empty(await reminders.GetScheduledAsync(default));
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM items;"));
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM occurrences;"));
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM recurrence_rules;"));
+        Assert.Equal(0, signal.RefreshCount);
     }
 
     [Fact]
@@ -357,4 +528,48 @@ public sealed class SqliteItemConversionStoreTests
 
     private static string FormatUtc(DateTimeOffset value) =>
         value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+
+    private sealed class SnapshotThenMutateTodoRepository(
+        ITodoRepository inner,
+        Func<TodoItem, Task> mutate) : ITodoRepository
+    {
+        private int _hasMutated;
+
+        public Task SaveAsync(TodoItem item, CancellationToken ct) =>
+            inner.SaveAsync(item, ct);
+
+        public async Task<TodoItem?> GetAsync(Guid id, CancellationToken ct)
+        {
+            var snapshot = await inner.GetAsync(id, ct);
+            if (snapshot is not null &&
+                Interlocked.Exchange(ref _hasMutated, 1) == 0)
+            {
+                await mutate(snapshot);
+            }
+            return snapshot;
+        }
+
+        public Task<IReadOnlyList<TodoItem>> GetAllAsync(
+            CancellationToken ct) => inner.GetAllAsync(ct);
+
+        public Task UpdateAsync(TodoItem item, CancellationToken ct) =>
+            inner.UpdateAsync(item, ct);
+
+        public Task SetCompletedAsync(
+            Guid id,
+            bool isCompleted,
+            DateTimeOffset? completedAt,
+            CancellationToken ct) =>
+            inner.SetCompletedAsync(id, isCompleted, completedAt, ct);
+
+        public Task DeleteAsync(Guid id, CancellationToken ct) =>
+            inner.DeleteAsync(id, ct);
+    }
+
+    private sealed class RecordingSignal : ISchedulerSignal
+    {
+        public int RefreshCount { get; private set; }
+
+        public void Refresh() => RefreshCount++;
+    }
 }

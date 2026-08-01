@@ -28,7 +28,10 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
     {
         Validate(request);
         await using var connection = await OpenConnectionAsync(ct);
-        await using var transaction = await connection.BeginTransactionAsync(ct);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+
+        await GetAndValidateTodoSourceAsync(
+            connection, transaction, request.Source, ct);
 
         await SqliteReminderRepository.InsertItemAsync(
             connection, transaction, request.DestinationItem, ct);
@@ -65,7 +68,7 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
     {
         Validate(request);
         await using var connection = await OpenConnectionAsync(ct);
-        await using var transaction = await connection.BeginTransactionAsync(ct);
+        await using var transaction = connection.BeginTransaction(deferred: false);
 
         await SqliteTodoRepository.InsertAsync(
             connection, transaction, request.Destination, ct);
@@ -108,6 +111,51 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
         CancellationToken ct) =>
         await DatabaseMigrator.OpenConnectionAsync(_databasePath, ct);
 
+    private static async Task GetAndValidateTodoSourceAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        TodoItem source,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id, title, created_at, due_date, importance,
+                   is_completed, completed_at
+            FROM todos
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", source.Id.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+        {
+            throw new InvalidOperationException(
+                "The todo conversion source no longer exists.");
+        }
+
+        var dueDateMatches = source.DueDate is null
+            ? reader.IsDBNull(3)
+            : !reader.IsDBNull(3) &&
+              reader.GetString(3) == Format(source.DueDate.Value);
+        var completedAtMatches = source.CompletedAt is null
+            ? reader.IsDBNull(6)
+            : !reader.IsDBNull(6) &&
+              reader.GetString(6) == Format(source.CompletedAt.Value);
+        if (Guid.Parse(reader.GetString(0)) != source.Id ||
+            !string.Equals(
+                reader.GetString(1), source.Title,
+                StringComparison.Ordinal) ||
+            reader.GetString(2) != Format(source.CreatedAt) ||
+            !dueDateMatches ||
+            reader.GetInt32(4) != (int)source.Importance ||
+            (reader.GetInt32(5) == 1) != source.IsCompleted ||
+            !completedAtMatches)
+        {
+            throw new InvalidOperationException(
+                "The todo conversion source changed before conversion.");
+        }
+    }
+
     private static async Task<OccurrenceState> GetAndValidateSourceAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -117,9 +165,14 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT item_id, due_at_utc, state
-            FROM occurrences
-            WHERE id = $id;
+            SELECT o.item_id, o.due_at, o.due_at_utc, o.state,
+                   o.handled_at, o.snooze_parent_id,
+                   i.title, i.kind, i.importance, i.created_at,
+                   r.kind, r.days_of_week, r.time
+            FROM occurrences o
+            INNER JOIN items i ON i.id = o.item_id
+            LEFT JOIN recurrence_rules r ON r.item_id = i.id
+            WHERE o.id = $id;
             """;
         command.Parameters.AddWithValue(
             "$id", source.Occurrence.Id.ToString("D"));
@@ -131,16 +184,65 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
         }
 
         var itemId = Guid.Parse(reader.GetString(0));
-        var dueAtUtc = reader.GetString(1);
-        var state = (OccurrenceState)reader.GetInt32(2);
+        var state = (OccurrenceState)reader.GetInt32(3);
         if (itemId != source.Item.Id ||
-            dueAtUtc != FormatUtc(source.Occurrence.DueAt) ||
-            state != source.Occurrence.State)
+            reader.GetString(1) != Format(source.Occurrence.DueAt) ||
+            reader.GetString(2) != FormatUtc(source.Occurrence.DueAt) ||
+            state != source.Occurrence.State ||
+            !OptionalTimestampMatches(
+                reader, 4, source.Occurrence.HandledAt) ||
+            !OptionalGuidMatches(
+                reader, 5, source.Occurrence.SnoozeParentId) ||
+            !string.Equals(
+                reader.GetString(6), source.Item.Title,
+                StringComparison.Ordinal) ||
+            reader.GetInt32(7) != (int)source.Item.Kind ||
+            reader.GetInt32(8) != (int)source.Item.Importance ||
+            reader.GetString(9) != Format(source.Item.CreatedAt) ||
+            !RecurrenceMatches(reader, source.Item.Recurrence))
         {
             throw new InvalidOperationException(
                 "The reminder conversion source changed before conversion.");
         }
         return state;
+    }
+
+    private static bool OptionalTimestampMatches(
+        SqliteDataReader reader,
+        int ordinal,
+        DateTimeOffset? expected) =>
+        expected is null
+            ? reader.IsDBNull(ordinal)
+            : !reader.IsDBNull(ordinal) &&
+              reader.GetString(ordinal) == Format(expected.Value);
+
+    private static bool OptionalGuidMatches(
+        SqliteDataReader reader,
+        int ordinal,
+        Guid? expected) =>
+        expected is null
+            ? reader.IsDBNull(ordinal)
+            : !reader.IsDBNull(ordinal) &&
+              Guid.Parse(reader.GetString(ordinal)) == expected.Value;
+
+    private static bool RecurrenceMatches(
+        SqliteDataReader reader,
+        RecurrenceRule? expected)
+    {
+        if (expected is null)
+        {
+            return reader.IsDBNull(10) &&
+                reader.IsDBNull(11) &&
+                reader.IsDBNull(12);
+        }
+
+        return !reader.IsDBNull(10) &&
+            !reader.IsDBNull(11) &&
+            !reader.IsDBNull(12) &&
+            reader.GetInt32(10) == (int)expected.Kind &&
+            reader.GetString(11) == FormatDays(expected.DaysOfWeek) &&
+            reader.GetString(12) ==
+                expected.Time.ToString("O", CultureInfo.InvariantCulture);
     }
 
     private static async Task<bool> InsertContinuationIfMissingAsync(
@@ -412,6 +514,14 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
 
     private static string Format(DateTimeOffset value) =>
         value.ToString("O", CultureInfo.InvariantCulture);
+
+    private static string Format(DateOnly value) =>
+        value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+    private static string FormatDays(IEnumerable<DayOfWeek> days) =>
+        string.Join(',', days.OrderBy(static day => day)
+            .Select(static day =>
+                ((int)day).ToString(CultureInfo.InvariantCulture)));
 
     private static string FormatUtc(DateTimeOffset value) =>
         value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);

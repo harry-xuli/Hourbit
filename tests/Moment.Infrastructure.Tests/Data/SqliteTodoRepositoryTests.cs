@@ -177,6 +177,67 @@ public sealed class SqliteTodoRepositoryTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Edit_from_a_stale_snapshot_does_not_revert_a_concurrent_completion(
+        bool useFake)
+    {
+        using var temp = new TempDirectory();
+        ITodoRepository repository = useFake
+            ? new FakeTodoRepository()
+            : await SqliteTodoRepository.OpenAsync(
+                Path.Combine(temp.Path, "moment.db"), default);
+        var pending = PendingTodo(Guid.NewGuid(), "编辑前", null);
+        await repository.SaveAsync(pending, default);
+        var staleEdit = new TodoItem(
+            pending.Id, "编辑后", pending.CreatedAt,
+            new DateOnly(2026, 8, 9), ReminderImportance.Important,
+            false, null);
+        var completedAt = CreatedAt.AddMinutes(30);
+
+        await repository.SetCompletedAsync(
+            pending.Id, true, completedAt, default);
+        await repository.UpdateAsync(staleEdit, default);
+
+        var persisted = await repository.GetAsync(pending.Id, default);
+        Assert.Equal("编辑后", persisted!.Title);
+        Assert.Equal(new DateOnly(2026, 8, 9), persisted.DueDate);
+        Assert.Equal(ReminderImportance.Important, persisted.Importance);
+        Assert.True(persisted.IsCompleted);
+        Assert.Equal(completedAt, persisted.CompletedAt);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Completion_transition_keeps_the_first_timestamp_and_explicit_uncomplete_is_idempotent(
+        bool useFake)
+    {
+        using var temp = new TempDirectory();
+        ITodoRepository repository = useFake
+            ? new FakeTodoRepository()
+            : await SqliteTodoRepository.OpenAsync(
+                Path.Combine(temp.Path, "moment.db"), default);
+        var pending = PendingTodo(Guid.NewGuid(), "完成一次", null);
+        await repository.SaveAsync(pending, default);
+        var first = CreatedAt.AddMinutes(10);
+        var second = CreatedAt.AddMinutes(20);
+
+        await repository.SetCompletedAsync(pending.Id, true, first, default);
+        await repository.SetCompletedAsync(pending.Id, true, second, default);
+
+        var completed = await repository.GetAsync(pending.Id, default);
+        Assert.True(completed!.IsCompleted);
+        Assert.Equal(first, completed.CompletedAt);
+
+        await repository.SetCompletedAsync(pending.Id, false, null, default);
+        await repository.SetCompletedAsync(pending.Id, false, null, default);
+        var reopened = await repository.GetAsync(pending.Id, default);
+        Assert.False(reopened!.IsCompleted);
+        Assert.Null(reopened.CompletedAt);
+    }
+
+    [Theory]
     [InlineData(1)]
     [InlineData(2)]
     public async Task Migration_upgrades_existing_databases_without_losing_reminder_or_action_rows(

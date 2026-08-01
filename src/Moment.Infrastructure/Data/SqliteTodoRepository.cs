@@ -60,7 +60,8 @@ public sealed class SqliteTodoRepository : ITodoRepository
     public async Task UpdateAsync(TodoItem item, CancellationToken ct)
     {
         await using var connection = await OpenConnectionAsync(ct);
-        await using var command = CreateUpdateCommand(connection, null, item);
+        await using var command =
+            CreateDetailsUpdateCommand(connection, null, item);
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -70,22 +71,52 @@ public sealed class SqliteTodoRepository : ITodoRepository
         DateTimeOffset? completedAt,
         CancellationToken ct)
     {
-        await using var connection = await OpenConnectionAsync(ct);
-        await using var transaction = await connection.BeginTransactionAsync(ct);
-        var existing = await GetAsync(connection, transaction, id, ct);
-        if (existing is not null)
+        if (isCompleted != completedAt.HasValue)
         {
-            var updated = new TodoItem(
-                existing.Id,
-                existing.Title,
-                existing.CreatedAt,
-                existing.DueDate,
-                existing.Importance,
-                isCompleted,
-                completedAt);
-            await using var command =
-                CreateUpdateCommand(connection, transaction, updated);
-            await command.ExecuteNonQueryAsync(ct);
+            throw new ArgumentException(
+                "Completion state and timestamp must agree.",
+                nameof(completedAt));
+        }
+
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var transaction =
+            connection.BeginTransaction(deferred: false);
+        var existing = await GetAsync(connection, transaction, id, ct);
+        if (existing is null || existing.IsCompleted == isCompleted)
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
+        _ = new TodoItem(
+            existing.Id,
+            existing.Title,
+            existing.CreatedAt,
+            existing.DueDate,
+            existing.Importance,
+            isCompleted,
+            completedAt);
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE todos
+            SET is_completed = $isCompleted,
+                completed_at = $completedAt
+            WHERE id = $id AND is_completed = $expectedState;
+            """;
+        command.Parameters.AddWithValue("$id", id.ToString("D"));
+        command.Parameters.AddWithValue(
+            "$isCompleted", isCompleted ? 1 : 0);
+        command.Parameters.AddWithValue("$completedAt",
+            completedAt is null
+                ? DBNull.Value
+                : Format(completedAt.Value));
+        command.Parameters.AddWithValue(
+            "$expectedState", isCompleted ? 0 : 1);
+        if (await command.ExecuteNonQueryAsync(ct) != 1)
+        {
+            throw new InvalidOperationException(
+                "Todo completion state changed during the transaction.");
         }
         await transaction.CommitAsync(ct);
     }
@@ -137,7 +168,7 @@ public sealed class SqliteTodoRepository : ITodoRepository
         return await reader.ReadAsync(ct) ? ReadTodo(reader) : null;
     }
 
-    private static SqliteCommand CreateUpdateCommand(
+    private static SqliteCommand CreateDetailsUpdateCommand(
         SqliteConnection connection,
         DbTransaction? transaction,
         TodoItem item)
@@ -147,14 +178,17 @@ public sealed class SqliteTodoRepository : ITodoRepository
         command.CommandText = """
             UPDATE todos
             SET title = $title,
-                created_at = $createdAt,
                 due_date = $dueDate,
-                importance = $importance,
-                is_completed = $isCompleted,
-                completed_at = $completedAt
+                importance = $importance
             WHERE id = $id;
             """;
-        AddParameters(command, item);
+        command.Parameters.AddWithValue("$id", item.Id.ToString("D"));
+        command.Parameters.AddWithValue("$title", item.Title);
+        command.Parameters.AddWithValue("$dueDate",
+            item.DueDate is null
+                ? DBNull.Value
+                : Format(item.DueDate.Value));
+        command.Parameters.AddWithValue("$importance", (int)item.Importance);
         return command;
     }
 
