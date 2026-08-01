@@ -276,7 +276,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
             recurrence);
     }
 
-    private static async Task InsertItemAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
+    internal static async Task InsertItemAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
         ReminderItem item, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
@@ -290,7 +290,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task InsertRecurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
+    internal static async Task InsertRecurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
         Guid itemId, RecurrenceRule rule, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
@@ -303,7 +303,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task InsertOccurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
+    internal static async Task InsertOccurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction? transaction,
         ReminderOccurrence occurrence, CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
