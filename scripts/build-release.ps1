@@ -19,6 +19,7 @@ $portableDirectory = [System.IO.Path]::GetFullPath(
 $portableArchive = Join-Path $artifactsRoot 'Moment-Portable-x64.zip'
 $installerArtifact = Join-Path $artifactsRoot 'Moment-Setup-x64.exe'
 $applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
+$windowsProject = Join-Path $repositoryRoot 'src\Moment.Windows\Moment.Windows.csproj'
 $solution = Join-Path $repositoryRoot 'Moment.slnx'
 $installerScript = Join-Path $repositoryRoot 'installer\Moment.iss'
 
@@ -133,6 +134,18 @@ try {
     Remove-ExactStagingDirectory `
         -Candidate $portableDirectory `
         -Expected $portableDirectory
+
+    # Generate the RID-specific PRI before publishing the app. ProjectReference
+    # property propagation is not sufficient on a clean checkout: the app PRI
+    # build consumes Moment.Windows.pri from this exact output directory.
+    & dotnet build $windowsProject `
+        -c Release `
+        -r win-x64 `
+        -p:EnableMsixTooling=true `
+        -p:WindowsAppSDKSingleFileVerifyConfiguration=false
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows runtime resource build failed with exit code $LASTEXITCODE."
+    }
 
     & dotnet publish $applicationProject `
         -c Release `
