@@ -7,6 +7,8 @@ public sealed record SchedulerDeliveryFailure(ScheduledReminder Reminder, Except
 
 public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
 {
+    private static readonly TimeSpan GracePeriod = TimeSpan.FromMinutes(5);
+
     private readonly IReminderRepository _repository;
     private readonly IReminderSink _sink;
     private readonly IClock _clock;
@@ -19,6 +21,7 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
     private bool _disposed;
 
     public event Action<SchedulerDeliveryFailure>? DeliveryFailed;
+    public event EventHandler? StateChanged;
 
     public Task Completion
     {
@@ -203,52 +206,118 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 var scheduled = await _repository.GetScheduledAsync(ct).ConfigureAwait(false);
-                var next = scheduled
-                    .OrderBy(reminder => reminder.Occurrence.DueAt)
-                    .ThenBy(reminder => reminder.Occurrence.Id)
-                    .FirstOrDefault();
-                if (next is null)
+                var now = _clock.Now;
+                var fired = (await _repository
+                        .GetRecoverableAsync(now, ct)
+                        .ConfigureAwait(false))
+                    .Where(static reminder =>
+                        reminder.Occurrence.State == OccurrenceState.Fired
+                        && reminder.Item.Importance == ReminderImportance.Normal)
+                    .ToArray();
+
+                var due = scheduled.Any(reminder => reminder.Occurrence.DueAt <= now);
+                var expired = fired
+                    .Where(reminder => now - GetFiredAt(reminder) > GracePeriod)
+                    .OrderBy(static reminder => reminder.Occurrence.DueAt)
+                    .ThenBy(static reminder => reminder.Occurrence.Id)
+                    .ToArray();
+                if (due)
+                {
+                    await FireDueAsync(now, ct).ConfigureAwait(false);
+                }
+
+                foreach (var reminder in expired)
+                {
+                    if (await _repository.TryTransitionAsync(
+                            reminder.Occurrence.Id,
+                            OccurrenceState.Fired,
+                            OccurrenceState.Missed,
+                            now,
+                            ct)
+                        .ConfigureAwait(false))
+                    {
+                        ReportStateChanged();
+                    }
+                }
+
+                if (due || expired.Length > 0)
+                {
+                    continue;
+                }
+
+                var nextScheduledAt = scheduled
+                    .Select(static reminder => (DateTimeOffset?)reminder.Occurrence.DueAt)
+                    .Min();
+                var nextFiredAt = fired
+                    .Select(reminder => (DateTimeOffset?)GetNextFiredWakeAt(reminder, now))
+                    .Min();
+                var nextAt = Min(nextScheduledAt, nextFiredAt);
+                if (nextAt is null)
                 {
                     await _refreshSignal.WaitAsync(ct).ConfigureAwait(false);
                     continue;
                 }
 
                 using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var delay = _clock.DelayUntilAsync(next.Occurrence.DueAt, waitCancellation.Token);
+                var delay = _clock.DelayUntilAsync(nextAt.Value, waitCancellation.Token);
                 var refresh = _refreshSignal.WaitAsync(waitCancellation.Token);
                 var completed = await Task.WhenAny(delay, refresh).ConfigureAwait(false);
                 await completed.ConfigureAwait(false);
                 waitCancellation.Cancel();
-
-                if (_clock.Now < next.Occurrence.DueAt)
-                {
-                    continue;
-                }
-
-                var due = await _repository.GetDueAsync(_clock.Now, ct).ConfigureAwait(false);
-                foreach (var reminder in due.OrderBy(reminder => reminder.Occurrence.DueAt).ThenBy(reminder => reminder.Occurrence.Id))
-                {
-                    if (await _repository.TryMarkFiredAsync(reminder.Occurrence.Id, _clock.Now, ct).ConfigureAwait(false))
-                    {
-                        try
-                        {
-                            await _sink.DeliverAsync(reminder, ct).ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch (Exception exception)
-                        {
-                            ReportDeliveryFailure(new SchedulerDeliveryFailure(reminder, exception));
-                        }
-                    }
-                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
         }
+    }
+
+    private async Task FireDueAsync(DateTimeOffset now, CancellationToken ct)
+    {
+        var due = await _repository.GetDueAsync(now, ct).ConfigureAwait(false);
+        foreach (var reminder in due
+                     .OrderBy(static reminder => reminder.Occurrence.DueAt)
+                     .ThenBy(static reminder => reminder.Occurrence.Id))
+        {
+            if (!await _repository.TryMarkFiredAsync(
+                    reminder.Occurrence.Id, now, ct).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            ReportStateChanged();
+            try
+            {
+                await _sink.DeliverAsync(reminder, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                ReportDeliveryFailure(new SchedulerDeliveryFailure(reminder, exception));
+            }
+        }
+    }
+
+    private static DateTimeOffset GetFiredAt(ScheduledReminder reminder) =>
+        reminder.Occurrence.HandledAt ?? reminder.Occurrence.DueAt;
+
+    private static DateTimeOffset GetNextFiredWakeAt(
+        ScheduledReminder reminder, DateTimeOffset now)
+    {
+        var deadline = GetFiredAt(reminder).Add(GracePeriod);
+        return deadline == now ? deadline.AddTicks(1) : deadline;
+    }
+
+    private static DateTimeOffset? Min(DateTimeOffset? first, DateTimeOffset? second)
+    {
+        if (first is null)
+        {
+            return second;
+        }
+
+        return second is null || first <= second ? first : second;
     }
 
     private void ReportDeliveryFailure(SchedulerDeliveryFailure failure)
@@ -264,6 +333,27 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
             try
             {
                 handler(failure);
+            }
+            catch
+            {
+                // Observers must not be allowed to stop the scheduling loop.
+            }
+        }
+    }
+
+    private void ReportStateChanged()
+    {
+        var handlers = StateChanged;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (EventHandler handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                handler(this, EventArgs.Empty);
             }
             catch
             {
