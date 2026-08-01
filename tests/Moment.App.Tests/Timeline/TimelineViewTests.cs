@@ -17,6 +17,30 @@ public sealed class TimelineViewTests
     private static readonly string[] ExpectedGroups = ["已错过", "接下来", "已完成"];
 
     [Fact]
+    public Task New_reminder_vector_icon_and_label_are_vertically_centered() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var viewModel = Create(TwoGroupQuery());
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var button = Assert.IsType<Button>(view.FindName("NewReminderButton"));
+            var content = Assert.IsType<StackPanel>(button.Content);
+            var icon = Assert.IsType<Viewbox>(content.Children[0]);
+            var label = Assert.IsType<TextBlock>(content.Children[1]);
+
+            Assert.Equal(16d, icon.ActualWidth);
+            Assert.Equal(16d, icon.ActualHeight);
+            Assert.Equal("新建提醒", label.Text);
+            Assert.Equal(10d, icon.Margin.Right);
+
+            var iconCenter = icon.TranslatePoint(
+                new Point(icon.ActualWidth / 2d, icon.ActualHeight / 2d), button).Y;
+            var labelCenter = label.TranslatePoint(
+                new Point(label.ActualWidth / 2d, label.ActualHeight / 2d), button).Y;
+            Assert.InRange(Math.Abs(iconCenter - labelCenter), 0d, 0.5d);
+        });
+
+    [Fact]
     public Task Simulated_dark_system_palette_reaches_timeline_surfaces() =>
         WpfTestHost.RunAsync(() =>
         {
