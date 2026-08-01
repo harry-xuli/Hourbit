@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -271,8 +272,9 @@ internal static class SmokeTestRunner
         string text,
         DateTimeOffset now,
         TimeZoneInfo zone) =>
-        parser.Parse(text, now, zone) is ParseResult.Success success
-            ? success.Draft
+        parser.Parse(text, now, zone, CultureInfo.GetCultureInfo("zh-CN")) is
+            ParseResult.Success { Draft: ReminderDraft draft }
+            ? draft
             : throw new InvalidOperationException(
                 $"The production parser rejected the self-test input: {text}");
 

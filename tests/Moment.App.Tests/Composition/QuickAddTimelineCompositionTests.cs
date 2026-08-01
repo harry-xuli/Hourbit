@@ -112,7 +112,11 @@ public sealed class QuickAddTimelineCompositionTests
 
     private sealed class ParserStub(ParseResult result) : IChineseTimeParser
     {
-        public ParseResult Parse(string text, DateTimeOffset now, TimeZoneInfo zone) => result;
+        public ParseResult Parse(
+            string text,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            System.Globalization.CultureInfo culture) => result;
     }
 
     private sealed class ReminderServiceStub : IReminderService

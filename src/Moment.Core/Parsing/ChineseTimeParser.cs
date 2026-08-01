@@ -14,12 +14,32 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         "(?<amount>\\d+)\\s*(?<unit>分钟|小时)后",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex DatePattern = new(
+    private static readonly Regex RelativeDatePattern = new(
         "(?<date>今天|明天|明早)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    private static readonly Regex ClockPattern = new(
+    private static readonly Regex ChineseDatePattern = new(
+        "(?<!\\d)(?<year>\\d{4})年(?<month>\\d{1,2})月(?<day>\\d{1,2})日(?!\\d)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex NumericDatePattern = new(
+        "(?<![\\d./-])(?<first>\\d{1,4})(?<separator>[/.-])(?<second>\\d{1,2})\\k<separator>(?<third>\\d{1,4})(?![\\d./-])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex DateLikePattern = new(
+        "(?<![\\d./-])\\d{1,4}[/.-]\\d{1,2}[/.-]\\d{1,4}(?![\\d./-])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex ChineseClockPattern = new(
         "(?<period>上午|中午|下午|晚上)?\\s*(?<hour>\\d{1,2})点(?:(?<half>半)|(?<minute>\\d{1,2})分?)?",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex ColonClockPattern = new(
+        "(?<![\\d:])(?<hour>\\d{1,2}):(?<minute>\\d{2})(?![\\d:])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex ClockLikePattern = new(
+        "(?<![\\d:])\\d{1,3}:\\d{1,3}(?![\\d:])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ReminderPrefixPattern = new(
@@ -36,9 +56,14 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         "(?<phrase>待会|下周)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
-    public ParseResult Parse(string text, DateTimeOffset now, TimeZoneInfo zone)
+    public ParseResult Parse(
+        string text,
+        DateTimeOffset now,
+        TimeZoneInfo zone,
+        CultureInfo culture)
     {
         ArgumentNullException.ThrowIfNull(zone);
+        ArgumentNullException.ThrowIfNull(culture);
 
         var originalText = text ?? string.Empty;
         var normalized = Normalize(originalText);
@@ -49,26 +74,27 @@ public sealed class ChineseTimeParser : IChineseTimeParser
 
         var localNow = TimeZoneInfo.ConvertTime(now, zone);
         var recurrenceMatch = RecurrencePattern.Match(normalized);
-        var recurrence = TryExtractRecurrence(recurrenceMatch, out var recurrenceRule);
-        var remaining = recurrenceMatch.Success
-            ? RecurrencePattern.Replace(normalized, string.Empty, 1)
-            : normalized;
+        var durationMatches = DurationPattern.Matches(normalized);
+        if (durationMatches.Count > 1)
+        {
+            return Invalid(originalText, "只能指定一个相对时长。");
+        }
 
-        var durationMatch = DurationPattern.Match(remaining);
+        var durationMatch = durationMatches.Count == 1 ? durationMatches[0] : Match.Empty;
         if (durationMatch.Success)
         {
-            if (recurrence)
+            if (recurrenceMatch.Success)
             {
                 return Invalid(originalText, "重复提醒不能使用相对时长。");
             }
 
-            if (DatePattern.IsMatch(remaining) || ClockPattern.IsMatch(remaining) ||
-                AmbiguousPattern.IsMatch(remaining))
+            if (HasDateToken(normalized) || HasClockToken(normalized) ||
+                AmbiguousPattern.IsMatch(normalized))
             {
                 return Invalid(originalText, "相对时长不能与日期或钟点组合。");
             }
 
-            var durationTitle = ExtractTitle(DurationPattern.Replace(remaining, string.Empty));
+            var durationTitle = ExtractTitle(RemoveMatches(normalized, durationMatch));
             if (!TryValidateTitle(durationTitle, originalText, out var invalid))
             {
                 return invalid;
@@ -92,50 +118,100 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             }
         }
 
-        var dateMatch = DatePattern.Match(remaining);
-        var dateToken = dateMatch.Success ? dateMatch.Groups["date"].Value : null;
-        if (dateMatch.Success)
+        var dateMatches = FindDateMatches(normalized);
+        if (dateMatches.Count > 1)
         {
-            remaining = DatePattern.Replace(remaining, string.Empty, 1);
+            return Invalid(originalText, "只能指定一个日期。");
         }
 
-        var clockMatch = ClockPattern.Match(remaining);
+        var dateMatch = dateMatches.Count == 1 ? dateMatches[0] : Match.Empty;
+        DateOnly? date = null;
+        if (dateMatch.Success && !TryParseDate(dateMatch, localNow, culture, out date))
+        {
+            return Invalid(originalText, "日期格式无效。");
+        }
+
+        if (!dateMatch.Success && DateLikePattern.IsMatch(normalized))
+        {
+            return Invalid(originalText, "日期格式无效。");
+        }
+
+        var clockMatches = FindClockMatches(normalized);
+        if (clockMatches.Count > 1)
+        {
+            return Invalid(originalText, "只能指定一个钟点。");
+        }
+
+        var clockMatch = clockMatches.Count == 1 ? clockMatches[0] : Match.Empty;
+        var time = default(TimeOnly);
+        if (clockMatch.Success && !TryParseClock(clockMatch, out time))
+        {
+            return Invalid(originalText, "时间格式无效。");
+        }
+
+        if (!clockMatch.Success && ClockLikePattern.IsMatch(normalized))
+        {
+            return Invalid(originalText, "时间格式无效。");
+        }
+
+        if (recurrenceMatch.Success && dateMatch.Success && clockMatch.Success)
+        {
+            return Invalid(originalText, "重复提醒不能同时指定日期。");
+        }
+
+        if (recurrenceMatch.Success && !clockMatch.Success)
+        {
+            var todoTitle = ExtractTitle(RemoveMatches(normalized, dateMatch));
+            if (!TryValidateTitle(todoTitle, originalText, out var todoTitleInvalid))
+            {
+                return todoTitleInvalid;
+            }
+
+            return Todo(todoTitle, date);
+        }
+
+        RecurrenceRule? recurrenceRule = null;
+        var recurrence = clockMatch.Success &&
+                         TryExtractRecurrence(recurrenceMatch, out recurrenceRule);
+        var schedulingMatches = recurrence
+            ? new[] { recurrenceMatch, dateMatch, clockMatch }.Where(match => match.Success).ToArray()
+            : new[] { dateMatch, clockMatch }.Where(match => match.Success).ToArray();
+        var remaining = RemoveMatches(normalized, schedulingMatches);
+
         if (!clockMatch.Success)
         {
             var ambiguousMatch = AmbiguousPattern.Match(remaining);
-            if (ambiguousMatch.Success)
+            if (ambiguousMatch.Success && !dateMatch.Success)
             {
-                var ambiguousTitle = ExtractTitle(
-                    AmbiguousPattern.Replace(remaining, string.Empty, 1));
+                var ambiguousTitle = ExtractTitle(RemoveMatches(remaining, ambiguousMatch));
                 if (!TryValidateTitle(ambiguousTitle, originalText, out var ambiguousTitleInvalid))
                 {
                     return ambiguousTitleInvalid;
                 }
 
                 return Ambiguous(originalText, ambiguousTitle, now, zone,
-                    ambiguousMatch.Groups["phrase"].Value, null, string.Empty, recurrenceRule);
+                    ambiguousMatch.Groups["phrase"].Value, null, string.Empty, null);
             }
 
-            return Invalid(originalText, "未找到明确的提醒时间。");
+            var todoTitle = ExtractTitle(remaining);
+            if (!TryValidateTitle(todoTitle, originalText, out var todoTitleInvalid))
+            {
+                return todoTitleInvalid;
+            }
+
+            return Todo(todoTitle, date);
         }
 
-        var titleAfterClock = ClockPattern.Replace(remaining, string.Empty, 1);
-        var title = ExtractTitle(titleAfterClock);
+        var title = ExtractTitle(remaining);
         if (!TryValidateTitle(title, originalText, out var titleInvalid))
         {
             return titleInvalid;
         }
 
-        if (!TryParseClock(clockMatch, out var time))
-        {
-            return Invalid(originalText, "时间格式无效。");
-        }
-
         var ambiguousClockMatch = AmbiguousClockPattern.Match(remaining);
         if (ambiguousClockMatch.Success)
         {
-            var ambiguousTitle = ExtractTitle(AmbiguousClockPattern.Replace(
-                ClockPattern.Replace(remaining, string.Empty, 1), string.Empty, 1));
+            var ambiguousTitle = ExtractTitle(RemoveMatches(remaining, ambiguousClockMatch));
             if (!TryValidateTitle(ambiguousTitle, originalText, out var ambiguousTitleInvalid))
             {
                 return ambiguousTitleInvalid;
@@ -143,25 +219,22 @@ public sealed class ChineseTimeParser : IChineseTimeParser
 
             return Ambiguous(originalText, ambiguousTitle, now, zone,
                 ambiguousClockMatch.Groups["phrase"].Value, time,
-                clockMatch.Groups["period"].Value, recurrenceRule);
+                clockMatch.Groups["period"].Value, recurrence ? recurrenceRule : null);
         }
 
         var recurrenceValue = recurrence ? recurrenceRule! with { Time = time } : null;
         var due = recurrence
             ? NextOccurrence(recurrenceValue!, time, now, zone)
-            : ResolveDateTime(dateToken, time, localNow, zone);
-
-        if (due is null)
-        {
-            return Invalid(originalText, "时间格式无效。");
-        }
+            : date is null
+                ? NextOneOffOccurrence(time, now, zone)
+                : ResolveLocal(date.Value.ToDateTime(time), zone);
 
         if (due <= now)
         {
             return Invalid(originalText, "提醒时间必须晚于当前时间。");
         }
 
-        return Success(title, due.Value, recurrenceValue);
+        return Success(title, due, recurrenceValue);
     }
 
     private static bool TryExtractRecurrence(Match match, out RecurrenceRule? recurrence)
@@ -193,10 +266,105 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         _ => throw new ArgumentOutOfRangeException(nameof(weekday))
     };
 
+    private static IReadOnlyList<Match> FindDateMatches(string text) =>
+        RelativeDatePattern.Matches(text).Cast<Match>()
+            .Concat(ChineseDatePattern.Matches(text).Cast<Match>())
+            .Concat(NumericDatePattern.Matches(text).Cast<Match>())
+            .OrderBy(match => match.Index)
+            .ToArray();
+
+    private static IReadOnlyList<Match> FindClockMatches(string text) =>
+        ChineseClockPattern.Matches(text).Cast<Match>()
+            .Concat(ColonClockPattern.Matches(text).Cast<Match>())
+            .OrderBy(match => match.Index)
+            .ToArray();
+
+    private static bool HasDateToken(string text) =>
+        FindDateMatches(text).Count != 0 || DateLikePattern.IsMatch(text);
+
+    private static bool HasClockToken(string text) =>
+        FindClockMatches(text).Count != 0 || ClockLikePattern.IsMatch(text);
+
+    private static bool TryParseDate(
+        Match match,
+        DateTimeOffset localNow,
+        CultureInfo culture,
+        out DateOnly? date)
+    {
+        date = null;
+        if (match.Groups["date"].Success)
+        {
+            var localDate = DateOnly.FromDateTime(localNow.DateTime);
+            date = match.Groups["date"].Value is "明天" or "明早"
+                ? localDate.AddDays(1)
+                : localDate;
+            return true;
+        }
+
+        if (match.Groups["year"].Success)
+        {
+            return TryCreateDate(
+                match.Groups["year"].Value,
+                match.Groups["month"].Value,
+                match.Groups["day"].Value,
+                out date);
+        }
+
+        var firstText = match.Groups["first"].Value;
+        var secondText = match.Groups["second"].Value;
+        var thirdText = match.Groups["third"].Value;
+        if (firstText.Length == 4)
+        {
+            return TryCreateDate(firstText, secondText, thirdText, out date);
+        }
+
+        if (thirdText.Length != 4)
+        {
+            return false;
+        }
+
+        var pattern = culture.DateTimeFormat.ShortDatePattern;
+        var monthIndex = pattern.IndexOf('M', StringComparison.Ordinal);
+        var dayIndex = pattern.IndexOf('d', StringComparison.Ordinal);
+        if (monthIndex < 0 || dayIndex < 0)
+        {
+            return false;
+        }
+
+        return monthIndex < dayIndex
+            ? TryCreateDate(thirdText, firstText, secondText, out date)
+            : TryCreateDate(thirdText, secondText, firstText, out date);
+    }
+
+    private static bool TryCreateDate(
+        string yearText,
+        string monthText,
+        string dayText,
+        out DateOnly? date)
+    {
+        date = null;
+        if (!TryParseNonNegativeInteger(yearText, out var year) ||
+            !TryParseNonNegativeInteger(monthText, out var month) ||
+            !TryParseNonNegativeInteger(dayText, out var day))
+        {
+            return false;
+        }
+
+        try
+        {
+            date = new DateOnly(year, month, day);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+    }
+
     private static bool TryParseClock(Match match, out TimeOnly time)
     {
         time = default;
-        if (!TryParsePositiveInteger(match.Groups["hour"].Value, out var hour))
+        if (!TryParseNonNegativeInteger(match.Groups["hour"].Value, out var hour))
         {
             return false;
         }
@@ -218,7 +386,42 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             return false;
         }
 
-        hour = match.Groups["period"].Value switch
+        var period = match.Groups["period"].Value;
+        if (match.Value.Contains(':', StringComparison.Ordinal))
+        {
+            if (hour is < 0 or > 23)
+            {
+                return false;
+            }
+
+            time = new TimeOnly(hour, minute);
+            return true;
+        }
+
+        if (period.Length == 0)
+        {
+            if (hour is < 0 or > 23)
+            {
+                return false;
+            }
+
+            time = new TimeOnly(hour, minute);
+            return true;
+        }
+
+        if (period == "上午")
+        {
+            if (hour is < 0 or > 12)
+            {
+                return false;
+            }
+        }
+        else if (hour is < 1 or > 12)
+        {
+            return false;
+        }
+
+        hour = period switch
         {
             "下午" or "晚上" when hour is >= 1 and <= 11 => hour + 12,
             "晚上" when hour == 12 => 0,
@@ -233,18 +436,6 @@ public sealed class ChineseTimeParser : IChineseTimeParser
 
         time = new TimeOnly(hour, minute);
         return true;
-    }
-
-    private static DateTimeOffset? ResolveDateTime(
-        string? dateToken, TimeOnly time, DateTimeOffset localNow, TimeZoneInfo zone)
-    {
-        var date = localNow.Date;
-        if (dateToken is "明天" or "明早")
-        {
-            date = date.AddDays(1);
-        }
-
-        return ResolveLocal(date + time.ToTimeSpan(), zone);
     }
 
     private static DateTimeOffset NextOccurrence(
@@ -427,6 +618,19 @@ public sealed class ChineseTimeParser : IChineseTimeParser
     private static ParseResult.Success Success(string title, DateTimeOffset due, RecurrenceRule? recurrence) =>
         new(new ReminderDraft(title, due, ReminderKind.Countdown, ReminderImportance.Normal, recurrence));
 
+    private static ParseResult.Success Todo(string title, DateOnly? dueDate) =>
+        new(new TodoDraft(title, dueDate, ReminderImportance.Normal));
+
+    private static string RemoveMatches(string text, params Match[] matches)
+    {
+        foreach (var match in matches.Where(match => match.Success).OrderByDescending(match => match.Index))
+        {
+            text = text.Remove(match.Index, match.Length);
+        }
+
+        return text;
+    }
+
     private static string ExtractTitle(string text) => WhitespacePattern.Replace(
         ReminderPrefixPattern.Replace(text, string.Empty).Trim(), " ");
 
@@ -450,6 +654,9 @@ public sealed class ChineseTimeParser : IChineseTimeParser
 
     private static bool TryParsePositiveInteger(string value, out int result) =>
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out result) && result > 0;
+
+    private static bool TryParseNonNegativeInteger(string value, out int result) =>
+        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out result) && result >= 0;
 
     private static ParseResult.Invalid Invalid(string originalText, string message) => new(originalText, message);
 

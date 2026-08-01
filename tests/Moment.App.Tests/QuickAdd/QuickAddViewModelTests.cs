@@ -137,7 +137,11 @@ public sealed class QuickAddViewModelTests
 
     private sealed class StubParser(ParseResult result) : IChineseTimeParser
     {
-        public ParseResult Parse(string text, DateTimeOffset now, TimeZoneInfo zone) => result;
+        public ParseResult Parse(
+            string text,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            System.Globalization.CultureInfo culture) => result;
     }
 
     private sealed class RecordingReminderService(bool blockCreate = false) : IReminderService

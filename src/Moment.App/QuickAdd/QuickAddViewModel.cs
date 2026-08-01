@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using Moment.App.Commands;
 using Moment.App.Timeline;
 using Moment.Core.Abstractions;
@@ -12,7 +13,8 @@ public enum QuickAddState { Empty, Success, Ambiguous, Invalid }
 
 public sealed class QuickAddChoiceViewModel(ParseChoice choice)
 {
-    internal ReminderDraft Draft { get; } = choice.Draft;
+    internal ReminderDraft Draft { get; } = choice.Draft as ReminderDraft ??
+        throw new ArgumentException("Quick Add choices must be reminder drafts.", nameof(choice));
     public string Label { get; } = choice.Label;
 }
 
@@ -174,13 +176,17 @@ public sealed class QuickAddViewModel : ObservableObject
             return;
         }
 
-        switch (_parser.Parse(Text, _clock.Now, _zone))
+        switch (_parser.Parse(Text, _clock.Now, _zone, CultureInfo.CurrentCulture))
         {
-            case ParseResult.Success success:
-                _draft = success.Draft;
-                Details = new EditReminderViewModel(success.Draft, _zone);
-                PreviewText = FormatPreview(success.Draft);
+            case ParseResult.Success { Draft: ReminderDraft reminderDraft }:
+                _draft = reminderDraft;
+                Details = new EditReminderViewModel(reminderDraft, _zone);
+                PreviewText = FormatPreview(reminderDraft);
                 State = QuickAddState.Success;
+                break;
+            case ParseResult.Success:
+                ErrorMessage = "待办事项将在后续界面更新中启用。";
+                State = QuickAddState.Invalid;
                 break;
             case ParseResult.Ambiguous ambiguous:
                 foreach (var choice in ambiguous.Choices)
