@@ -57,6 +57,61 @@ public sealed class EditItemWindowTests
             window.Close();
         });
 
+    [Fact]
+    public Task Todo_conversion_refresh_failure_disables_fields_and_labels_retry() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var vm = new EditTodoViewModel(
+                CreateTodo(),
+                Zone,
+                new TodoServiceStub(),
+                _ => throw new InvalidOperationException("时间轴刷新失败"));
+            vm.TimeText = "14:30";
+            var window = new EditTodoWindow { DataContext = vm };
+            window.Show();
+            window.UpdateLayout();
+
+            await vm.SaveCommand.ExecuteAsync(null);
+            window.UpdateLayout();
+
+            var date = Assert.IsType<TextBox>(window.FindName("TodoDateBox"));
+            var save = Assert.IsType<Button>(window.FindName("SaveTodoButton"));
+            Assert.False(date.IsEnabled);
+            Assert.Equal("重试刷新", save.Content);
+            Assert.True(window.IsVisible);
+            window.Close();
+        });
+
+    [Fact]
+    public Task Reminder_conversion_refresh_failure_disables_fields_and_labels_retry() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var item = new TimelineItemViewModel(
+                TestData.Row("会议", "2026-08-03T10:30:00+08:00"),
+                DateTimeOffset.Parse("2026-08-03T09:00:00+08:00"));
+            var vm = new EditReminderViewModel(
+                item,
+                Zone,
+                new ReminderServiceStub(),
+                new TodoServiceStub(),
+                SeriesScope.OccurrenceOnly,
+                afterSaved: _ => throw new InvalidOperationException("时间轴刷新失败"));
+            vm.TimeText = "";
+            var window = new EditReminderWindow { DataContext = vm };
+            window.Show();
+            window.UpdateLayout();
+
+            await vm.SaveCommand.ExecuteAsync(null);
+            window.UpdateLayout();
+
+            var date = Assert.IsType<TextBox>(window.FindName("ReminderDateBox"));
+            var save = Assert.IsType<Button>(window.FindName("SaveReminderButton"));
+            Assert.False(date.IsEnabled);
+            Assert.Equal("重试刷新", save.Content);
+            Assert.True(window.IsVisible);
+            window.Close();
+        });
+
     private static TodoItem CreateTodo() => new(
         Guid.Parse("10000000-0000-0000-0000-000000000006"),
         "提交报告",
@@ -78,6 +133,19 @@ public sealed class EditItemWindowTests
             throw new InvalidOperationException("保存失败，请重试。");
         public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class ReminderServiceStub : IReminderService
+    {
+        public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public Task EditAsync(
+            Guid occurrenceId,
+            ReminderDraft draft,
+            SeriesScope scope,
+            CancellationToken ct) => Task.CompletedTask;
+        public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 
     private sealed class TodoServiceStub : ITodoService

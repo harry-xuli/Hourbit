@@ -25,7 +25,7 @@
         <TextBlock Grid.Row="0" Text="编辑待办" FontSize="24"
                    FontWeight="SemiBold" Margin="0,0,0,18" />
 
-        <Grid Grid.Row="1" Margin="0,0,0,12">
+        <Grid Grid.Row="1" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
@@ -36,7 +36,7 @@
                      automation:AutomationProperties.Name="待办内容" />
         </Grid>
 
-        <Grid Grid.Row="2" Margin="0,0,0,12">
+        <Grid Grid.Row="2" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
@@ -54,7 +54,7 @@
                      automation:AutomationProperties.Name="提醒时间，格式小时:分钟，可留空" />
         </Grid>
 
-        <Grid Grid.Row="3" Margin="0,0,0,12">
+        <Grid Grid.Row="3" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
@@ -97,8 +97,10 @@
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Style="{StaticResource SecondaryButton}"
-                            Content="取消" IsCancel="True" Margin="0,0,10,0" />
-                    <Button Content="保存"
+                            Content="取消" IsCancel="True" Margin="0,0,10,0"
+                            IsEnabled="{Binding CanCancel}" />
+                    <Button x:Name="SaveTodoButton"
+                            Content="{Binding PrimaryActionText}"
                             Command="{Binding SaveCommand}"
                             IsDefault="True"
                             automation:AutomationProperties.Name="保存待办修改" />

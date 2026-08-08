@@ -39,6 +39,7 @@
                  MinHeight="66"
                  Margin="22,22,22,12"
                  VerticalContentAlignment="Center"
+                 IsEnabled="{Binding CanEdit}"
                  automation:AutomationProperties.Name="快速创建待办或提醒输入" />
 
         <Border Grid.Row="1"
@@ -127,6 +128,7 @@
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1"
                 CornerRadius="5"
+                IsEnabled="{Binding CanEdit}"
                 Visibility="{Binding IsReminderDetailsVisible, Converter={StaticResource BooleanToVisibility}}">
             <StackPanel>
                 <Grid Margin="0,0,0,10">
@@ -212,6 +214,7 @@
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
                 BorderThickness="1"
                 CornerRadius="5"
+                IsEnabled="{Binding CanEdit}"
                 Visibility="{Binding IsTodoDetailsVisible, Converter={StaticResource BooleanToVisibility}}">
             <StackPanel>
                 <Grid Margin="0,0,0,10">

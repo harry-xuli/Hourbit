@@ -77,7 +77,10 @@ public sealed class QuickAddTimelineCompositionTests
         Assert.Single(service.Created);
         Assert.Equal(0, hides);
         Assert.Equal("时间轴刷新失败", timeline.ErrorMessage);
-        Assert.Equal("时间轴刷新失败", quickAdd.ErrorMessage);
+        Assert.Contains("提醒已创建", quickAdd.ErrorMessage);
+        Assert.Contains("时间轴刷新失败", quickAdd.ErrorMessage);
+        Assert.True(quickAdd.IsRefreshOnly);
+        Assert.False(quickAdd.CanEdit);
 
         query.RefreshFailure = null;
         await quickAdd.SubmitAsync();

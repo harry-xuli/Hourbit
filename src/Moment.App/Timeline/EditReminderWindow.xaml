@@ -26,7 +26,7 @@
 
         <TextBlock Grid.Row="0" Text="编辑提醒" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,18" />
 
-        <Grid Grid.Row="1" Margin="0,0,0,12">
+        <Grid Grid.Row="1" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
@@ -36,7 +36,7 @@
                      automation:AutomationProperties.Name="提醒内容" />
         </Grid>
 
-        <Grid Grid.Row="2" Margin="0,0,0,12">
+        <Grid Grid.Row="2" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
@@ -44,13 +44,14 @@
                 <ColumnDefinition Width="150" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="日期时间" VerticalAlignment="Center" />
-            <TextBox Grid.Column="1" Text="{Binding DateText, UpdateSourceTrigger=PropertyChanged}"
+            <TextBox x:Name="ReminderDateBox"
+                     Grid.Column="1" Text="{Binding DateText, UpdateSourceTrigger=PropertyChanged}"
                      automation:AutomationProperties.Name="日期，格式年-月-日" />
             <TextBox Grid.Column="3" Text="{Binding TimeText, UpdateSourceTrigger=PropertyChanged}"
                      automation:AutomationProperties.Name="时间，格式小时:分钟" />
         </Grid>
 
-        <Grid Grid.Row="3" Margin="0,0,0,12">
+        <Grid Grid.Row="3" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
@@ -76,7 +77,7 @@
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="4" Margin="0,0,0,12">
+        <Grid Grid.Row="4" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
@@ -90,7 +91,7 @@
                       automation:AutomationProperties.Name="重复方式" />
         </Grid>
 
-        <Grid Grid.Row="5" Margin="0,0,0,12"
+        <Grid Grid.Row="5" Margin="0,0,0,12" IsEnabled="{Binding CanEdit}"
               Visibility="{Binding IsWeekly, Converter={StaticResource BooleanToVisibility}}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="92" />
@@ -120,9 +121,10 @@
                        TextWrapping="Wrap" />
             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Style="{StaticResource SecondaryButton}" Content="取消"
-                        IsCancel="True" Margin="0,0,10,0" />
+                        IsCancel="True" Margin="0,0,10,0"
+                        IsEnabled="{Binding CanCancel}" />
                 <Button x:Name="SaveReminderButton"
-                        Content="保存" Command="{Binding SaveCommand}" IsDefault="True"
+                        Content="{Binding PrimaryActionText}" Command="{Binding SaveCommand}" IsDefault="True"
                         automation:AutomationProperties.Name="保存提醒修改" />
             </StackPanel>
         </Grid>

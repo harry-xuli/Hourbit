@@ -134,8 +134,121 @@ public sealed class EditTodoViewModelTests
         Assert.Null(vm.ErrorMessage);
     }
 
+    [Fact]
+    public async Task Converted_todo_with_failed_refresh_allows_only_refresh_retry()
+    {
+        var service = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = Create(service, _ =>
+        {
+            if (++refreshAttempts == 1)
+                throw new InvalidOperationException("时间轴刷新失败");
+            return Task.CompletedTask;
+        });
+        vm.TimeText = "14:30";
+        var originalTitle = vm.Title;
+        var closes = 0;
+        vm.CloseRequested += (_, _) => closes++;
+
+        await vm.SaveAsync();
+
+        Assert.False(service.SourceExists);
+        Assert.True(vm.IsRefreshOnly);
+        Assert.False(vm.CanEdit);
+        Assert.False(vm.CanCancel);
+        Assert.Equal("重试刷新", vm.PrimaryActionText);
+        Assert.Contains("已转换为提醒", vm.ErrorMessage);
+
+        vm.Title = "不得写入已删除源";
+        await vm.DeleteAsync();
+        await vm.CompleteAsync();
+        await vm.SaveAsync();
+
+        Assert.Equal(originalTitle, vm.Title);
+        Assert.Single(service.ReminderConversions);
+        Assert.Empty(service.Deleted);
+        Assert.Empty(service.Completed);
+        Assert.Equal(2, refreshAttempts);
+        Assert.Equal(1, closes);
+    }
+
+    [Fact]
+    public async Task Deleted_todo_with_failed_refresh_never_reuses_deleted_source_id()
+    {
+        var service = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = Create(service, _ =>
+        {
+            if (++refreshAttempts == 1)
+                throw new InvalidOperationException("时间轴刷新失败");
+            return Task.CompletedTask;
+        });
+
+        await vm.DeleteAsync();
+
+        Assert.False(vm.CanCancel);
+
+        await vm.CompleteAsync();
+        await vm.SaveAsync();
+
+        Assert.False(service.SourceExists);
+        Assert.Single(service.Deleted);
+        Assert.Empty(service.Completed);
+        Assert.Empty(service.Edits);
+        Assert.Equal(2, refreshAttempts);
+    }
+
+    [Fact]
+    public async Task Save_and_delete_share_one_atomic_busy_gate()
+    {
+        var service = new BlockingTodoService();
+        var vm = Create(service);
+
+        var save = vm.SaveAsync();
+        await service.EditEntered.Task;
+        var delete = vm.DeleteAsync();
+
+        Assert.True(vm.IsBusy);
+        Assert.False(vm.CanEdit);
+        Assert.False(vm.CanCancel);
+        Assert.False(vm.SaveCommand.CanExecute(null));
+        Assert.False(vm.CompleteCommand.CanExecute(null));
+        Assert.False(vm.DeleteCommand.CanExecute(null));
+        Assert.Equal(0, service.DeleteCalls);
+
+        service.ReleaseEdit.SetResult();
+        await Task.WhenAll(save, delete);
+
+        Assert.Equal(1, service.EditCalls);
+        Assert.Equal(0, service.DeleteCalls);
+    }
+
+    [Fact]
+    public async Task Complete_and_delete_commands_share_one_atomic_busy_gate()
+    {
+        var service = new BlockingTodoService();
+        var vm = Create(service);
+
+        var complete = vm.CompleteCommand.ExecuteAsync(null);
+        await service.CompleteEntered.Task;
+        var delete = vm.DeleteCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsBusy);
+        Assert.False(vm.SaveCommand.CanExecute(null));
+        Assert.False(vm.CompleteCommand.CanExecute(null));
+        Assert.False(vm.DeleteCommand.CanExecute(null));
+        Assert.Equal(1, service.CompleteCalls);
+        Assert.Equal(0, service.DeleteCalls);
+
+        service.ReleaseComplete.SetResult();
+        await Task.WhenAll(complete, delete);
+
+        Assert.Equal(1, service.CompleteCalls);
+        Assert.Equal(0, service.DeleteCalls);
+    }
+
     private static EditTodoViewModel Create(
-        RecordingTodoService service,
+        ITodoService service,
         Func<CancellationToken, Task>? afterSaved = null)
     {
         var todo = new TodoItem(
@@ -156,25 +269,30 @@ public sealed class EditTodoViewModelTests
         public List<Guid> Completed { get; } = [];
         public List<Guid> Deleted { get; } = [];
         public Exception? ConversionFailure { get; init; }
+        public bool SourceExists { get; private set; } = true;
 
         public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
             throw new NotSupportedException();
 
         public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct)
         {
+            EnsureSourceExists();
             Edits.Add((todoId, draft));
             return Task.CompletedTask;
         }
 
         public Task CompleteAsync(Guid todoId, CancellationToken ct)
         {
+            EnsureSourceExists();
             Completed.Add(todoId);
             return Task.CompletedTask;
         }
 
         public Task DeleteAsync(Guid todoId, CancellationToken ct)
         {
+            EnsureSourceExists();
             Deleted.Add(todoId);
+            SourceExists = false;
             return Task.CompletedTask;
         }
 
@@ -185,11 +303,64 @@ public sealed class EditTodoViewModelTests
         {
             if (ConversionFailure is not null)
                 throw ConversionFailure;
+            EnsureSourceExists();
             ReminderConversions.Add((todoId, draft));
+            SourceExists = false;
             return Task.CompletedTask;
         }
 
         public Task ConvertToTodoAsync(Guid occurrenceId, TodoDraft draft, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId,
+            TodoDraft draft,
+            SeriesScope scope,
+            CancellationToken ct) => throw new NotSupportedException();
+
+        private void EnsureSourceExists()
+        {
+            if (!SourceExists)
+                throw new InvalidOperationException("待办源已删除。");
+        }
+    }
+
+    private sealed class BlockingTodoService : ITodoService
+    {
+        public TaskCompletionSource EditEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseEdit { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CompleteEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseComplete { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int EditCalls { get; private set; }
+        public int CompleteCalls { get; private set; }
+        public int DeleteCalls { get; private set; }
+
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public async Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct)
+        {
+            EditCalls++;
+            EditEntered.TrySetResult();
+            await ReleaseEdit.Task.WaitAsync(ct);
+        }
+        public async Task CompleteAsync(Guid todoId, CancellationToken ct)
+        {
+            CompleteCalls++;
+            CompleteEntered.TrySetResult();
+            await ReleaseComplete.Task.WaitAsync(ct);
+        }
+        public Task DeleteAsync(Guid todoId, CancellationToken ct)
+        {
+            DeleteCalls++;
+            return Task.CompletedTask;
+        }
+        public Task ConvertToReminderAsync(
+            Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, CancellationToken ct) =>
             throw new NotSupportedException();
         public Task ConvertToTodoAsync(
             Guid occurrenceId,

@@ -45,7 +45,10 @@ public sealed class EditReminderViewModel : ObservableObject
     private EditRecurrenceMode _selectedRecurrence;
     private string _weeklyDaysText;
     private string? _errorMessage;
-    private ReminderPersistenceOperation? _persistedOperation;
+    private ReminderDraft? _persistedEditDraft;
+    private SeriesScope _persistedEditScope;
+    private string? _refreshOnlyMessage;
+    private int _operationInProgress;
 
     public EditReminderViewModel(TimelineItemViewModel item, TimeZoneInfo zone)
         : this(CreateDraft(item), zone)
@@ -73,7 +76,7 @@ public sealed class EditReminderViewModel : ObservableObject
         _weeklyDaysText = string.Join("、", DayLabels
             .Where(pair => draft.Recurrence?.DaysOfWeek.Contains(pair.Value) == true)
             .Select(pair => pair.Key));
-        SaveCommand = new AsyncCommand((_, ct) => SaveAsync(ct));
+        SaveCommand = new AsyncCommand((_, ct) => SaveAsync(ct), _ => !IsBusy);
     }
 
     public EditReminderViewModel(
@@ -103,6 +106,11 @@ public sealed class EditReminderViewModel : ObservableObject
 
     public Guid OccurrenceId { get; }
     public IAsyncCommand SaveCommand { get; }
+    public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
+    public bool IsRefreshOnly => _refreshOnlyMessage is not null;
+    public bool CanEdit => !IsBusy && !IsRefreshOnly;
+    public bool CanCancel => CanEdit;
+    public string PrimaryActionText => IsRefreshOnly ? "重试刷新" : "保存";
 
     public IReadOnlyList<EditOption<ReminderKind>> Kinds { get; } =
     [
@@ -128,13 +136,21 @@ public sealed class EditReminderViewModel : ObservableObject
     public string Title
     {
         get => _title;
-        set => SetProperty(ref _title, value ?? string.Empty);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _title, value ?? string.Empty);
+        }
     }
 
     public string DateText
     {
         get => _dateText;
-        set => SetProperty(ref _dateText, value ?? string.Empty);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _dateText, value ?? string.Empty);
+        }
     }
 
     public string TimeText
@@ -142,6 +158,8 @@ public sealed class EditReminderViewModel : ObservableObject
         get => _timeText;
         set
         {
+            if (!CanEdit)
+                return;
             if (SetProperty(ref _timeText, value ?? string.Empty))
                 OnPropertyChanged(nameof(ConvertsToTodo));
         }
@@ -150,13 +168,21 @@ public sealed class EditReminderViewModel : ObservableObject
     public ReminderKind SelectedKind
     {
         get => _selectedKind;
-        set => SetProperty(ref _selectedKind, value);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _selectedKind, value);
+        }
     }
 
     public ReminderImportance SelectedImportance
     {
         get => _selectedImportance;
-        set => SetProperty(ref _selectedImportance, value);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _selectedImportance, value);
+        }
     }
 
     public EditRecurrenceMode SelectedRecurrence
@@ -164,6 +190,8 @@ public sealed class EditReminderViewModel : ObservableObject
         get => _selectedRecurrence;
         set
         {
+            if (!CanEdit)
+                return;
             if (SetProperty(ref _selectedRecurrence, value))
                 OnPropertyChanged(nameof(IsWeekly));
         }
@@ -172,7 +200,11 @@ public sealed class EditReminderViewModel : ObservableObject
     public string WeeklyDaysText
     {
         get => _weeklyDaysText;
-        set => SetProperty(ref _weeklyDaysText, value ?? string.Empty);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _weeklyDaysText, value ?? string.Empty);
+        }
     }
 
     public bool IsWeekly => SelectedRecurrence == EditRecurrenceMode.Weekly;
@@ -255,30 +287,42 @@ public sealed class EditReminderViewModel : ObservableObject
                 "This reminder editor is not connected to persistence.");
         }
 
-        if (!ConvertsToTodo)
-        {
-            if (!TryBuildDraft(out var reminderDraft))
-                return;
-            await PersistAndCloseAsync(
-                new EditReminderOperation(reminderDraft!, _editScope),
-                token => _reminderService.EditAsync(
-                    OccurrenceId, reminderDraft!, _editScope, token),
-                ct);
+        if (!TryBeginOperation())
             return;
-        }
-
-        if (!TryBuildTodoDraft(out var todoDraft))
-            return;
-
-        SeriesScope conversionScope = SeriesScope.OccurrenceOnly;
-        if (_sourceIsRecurring)
+        var ordinaryEditAwaitingRefresh = false;
+        try
         {
-            if (_persistedOperation is ConvertReminderOperation persisted &&
-                Equals(persisted.Draft, todoDraft))
+            if (IsRefreshOnly)
             {
-                conversionScope = persisted.Scope;
+                await FinishRefreshAsync(ct);
+                return;
             }
-            else
+
+            if (!ConvertsToTodo)
+            {
+                if (!TryBuildDraft(out var reminderDraft))
+                    return;
+                if (!ReminderDraftEquals(
+                        _persistedEditDraft,
+                        _persistedEditScope,
+                        reminderDraft!,
+                        _editScope))
+                {
+                    await _reminderService.EditAsync(
+                        OccurrenceId, reminderDraft!, _editScope, ct);
+                    _persistedEditDraft = reminderDraft;
+                    _persistedEditScope = _editScope;
+                }
+                ordinaryEditAwaitingRefresh = true;
+                await FinishRefreshAsync(ct);
+                return;
+            }
+
+            if (!TryBuildTodoDraft(out var todoDraft))
+                return;
+
+            SeriesScope conversionScope = SeriesScope.OccurrenceOnly;
+            if (_sourceIsRecurring)
             {
                 if (_selectConversionScope is null)
                 {
@@ -302,13 +346,26 @@ public sealed class EditReminderViewModel : ObservableObject
                     return;
                 }
             }
-        }
 
-        await PersistAndCloseAsync(
-            new ConvertReminderOperation(todoDraft!, conversionScope),
-            token => _todoService.ConvertToTodoAsync(
-                OccurrenceId, todoDraft!, conversionScope, token),
-            ct);
+            await _todoService.ConvertToTodoAsync(
+                OccurrenceId, todoDraft!, conversionScope, ct);
+            _persistedEditDraft = null;
+            EnterRefreshOnly(
+                "提醒已转换为待办，但时间轴刷新失败。请仅重试刷新。");
+            await FinishRefreshAsync(ct);
+        }
+        catch (Exception exception)
+        {
+            ErrorMessage = IsRefreshOnly
+                ? $"{_refreshOnlyMessage} {exception.Message}"
+                : ordinaryEditAwaitingRefresh
+                    ? $"提醒已保存，但时间轴刷新失败。可修改后再次保存，或直接重试保存。 {exception.Message}"
+                    : exception.Message;
+        }
+        finally
+        {
+            EndOperation();
+        }
     }
 
     private bool TryBuildTodoDraft(out TodoDraft? draft)
@@ -352,27 +409,50 @@ public sealed class EditReminderViewModel : ObservableObject
         return true;
     }
 
-    private async Task PersistAndCloseAsync(
-        ReminderPersistenceOperation operation,
-        Func<CancellationToken, Task> persist,
-        CancellationToken ct)
+    private bool TryBeginOperation()
     {
-        try
-        {
-            ErrorMessage = null;
-            if (!Equals(_persistedOperation, operation))
-            {
-                await persist(ct);
-                _persistedOperation = operation;
-            }
-            await _afterSaved(ct);
-            _persistedOperation = null;
-            CloseRequested?.Invoke(this, EventArgs.Empty);
-        }
-        catch (Exception exception)
-        {
-            ErrorMessage = exception.Message;
-        }
+        if (Interlocked.CompareExchange(ref _operationInProgress, 1, 0) != 0)
+            return false;
+        NotifyOperationStateChanged();
+        return true;
+    }
+
+    private void EndOperation()
+    {
+        Volatile.Write(ref _operationInProgress, 0);
+        NotifyOperationStateChanged();
+    }
+
+    private void EnterRefreshOnly(string message)
+    {
+        _refreshOnlyMessage = message;
+        NotifyRefreshOnlyChanged();
+    }
+
+    private async Task FinishRefreshAsync(CancellationToken ct)
+    {
+        await _afterSaved(ct);
+        _persistedEditDraft = null;
+        _refreshOnlyMessage = null;
+        ErrorMessage = null;
+        NotifyRefreshOnlyChanged();
+        CloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void NotifyOperationStateChanged()
+    {
+        OnPropertyChanged(nameof(IsBusy));
+        OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(CanCancel));
+        SaveCommand.RaiseCanExecuteChanged();
+    }
+
+    private void NotifyRefreshOnlyChanged()
+    {
+        OnPropertyChanged(nameof(IsRefreshOnly));
+        OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(PrimaryActionText));
+        SaveCommand.RaiseCanExecuteChanged();
     }
 
     private DateTimeOffset ResolveLocal(DateTime local)
@@ -411,11 +491,25 @@ public sealed class EditReminderViewModel : ObservableObject
         return new ReminderDraft(item.Title, item.DueAt, item.Kind, item.Importance, recurrence);
     }
 
-    private abstract record ReminderPersistenceOperation;
-    private sealed record EditReminderOperation(
-        ReminderDraft Draft,
-        SeriesScope Scope) : ReminderPersistenceOperation;
-    private sealed record ConvertReminderOperation(
-        TodoDraft Draft,
-        SeriesScope Scope) : ReminderPersistenceOperation;
+    private static bool ReminderDraftEquals(
+        ReminderDraft? left,
+        SeriesScope leftScope,
+        ReminderDraft right,
+        SeriesScope rightScope) =>
+        left is not null &&
+        leftScope == rightScope &&
+        string.Equals(left.Title, right.Title, StringComparison.Ordinal) &&
+        left.DueAt == right.DueAt &&
+        left.Kind == right.Kind &&
+        left.Importance == right.Importance &&
+        RecurrenceEquals(left.Recurrence, right.Recurrence);
+
+    private static bool RecurrenceEquals(RecurrenceRule? left, RecurrenceRule? right)
+    {
+        if (left is null || right is null)
+            return left is null && right is null;
+        return left.Kind == right.Kind &&
+            left.Time == right.Time &&
+            left.DaysOfWeek.SetEquals(right.DaysOfWeek);
+    }
 }

@@ -132,7 +132,7 @@ public sealed class QuickAddViewModelTests
     }
 
     [Fact]
-    public async Task Changed_expanded_details_after_refresh_failure_persist_the_new_draft()
+    public async Task Created_item_with_failed_refresh_enters_refresh_only_state()
     {
         var reminders = new RecordingReminderService();
         var refreshAttempts = 0;
@@ -150,15 +150,76 @@ public sealed class QuickAddViewModelTests
         await vm.ToggleDetailsCommand.ExecuteAsync(null);
 
         await vm.SubmitAsync();
-        vm.Details!.Title = "晨间阅读";
+
+        Assert.True(vm.IsRefreshOnly);
+        Assert.False(vm.CanEdit);
+        Assert.Contains("请按 Enter 重试刷新", vm.ErrorMessage);
+
+        vm.Text = "下午3点写作";
         await vm.SubmitAsync();
 
-        Assert.Collection(
-            reminders.Created,
-            draft => Assert.Equal("看书", draft.Title),
-            draft => Assert.Equal("晨间阅读", draft.Title));
+        Assert.Equal("看书", Assert.Single(reminders.Created).Title);
+        Assert.Equal("明早9点看书", vm.Text);
         Assert.Equal(2, refreshAttempts);
+        Assert.False(vm.IsRefreshOnly);
         Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Created_item_awaiting_refresh_disables_hide_and_direct_detail_expansion()
+    {
+        var vm = Create(
+            new ParseResult.Success(
+                TestData.Draft("看书", "2026-07-30T09:00:00+08:00")),
+            new RecordingReminderService(),
+            afterCreated: _ => throw new InvalidOperationException("时间轴刷新失败"));
+        vm.Text = "明早9点看书";
+        var hides = 0;
+        vm.HideRequested += (_, _) => hides++;
+
+        await vm.SubmitAsync();
+
+        Assert.True(vm.IsRefreshOnly);
+        Assert.False(vm.HideCommand.CanExecute(null));
+        Assert.False(vm.ToggleDetailsCommand.CanExecute(null));
+        Assert.False(vm.ShowDetails());
+
+        await vm.HideCommand.ExecuteAsync(null);
+
+        Assert.Equal(0, hides);
+        Assert.False(vm.AreDetailsVisible);
+    }
+
+    [Fact]
+    public async Task Identical_expanded_weekly_reminder_retries_only_refresh()
+    {
+        var reminders = new RecordingReminderService();
+        var refreshAttempts = 0;
+        var draft = new ReminderDraft(
+            "每周复盘",
+            DateTimeOffset.Parse("2026-08-03T14:30:00+08:00"),
+            ReminderKind.Plan,
+            ReminderImportance.Normal,
+            RecurrenceRule.Weekly(
+                [DayOfWeek.Monday, DayOfWeek.Wednesday],
+                new TimeOnly(14, 30)));
+        var vm = Create(
+            new ParseResult.Success(draft),
+            reminders,
+            afterCreated: _ =>
+            {
+                if (++refreshAttempts == 1)
+                    throw new InvalidOperationException("时间轴刷新失败");
+                return Task.CompletedTask;
+            });
+        vm.Text = "每周一、周三14:30复盘";
+        await vm.ToggleDetailsCommand.ExecuteAsync(null);
+
+        await vm.SubmitAsync();
+        await vm.SubmitAsync();
+
+        Assert.Single(reminders.Created);
+        Assert.Equal(2, refreshAttempts);
     }
 
     [Theory]
@@ -262,16 +323,21 @@ public sealed class QuickAddViewModelTests
     }
 
     [Fact]
-    public async Task Submit_command_rejects_reentrancy_during_create()
+    public async Task Direct_submit_and_command_share_one_create_interlock()
     {
         var service = new RecordingReminderService(blockCreate: true);
         var vm = Create(new ParseResult.Success(
             TestData.Draft("看书", "2026-07-30T09:00:00+08:00")), service);
         vm.Text = "明早9点看书";
 
-        var first = vm.SubmitCommand.ExecuteAsync(null);
+        var first = vm.SubmitAsync();
         await service.CreateEntered.Task;
         var second = vm.SubmitCommand.ExecuteAsync(null);
+
+        Assert.False(vm.CanEdit);
+        Assert.False(vm.SubmitCommand.CanExecute(null));
+        Assert.False(vm.ToggleDetailsCommand.CanExecute(null));
+        Assert.False(vm.HideCommand.CanExecute(null));
         service.ReleaseCreate.SetResult();
         await Task.WhenAll(first, second);
 

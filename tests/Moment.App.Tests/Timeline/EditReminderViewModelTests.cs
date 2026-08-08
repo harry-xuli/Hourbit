@@ -214,6 +214,91 @@ public sealed class EditReminderViewModelTests
         Assert.Null(vm.ErrorMessage);
     }
 
+    [Fact]
+    public async Task Identical_weekly_edit_with_failed_refresh_does_not_edit_twice()
+    {
+        var reminders = new RecordingReminderService();
+        var todos = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = CreatePersisted(
+            reminders,
+            todos,
+            recurrenceText: "每周 周一、周三",
+            afterSaved: _ =>
+            {
+                if (++refreshAttempts == 1)
+                    throw new InvalidOperationException("时间轴刷新失败");
+                return Task.CompletedTask;
+            });
+
+        await vm.SaveAsync();
+        await vm.SaveAsync();
+
+        Assert.Single(reminders.Edits);
+        Assert.Equal(2, refreshAttempts);
+    }
+
+    [Fact]
+    public async Task Converted_reminder_with_failed_refresh_allows_only_refresh_retry()
+    {
+        var reminders = new RecordingReminderService();
+        var todos = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = CreatePersisted(
+            reminders,
+            todos,
+            afterSaved: _ =>
+            {
+                if (++refreshAttempts == 1)
+                    throw new InvalidOperationException("时间轴刷新失败");
+                return Task.CompletedTask;
+            });
+        vm.TimeText = "";
+        var originalTitle = vm.Title;
+
+        await vm.SaveAsync();
+
+        Assert.False(todos.ReminderSourceExists);
+        Assert.True(vm.IsRefreshOnly);
+        Assert.False(vm.CanEdit);
+        Assert.False(vm.CanCancel);
+        Assert.Equal("重试刷新", vm.PrimaryActionText);
+        Assert.Contains("已转换为待办", vm.ErrorMessage);
+
+        vm.Title = "不得写入已删除源";
+        vm.TimeText = "15:00";
+        await vm.SaveAsync();
+
+        Assert.Equal(originalTitle, vm.Title);
+        Assert.Equal("", vm.TimeText);
+        Assert.Single(todos.ReminderConversions);
+        Assert.Empty(reminders.Edits);
+        Assert.Equal(2, refreshAttempts);
+    }
+
+    [Fact]
+    public async Task Direct_save_and_save_command_share_one_atomic_busy_gate()
+    {
+        var reminders = new BlockingReminderService();
+        var todos = new RecordingTodoService();
+        var vm = CreatePersisted(reminders, todos);
+
+        var first = vm.SaveAsync();
+        await reminders.EditEntered.Task;
+        var second = vm.SaveCommand.ExecuteAsync(null);
+
+        Assert.True(vm.IsBusy);
+        Assert.False(vm.CanEdit);
+        Assert.False(vm.CanCancel);
+        Assert.False(vm.SaveCommand.CanExecute(null));
+        Assert.Equal(1, reminders.EditCalls);
+
+        reminders.ReleaseEdit.SetResult();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(1, reminders.EditCalls);
+    }
+
     private static EditReminderViewModel Create()
     {
         var item = new TimelineItemViewModel(
@@ -223,16 +308,17 @@ public sealed class EditReminderViewModelTests
     }
 
     private static EditReminderViewModel CreatePersisted(
-        RecordingReminderService reminders,
+        IReminderService reminders,
         RecordingTodoService todos,
         SeriesScope editScope = SeriesScope.OccurrenceOnly,
         bool recurring = false,
+        string? recurrenceText = null,
         Func<CancellationToken, Task<SeriesScope?>>? selectConversionScope = null,
         Func<CancellationToken, Task>? afterSaved = null)
     {
         var row = TestData.Row("会议", "2026-08-03T10:30:00+08:00") with
         {
-            RecurrenceText = recurring ? "每天" : null
+            RecurrenceText = recurrenceText ?? (recurring ? "每天" : null)
         };
         var item = new TimelineItemViewModel(
             row,
@@ -272,6 +358,7 @@ public sealed class EditReminderViewModelTests
     {
         public List<(Guid OccurrenceId, TodoDraft Draft, SeriesScope Scope)> ReminderConversions { get; } = [];
         public Exception? ConversionFailure { get; init; }
+        public bool ReminderSourceExists { get; private set; } = true;
 
         public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
             throw new NotSupportedException();
@@ -293,8 +380,35 @@ public sealed class EditReminderViewModelTests
         {
             if (ConversionFailure is not null)
                 throw ConversionFailure;
+            if (!ReminderSourceExists)
+                throw new InvalidOperationException("提醒源已删除。");
             ReminderConversions.Add((occurrenceId, draft, scope));
+            ReminderSourceExists = false;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class BlockingReminderService : IReminderService
+    {
+        public TaskCompletionSource EditEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseEdit { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int EditCalls { get; private set; }
+
+        public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public async Task EditAsync(
+            Guid occurrenceId,
+            ReminderDraft draft,
+            SeriesScope scope,
+            CancellationToken ct)
+        {
+            EditCalls++;
+            EditEntered.TrySetResult();
+            await ReleaseEdit.Task.WaitAsync(ct);
+        }
+        public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 }

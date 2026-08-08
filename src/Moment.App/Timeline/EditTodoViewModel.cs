@@ -16,7 +16,9 @@ public sealed class EditTodoViewModel : ObservableObject
     private string _timeText = string.Empty;
     private ReminderImportance _selectedImportance;
     private string? _errorMessage;
-    private TodoPersistenceOperation? _persistedOperation;
+    private TodoDraft? _persistedSaveDraft;
+    private string? _refreshOnlyMessage;
+    private int _operationInProgress;
 
     public EditTodoViewModel(TodoDraft draft, TimeZoneInfo zone)
     {
@@ -51,6 +53,11 @@ public sealed class EditTodoViewModel : ObservableObject
 
     public Guid TodoId { get; }
     public bool IsCompleted { get; }
+    public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
+    public bool IsRefreshOnly => _refreshOnlyMessage is not null;
+    public bool CanEdit => !IsBusy && !IsRefreshOnly;
+    public bool CanCancel => CanEdit;
+    public string PrimaryActionText => IsRefreshOnly ? "重试刷新" : "保存";
 
     public IReadOnlyList<EditOption<ReminderImportance>> Importances { get; } =
     [
@@ -65,13 +72,21 @@ public sealed class EditTodoViewModel : ObservableObject
     public string Title
     {
         get => _title;
-        set => SetProperty(ref _title, value ?? string.Empty);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _title, value ?? string.Empty);
+        }
     }
 
     public string DateText
     {
         get => _dateText;
-        set => SetProperty(ref _dateText, value ?? string.Empty);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _dateText, value ?? string.Empty);
+        }
     }
 
     public string TimeText
@@ -79,6 +94,8 @@ public sealed class EditTodoViewModel : ObservableObject
         get => _timeText;
         set
         {
+            if (!CanEdit)
+                return;
             if (SetProperty(ref _timeText, value ?? string.Empty))
                 OnPropertyChanged(nameof(ConvertsToReminder));
         }
@@ -87,7 +104,11 @@ public sealed class EditTodoViewModel : ObservableObject
     public ReminderImportance SelectedImportance
     {
         get => _selectedImportance;
-        set => SetProperty(ref _selectedImportance, value);
+        set
+        {
+            if (CanEdit)
+                SetProperty(ref _selectedImportance, value);
+        }
     }
 
     public bool ConvertsToReminder => !string.IsNullOrWhiteSpace(TimeText);
@@ -180,26 +201,52 @@ public sealed class EditTodoViewModel : ObservableObject
     {
         if (_service is null)
             throw new InvalidOperationException("This todo editor is not connected to persistence.");
-        if (!TryBuildDraft(out var draft))
+        if (!TryBeginOperation())
             return;
-
-        TodoPersistenceOperation operation;
-        Func<CancellationToken, Task> persist;
-        switch (draft)
+        var ordinarySaveAwaitingRefresh = false;
+        try
         {
-            case TodoDraft todoDraft:
-                operation = new EditTodoOperation(todoDraft);
-                persist = token => _service.EditAsync(TodoId, todoDraft, token);
-                break;
-            case ReminderDraft reminderDraft:
-                operation = new ConvertTodoOperation(reminderDraft);
-                persist = token =>
-                    _service.ConvertToReminderAsync(TodoId, reminderDraft, token);
-                break;
-            default:
-                throw new InvalidOperationException("Unsupported todo edit result.");
+            if (IsRefreshOnly)
+            {
+                await FinishRefreshAsync(ct);
+                return;
+            }
+            if (!TryBuildDraft(out var draft))
+                return;
+
+            switch (draft)
+            {
+                case TodoDraft todoDraft:
+                    if (!TodoDraftEquals(_persistedSaveDraft, todoDraft))
+                    {
+                        await _service.EditAsync(TodoId, todoDraft, ct);
+                        _persistedSaveDraft = todoDraft;
+                    }
+                    ordinarySaveAwaitingRefresh = true;
+                    break;
+                case ReminderDraft reminderDraft:
+                    await _service.ConvertToReminderAsync(TodoId, reminderDraft, ct);
+                    _persistedSaveDraft = null;
+                    EnterRefreshOnly(
+                        "待办已转换为提醒，但时间轴刷新失败。请仅重试刷新。");
+                    break;
+                default:
+                    throw new InvalidOperationException("Unsupported todo edit result.");
+            }
+            await FinishRefreshAsync(ct);
         }
-        await PersistAndCloseAsync(operation, persist, ct);
+        catch (Exception exception)
+        {
+            ReportOperationFailure(
+                exception,
+                ordinarySaveAwaitingRefresh
+                    ? "待办已保存，但时间轴刷新失败。可修改后再次保存，或直接重试保存。"
+                    : null);
+        }
+        finally
+        {
+            EndOperation();
+        }
     }
 
     public Task CompleteAsync() => CompleteAsync(CancellationToken.None);
@@ -210,10 +257,25 @@ public sealed class EditTodoViewModel : ObservableObject
             throw new InvalidOperationException("This todo editor is not connected to persistence.");
         if (IsCompleted)
             return;
-        await PersistAndCloseAsync(
-            CompleteTodoOperation.Instance,
-            token => _service.CompleteAsync(TodoId, token),
-            ct);
+        if (!TryBeginOperation())
+            return;
+        try
+        {
+            if (IsRefreshOnly)
+                return;
+            await _service.CompleteAsync(TodoId, ct);
+            _persistedSaveDraft = null;
+            EnterRefreshOnly("待办已完成，但时间轴刷新失败。请仅重试刷新。");
+            await FinishRefreshAsync(ct);
+        }
+        catch (Exception exception)
+        {
+            ReportOperationFailure(exception, null);
+        }
+        finally
+        {
+            EndOperation();
+        }
     }
 
     public Task DeleteAsync() => DeleteAsync(CancellationToken.None);
@@ -222,40 +284,95 @@ public sealed class EditTodoViewModel : ObservableObject
     {
         if (_service is null)
             throw new InvalidOperationException("This todo editor is not connected to persistence.");
-        await PersistAndCloseAsync(
-            DeleteTodoOperation.Instance,
-            token => _service.DeleteAsync(TodoId, token),
-            ct);
+        if (!TryBeginOperation())
+            return;
+        try
+        {
+            if (IsRefreshOnly)
+                return;
+            await _service.DeleteAsync(TodoId, ct);
+            _persistedSaveDraft = null;
+            EnterRefreshOnly("待办已删除，但时间轴刷新失败。请仅重试刷新。");
+            await FinishRefreshAsync(ct);
+        }
+        catch (Exception exception)
+        {
+            ReportOperationFailure(exception, null);
+        }
+        finally
+        {
+            EndOperation();
+        }
     }
 
     private void InitializeCommands()
     {
-        SaveCommand = new AsyncCommand((_, ct) => SaveAsync(ct));
-        CompleteCommand = new AsyncCommand((_, ct) => CompleteAsync(ct), _ => !IsCompleted);
-        DeleteCommand = new AsyncCommand((_, ct) => DeleteAsync(ct));
+        SaveCommand = new AsyncCommand((_, ct) => SaveAsync(ct), _ => !IsBusy);
+        CompleteCommand = new AsyncCommand(
+            (_, ct) => CompleteAsync(ct), _ => !IsCompleted && CanEdit);
+        DeleteCommand = new AsyncCommand((_, ct) => DeleteAsync(ct), _ => CanEdit);
     }
 
-    private async Task PersistAndCloseAsync(
-        TodoPersistenceOperation operation,
-        Func<CancellationToken, Task> persist,
-        CancellationToken ct)
+    private bool TryBeginOperation()
     {
-        try
-        {
-            ErrorMessage = null;
-            if (!Equals(_persistedOperation, operation))
-            {
-                await persist(ct);
-                _persistedOperation = operation;
-            }
-            await _afterSaved(ct);
-            _persistedOperation = null;
-            CloseRequested?.Invoke(this, EventArgs.Empty);
-        }
-        catch (Exception exception)
-        {
-            ErrorMessage = exception.Message;
-        }
+        if (Interlocked.CompareExchange(ref _operationInProgress, 1, 0) != 0)
+            return false;
+        NotifyOperationStateChanged();
+        return true;
+    }
+
+    private void EndOperation()
+    {
+        Volatile.Write(ref _operationInProgress, 0);
+        NotifyOperationStateChanged();
+    }
+
+    private void EnterRefreshOnly(string message)
+    {
+        _refreshOnlyMessage = message;
+        NotifyRefreshOnlyChanged();
+    }
+
+    private async Task FinishRefreshAsync(CancellationToken ct)
+    {
+        await _afterSaved(ct);
+        _persistedSaveDraft = null;
+        _refreshOnlyMessage = null;
+        ErrorMessage = null;
+        NotifyRefreshOnlyChanged();
+        CloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ReportOperationFailure(Exception exception, string? savedMessage)
+    {
+        ErrorMessage = IsRefreshOnly
+            ? $"{_refreshOnlyMessage} {exception.Message}"
+            : savedMessage is not null
+                ? $"{savedMessage} {exception.Message}"
+                : exception.Message;
+    }
+
+    private void NotifyOperationStateChanged()
+    {
+        OnPropertyChanged(nameof(IsBusy));
+        OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(CanCancel));
+        RaiseOperationCanExecuteChanged();
+    }
+
+    private void NotifyRefreshOnlyChanged()
+    {
+        OnPropertyChanged(nameof(IsRefreshOnly));
+        OnPropertyChanged(nameof(CanEdit));
+        OnPropertyChanged(nameof(PrimaryActionText));
+        RaiseOperationCanExecuteChanged();
+    }
+
+    private void RaiseOperationCanExecuteChanged()
+    {
+        SaveCommand.RaiseCanExecuteChanged();
+        CompleteCommand.RaiseCanExecuteChanged();
+        DeleteCommand.RaiseCanExecuteChanged();
     }
 
     private DateTimeOffset ResolveLocal(DateTime local)
@@ -272,15 +389,9 @@ public sealed class EditTodoViewModel : ObservableObject
     private static string FormatDate(DateOnly? date) =>
         date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
 
-    private abstract record TodoPersistenceOperation;
-    private sealed record EditTodoOperation(TodoDraft Draft) : TodoPersistenceOperation;
-    private sealed record ConvertTodoOperation(ReminderDraft Draft) : TodoPersistenceOperation;
-    private sealed record CompleteTodoOperation : TodoPersistenceOperation
-    {
-        public static CompleteTodoOperation Instance { get; } = new();
-    }
-    private sealed record DeleteTodoOperation : TodoPersistenceOperation
-    {
-        public static DeleteTodoOperation Instance { get; } = new();
-    }
+    private static bool TodoDraftEquals(TodoDraft? left, TodoDraft right) =>
+        left is not null &&
+        string.Equals(left.Title, right.Title, StringComparison.Ordinal) &&
+        left.DueDate == right.DueDate &&
+        left.Importance == right.Importance;
 }

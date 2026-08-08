@@ -34,7 +34,8 @@ public sealed class QuickAddViewModel : ObservableObject
     private bool _areDetailsVisible;
     private EditReminderViewModel? _details;
     private EditTodoViewModel? _todoDetails;
-    private ItemDraft? _persistedDraft;
+    private int _operationInProgress;
+    private string? _refreshOnlyMessage;
 
     public QuickAddViewModel(
         IChineseTimeParser parser,
@@ -53,19 +54,20 @@ public sealed class QuickAddViewModel : ObservableObject
         _zone = zone ?? throw new ArgumentNullException(nameof(zone));
         _culture = culture ?? throw new ArgumentNullException(nameof(culture));
         _afterCreated = afterCreated ?? (_ => Task.CompletedTask);
-        SubmitCommand = new AsyncCommand((_, ct) => SubmitAsync(ct));
+        SubmitCommand = new AsyncCommand((_, ct) => SubmitAsync(ct), _ => !IsBusy);
         ChooseCommand = new AsyncCommand((choice, _) =>
-            choice is QuickAddChoiceViewModel value ? ChooseAsync(value) : Task.CompletedTask);
+            choice is QuickAddChoiceViewModel value ? ChooseAsync(value) : Task.CompletedTask,
+            _ => CanEdit);
         ToggleDetailsCommand = new AsyncCommand((_, _) =>
         {
             AreDetailsVisible = !AreDetailsVisible;
             return Task.CompletedTask;
-        });
+        }, _ => CanEdit);
         HideCommand = new AsyncCommand((_, _) =>
         {
             HideRequested?.Invoke(this, EventArgs.Empty);
             return Task.CompletedTask;
-        });
+        }, _ => CanEdit);
     }
 
     public event EventHandler? HideRequested;
@@ -84,6 +86,9 @@ public sealed class QuickAddViewModel : ObservableObject
         }
     }
     public bool IsChoicePanelVisible => State == QuickAddState.Ambiguous;
+    public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
+    public bool IsRefreshOnly => _refreshOnlyMessage is not null;
+    public bool CanEdit => !IsBusy && !IsRefreshOnly;
     public string GuidanceText => "请选择具体时间";
     public string FooterText => "Enter 创建 · Tab 更多选项 · Esc 隐藏";
     public string? PreviewText
@@ -124,6 +129,8 @@ public sealed class QuickAddViewModel : ObservableObject
         get => _text;
         set
         {
+            if (!CanEdit)
+                return;
             if (SetProperty(ref _text, value ?? string.Empty))
                 Parse();
         }
@@ -131,7 +138,7 @@ public sealed class QuickAddViewModel : ObservableObject
 
     public bool ShowDetails()
     {
-        if ((Details is null && TodoDetails is null) || AreDetailsVisible)
+        if (!CanEdit || (Details is null && TodoDetails is null) || AreDetailsVisible)
             return false;
         AreDetailsVisible = true;
         return true;
@@ -141,10 +148,18 @@ public sealed class QuickAddViewModel : ObservableObject
 
     public async Task SubmitAsync(CancellationToken ct)
     {
-        if (_draft is null || State != QuickAddState.Success)
+        if (!TryBeginOperation())
             return;
         try
         {
+            if (IsRefreshOnly)
+            {
+                await FinishRefreshAsync(ct);
+                return;
+            }
+
+            if (_draft is null || State != QuickAddState.Success)
+                return;
             ErrorMessage = null;
             var draft = _draft;
             if (AreDetailsVisible && Details is not null)
@@ -164,28 +179,30 @@ public sealed class QuickAddViewModel : ObservableObject
                     return;
                 }
             }
-            if (!Equals(_persistedDraft, draft))
+            switch (draft)
             {
-                switch (draft)
-                {
-                    case ReminderDraft reminderDraft:
-                        await _reminderService.CreateAsync(reminderDraft, ct);
-                        break;
-                    case TodoDraft todoDraft:
-                        await _todoService.CreateAsync(todoDraft, ct);
-                        break;
-                    default:
-                        throw new InvalidOperationException("不支持的快速创建类型。");
-                }
-                _persistedDraft = draft;
+                case ReminderDraft reminderDraft:
+                    await _reminderService.CreateAsync(reminderDraft, ct);
+                    EnterRefreshOnly("提醒已创建，但时间轴刷新失败。请按 Enter 重试刷新。");
+                    break;
+                case TodoDraft todoDraft:
+                    await _todoService.CreateAsync(todoDraft, ct);
+                    EnterRefreshOnly("待办已创建，但时间轴刷新失败。请按 Enter 重试刷新。");
+                    break;
+                default:
+                    throw new InvalidOperationException("不支持的快速创建类型。");
             }
-            await _afterCreated(ct);
-            _persistedDraft = null;
-            HideRequested?.Invoke(this, EventArgs.Empty);
+            await FinishRefreshAsync(ct);
         }
         catch (Exception exception)
         {
-            ErrorMessage = exception.Message;
+            ErrorMessage = IsRefreshOnly
+                ? $"{_refreshOnlyMessage} {exception.Message}"
+                : exception.Message;
+        }
+        finally
+        {
+            EndOperation();
         }
     }
 
@@ -204,7 +221,6 @@ public sealed class QuickAddViewModel : ObservableObject
     private void Parse()
     {
         _draft = null;
-        _persistedDraft = null;
         Details = null;
         TodoDetails = null;
         PreviewText = null;
@@ -270,5 +286,53 @@ public sealed class QuickAddViewModel : ObservableObject
     {
         var local = TimeZoneInfo.ConvertTime(draft.DueAt, _zone);
         return $"提醒 · {local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
+    }
+
+    private bool TryBeginOperation()
+    {
+        if (Interlocked.CompareExchange(ref _operationInProgress, 1, 0) != 0)
+            return false;
+        NotifyOperationStateChanged();
+        return true;
+    }
+
+    private void EndOperation()
+    {
+        Volatile.Write(ref _operationInProgress, 0);
+        NotifyOperationStateChanged();
+    }
+
+    private void EnterRefreshOnly(string message)
+    {
+        _refreshOnlyMessage = message;
+        OnPropertyChanged(nameof(IsRefreshOnly));
+        OnPropertyChanged(nameof(CanEdit));
+        RaiseOperationCanExecuteChanged();
+    }
+
+    private async Task FinishRefreshAsync(CancellationToken ct)
+    {
+        await _afterCreated(ct);
+        _refreshOnlyMessage = null;
+        ErrorMessage = null;
+        OnPropertyChanged(nameof(IsRefreshOnly));
+        OnPropertyChanged(nameof(CanEdit));
+        RaiseOperationCanExecuteChanged();
+        HideRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void NotifyOperationStateChanged()
+    {
+        OnPropertyChanged(nameof(IsBusy));
+        OnPropertyChanged(nameof(CanEdit));
+        RaiseOperationCanExecuteChanged();
+    }
+
+    private void RaiseOperationCanExecuteChanged()
+    {
+        SubmitCommand.RaiseCanExecuteChanged();
+        ChooseCommand.RaiseCanExecuteChanged();
+        ToggleDetailsCommand.RaiseCanExecuteChanged();
+        HideCommand.RaiseCanExecuteChanged();
     }
 }

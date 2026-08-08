@@ -184,6 +184,36 @@ public sealed class QuickAddWindowTests
         });
     }
 
+    [Fact]
+    public Task Created_item_with_failed_refresh_disables_sentence_input() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var due = DateTimeOffset.Parse("2026-08-05T14:30:00+08:00");
+            var vm = new QuickAddViewModel(
+                new StubParser(new ParseResult.Success(new ReminderDraft(
+                    "开会", due, ReminderKind.Plan, ReminderImportance.Normal, null))),
+                new ReminderServiceStub(),
+                new TodoServiceStub(),
+                new LocalClock(due.AddDays(-1)),
+                TimeZoneInfo.CreateCustomTimeZone(
+                    "UTC+08-refresh-only", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+                CultureInfo.GetCultureInfo("zh-CN"),
+                _ => throw new InvalidOperationException("时间轴刷新失败"));
+            vm.Text = "8月5日14:30开会";
+            var window = new QuickAddWindow { DataContext = vm };
+            window.Show();
+            window.UpdateLayout();
+
+            await vm.SubmitAsync();
+            window.UpdateLayout();
+
+            var input = Assert.IsType<TextBox>(window.FindName("InputBox"));
+            Assert.False(input.IsEnabled);
+            Assert.True(window.IsVisible);
+            Assert.Contains("重试刷新", vm.ErrorMessage);
+            window.Close();
+        });
+
     private static QuickAddViewModel CreateWithoutTestSupport()
     {
         var due = new DateTimeOffset(
