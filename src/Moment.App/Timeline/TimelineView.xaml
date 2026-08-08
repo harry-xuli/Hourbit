@@ -193,7 +193,6 @@
 
                 <StackPanel x:Name="TodoSection"
                             Grid.Row="0"
-                            automation:AutomationProperties.Name="待办事项"
                             Margin="26,8,26,0">
                     <TextBlock x:Name="TodoSectionHeader"
                                Text="待办事项"

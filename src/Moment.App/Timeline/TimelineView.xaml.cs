@@ -3,7 +3,9 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using ItemsControl = System.Windows.Controls.ItemsControl;
 using ListBox = System.Windows.Controls.ListBox;
+using ListBoxItem = System.Windows.Controls.ListBoxItem;
 using SelectionChangedEventArgs = System.Windows.Controls.SelectionChangedEventArgs;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -29,20 +31,62 @@ public partial class TimelineView : UserControl
             return;
 
         var modifiers = eventArgs.KeyboardDevice.Modifiers;
+        if ((eventArgs.Key, modifiers) == (Key.N, ModifierKeys.Control))
+        {
+            ExecuteIfAvailable(_viewModel.OpenQuickAddCommand, eventArgs);
+            return;
+        }
+
         var command = (eventArgs.Key, modifiers) switch
         {
             (Key.Enter, ModifierKeys.None) => _viewModel.EditCommand,
             (Key.Delete, ModifierKeys.None) => _viewModel.DeleteCommand,
-            (Key.N, ModifierKeys.Control) => _viewModel.OpenQuickAddCommand,
             (Key.Space, ModifierKeys.Control | ModifierKeys.Shift) =>
                 _viewModel.CompleteCommand,
             _ => null
         };
-        if (command?.CanExecute(null) != true)
+        if (command is null)
             return;
 
+        var row = FindTimelineRow(eventArgs.OriginalSource as DependencyObject)
+            ?? FindTimelineRow(Keyboard.FocusedElement as DependencyObject);
+        switch (row?.DataContext)
+        {
+            case TodoTimelineItemViewModel todo:
+                _viewModel.SelectedTodo = todo;
+                break;
+            case TimelineItemViewModel reminder:
+                _viewModel.SelectedItem = reminder;
+                break;
+            default:
+                return;
+        }
+
+        ExecuteIfAvailable(command, eventArgs);
+    }
+
+    private static void ExecuteIfAvailable(
+        System.Windows.Input.ICommand command,
+        KeyEventArgs eventArgs)
+    {
+        if (!command.CanExecute(null))
+            return;
         eventArgs.Handled = true;
         command.Execute(null);
+    }
+
+    private ListBoxItem? FindTimelineRow(DependencyObject? source)
+    {
+        if (source is null)
+            return null;
+
+        foreach (var list in DescendantLists(this))
+        {
+            if (ItemsControl.ContainerFromElement(list, source)
+                is ListBoxItem row)
+                return row;
+        }
+        return null;
     }
 
     private void OnTimelineSelectionChanged(

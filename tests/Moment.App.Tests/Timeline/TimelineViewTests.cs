@@ -128,15 +128,13 @@ public sealed class TimelineViewTests
                 view.FindName("CompletedTodosExpander"));
             var completedSummary = Assert.IsType<StackPanel>(
                 view.FindName("CompletedSummary"));
-            var todoSection = Assert.IsType<StackPanel>(
-                view.FindName("TodoSection"));
             var pending = Assert.IsType<ListBox>(view.FindName("PendingTodoList"));
             var todoRow = Assert.IsType<ListBoxItem>(
                 pending.ItemContainerGenerator.ContainerFromIndex(0));
 
             Assert.Equal("待办事项", todoHeader.Text);
-            Assert.Equal("待办事项", PeerName(todoSection));
             Assert.Equal("待办事项", PeerName(todoHeader));
+            Assert.Equal("待办事项列表", PeerName(pending));
             Assert.Equal("定时提醒", reminderHeader.Text);
             Assert.Equal("定时提醒", PeerName(reminderHeader));
             Assert.Equal(
@@ -175,7 +173,10 @@ public sealed class TimelineViewTests
                 list.ItemContainerGenerator.ContainerFromIndex(0));
             Assert.True(row.Focus());
             Assert.Same(row, Keyboard.FocusedElement);
-            Assert.Same(viewModel.SelectedTodo, list.SelectedItem);
+            viewModel.SelectedItem = viewModel.Items[0];
+            Assert.Same(row, Keyboard.FocusedElement);
+            Assert.NotNull(viewModel.SelectedItem);
+            Assert.Null(viewModel.SelectedTodo);
 
             Assert.True(RaiseKey(row, Key.Enter).Handled);
             Assert.Equal([todo.TodoId], dialogs.EditedTodoIds);
@@ -229,8 +230,10 @@ public sealed class TimelineViewTests
                 list.ItemContainerGenerator.ContainerFromIndex(0));
             Assert.True(row.Focus());
             Assert.Same(row, Keyboard.FocusedElement);
-            Assert.Same(viewModel.SelectedItem, list.SelectedItem);
-            Assert.Null(viewModel.SelectedTodo);
+            viewModel.SelectedTodo = viewModel.PendingTodos[0];
+            Assert.Same(row, Keyboard.FocusedElement);
+            Assert.NotNull(viewModel.SelectedTodo);
+            Assert.Null(viewModel.SelectedItem);
 
             Assert.True(RaiseKey(row, Key.Enter).Handled);
             Assert.Equal([reminder.OccurrenceId], dialogs.EditedReminderIds);
@@ -253,6 +256,52 @@ public sealed class TimelineViewTests
             Assert.Equal([reminder.OccurrenceId], actions.CompletedOccurrenceIds);
             Assert.Empty(todos.CompletedTodoIds);
             await System.Windows.Threading.Dispatcher.Yield();
+        });
+
+    [Fact]
+    public Task Item_shortcuts_ignore_button_and_section_focus_but_ctrl_n_remains_global() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var todo = TodoRow("旧选择待办", new DateOnly(2026, 7, 29));
+            var reminder = TestData.Row(
+                "旧选择提醒", "2026-07-29T10:00:00+08:00");
+            var query = new QueryStub(new TimelineSnapshot(
+                [todo], [reminder], 0, 0));
+            var todos = new TodoServiceStub();
+            var actions = new ActionServiceStub();
+            var dialogs = new DialogStub();
+            var reminders = new ReminderServiceStub();
+            var viewModel = Create(
+                query, actions, todos, reminders, dialogs);
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var button = Assert.IsType<Button>(
+                view.FindName("NewReminderButton"));
+            var section = Assert.IsType<TextBlock>(
+                view.FindName("TodoSectionHeader"));
+            section.Focusable = true;
+
+            foreach (var target in new UIElement[] { button, section })
+            {
+                Assert.True(target.Focus());
+                Assert.Same(target, Keyboard.FocusedElement);
+                Assert.False(RaiseKey(target, Key.Enter).Handled);
+                Assert.False(RaiseKey(target, Key.Delete).Handled);
+                Assert.False(RaiseKey(
+                    target,
+                    Key.Space,
+                    ModifierKeys.Control | ModifierKeys.Shift).Handled);
+                Assert.True(RaiseKey(
+                    target, Key.N, ModifierKeys.Control).Handled);
+            }
+
+            Assert.Empty(dialogs.EditedTodoIds);
+            Assert.Empty(dialogs.EditedReminderIds);
+            Assert.Empty(todos.DeletedTodoIds);
+            Assert.Empty(reminders.DeletedOccurrenceIds);
+            Assert.Empty(todos.CompletedTodoIds);
+            Assert.Empty(actions.CompletedOccurrenceIds);
+            Assert.Equal(2, dialogs.QuickAddCalls);
         });
 
     [Fact]
@@ -381,9 +430,9 @@ public sealed class TimelineViewTests
 
     private static string PeerName(FrameworkElement element)
     {
-        var peer = FrameworkElementAutomationPeer.CreatePeerForElement(element)
-            ?? new FrameworkElementAutomationPeer(element);
-        return peer.GetName();
+        var peer = FrameworkElementAutomationPeer.CreatePeerForElement(element);
+        Assert.NotNull(peer);
+        return peer!.GetName();
     }
 
     private static KeyEventArgs RaiseKey(
