@@ -126,6 +126,49 @@ public sealed class BackupServiceTests
         Assert.False(File.Exists(destination));
     }
 
+    [Theory]
+    [InlineData("DROP TABLE action_log;")]
+    [InlineData("DROP INDEX ix_occurrences_active_state_due_at_utc; CREATE INDEX ix_occurrences_active_state_due_at_utc ON occurrences(due_at_utc, state) WHERE deleted_at IS NULL;")]
+    [InlineData("DELETE FROM schema_info WHERE version = 2;")]
+    public async Task Export_rejects_an_incomplete_or_malformed_version_four_schema(
+        string corruptionSql)
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        await using (var connection = await DatabaseMigrator.OpenConnectionAsync(
+                         TestBackupFactory.DatabasePath(temp.Path), default))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = corruptionSql;
+            await command.ExecuteNonQueryAsync();
+        }
+        var destination = Path.Combine(temp.Path, "corrupt-v4.moment-backup");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            TestBackupFactory.Create(temp.Path).ExportAsync(destination, default));
+
+        Assert.False(File.Exists(destination));
+    }
+
+    [Fact]
+    public async Task Restore_rejects_a_hash_valid_version_four_package_missing_action_log()
+    {
+        using var temp = new TempDirectory();
+        await TestBackupFactory.InitializeAsync(temp.Path);
+        var path = Path.Combine(temp.Path, "missing-action-log.moment-backup");
+        var service = TestBackupFactory.Create(temp.Path);
+        await service.ExportAsync(path, default);
+        await TestBackupFactory.MutateDatabaseEntryAsync(
+            path, "DROP TABLE action_log;");
+        await TestBackupFactory.ChangeDatabaseAsync(temp.Path, "unchanged");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.RestoreAsync(path, default));
+
+        Assert.Equal("unchanged",
+            await TestBackupFactory.ReadMarkerAsync(temp.Path));
+    }
+
     public static TheoryData<string> QuotedGlobCorruptions =>
         new()
         {
@@ -197,7 +240,16 @@ public sealed class BackupServiceTests
                 .Replace("id TEXT PRIMARY KEY", "ID TEXT PRIMARY KEY",
                     StringComparison.Ordinal);
             await using var rebuild = connection.CreateCommand();
-            rebuild.CommandText = $"DROP TABLE todos; {mixedCaseSql};";
+            rebuild.CommandText = $"""
+                DROP TABLE todos;
+                {mixedCaseSql};
+                CREATE INDEX ix_todos_active_due_date
+                    ON todos(due_date, id) WHERE deleted_at IS NULL;
+                CREATE INDEX ix_todos_deleted_due_date
+                    ON todos(deleted_at, due_date);
+                CREATE INDEX ix_todos_deleted_completed_at
+                    ON todos(deleted_at, completed_at);
+                """;
             await rebuild.ExecuteNonQueryAsync();
         }
         var destination = Path.Combine(temp.Path, "mixed-case.moment-backup");

@@ -264,7 +264,9 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM occurrences
-                WHERE item_id = $itemId AND due_at_utc = $dueAtUtc
+                WHERE item_id = $itemId
+                  AND due_at_utc = $dueAtUtc
+                  AND deleted_at IS NULL
             );
             """;
         command.Parameters.AddWithValue("$id", occurrence.Id.ToString("D"));

@@ -81,6 +81,46 @@ internal static class TestBackupFactory
         await RewriteAsync(path, entries);
     }
 
+    internal static async Task MutateDatabaseEntryAsync(
+        string path,
+        string sql)
+    {
+        var entries = await ReadEntriesAsync(path);
+        var databasePath = Path.Combine(
+            Path.GetDirectoryName(path)!,
+            $".mutated-{Guid.NewGuid():N}.db");
+        try
+        {
+            await File.WriteAllBytesAsync(databasePath, entries["moment.db"]);
+            await using (var connection = new SqliteConnection(
+                             $"Data Source={databasePath};Pooling=False"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                await command.ExecuteNonQueryAsync();
+            }
+
+            entries["moment.db"] = await File.ReadAllBytesAsync(databasePath);
+            using var document = JsonDocument.Parse(entries["manifest.json"]);
+            var root = document.RootElement;
+            entries["manifest.json"] = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                formatVersion = root.GetProperty("formatVersion").GetInt32(),
+                schemaVersion = root.GetProperty("schemaVersion").GetInt32(),
+                createdAt = root.GetProperty("createdAt").GetDateTimeOffset(),
+                sha256 = Convert.ToHexStringLower(
+                    SHA256.HashData(entries["moment.db"]))
+            });
+            await RewriteAsync(path, entries);
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+                File.Delete(databasePath);
+        }
+    }
+
     internal static async Task SetManifestSchemaVersionAsync(
         string path,
         int schemaVersion)

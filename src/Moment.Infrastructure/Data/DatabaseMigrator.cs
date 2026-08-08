@@ -49,6 +49,17 @@ public static class DatabaseMigrator
             """;
         await command.ExecuteNonQueryAsync(ct);
 
+        var versionFourMarkers =
+            await DatabaseSchemaValidator.CountVersionMarkersAsync(
+                connection, (SqliteTransaction)transaction, 4, ct);
+        if (versionFourMarkers > 0)
+        {
+            await DatabaseSchemaValidator.ValidateVersionFourAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
         command.CommandText = "SELECT COUNT(*) FROM schema_info WHERE version = 1;";
         var exists = Convert.ToInt32(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture) > 0;
         if (!exists)
@@ -141,59 +152,75 @@ public static class DatabaseMigrator
             await command.ExecuteNonQueryAsync(ct);
         }
 
-        var versionFourMarkers =
-            await DatabaseSchemaValidator.CountVersionMarkersAsync(
-                connection, (SqliteTransaction)transaction, 4, ct);
-        if (versionFourMarkers > 1)
+        await DatabaseSchemaValidator.ValidateVersionThreeUpgradeSourceAsync(
+            connection, (SqliteTransaction)transaction, ct);
+        if (await HasColumnAsync(
+                connection, (SqliteTransaction)transaction,
+                "occurrences", "deleted_at", ct) ||
+            await HasColumnAsync(
+                connection, (SqliteTransaction)transaction,
+                "todos", "deleted_at", ct))
         {
             throw new InvalidDataException(
-                $"Schema version 4 must have exactly one marker; found {versionFourMarkers}.");
+                "Schema version 4 columns exist without a version marker.");
         }
-        if (versionFourMarkers == 0)
-        {
-            await DatabaseSchemaValidator.ValidateVersionThreeAsync(
-                connection, (SqliteTransaction)transaction, ct);
-            if (await HasColumnAsync(
-                    connection, (SqliteTransaction)transaction,
-                    "occurrences", "deleted_at", ct) ||
-                await HasColumnAsync(
-                    connection, (SqliteTransaction)transaction,
-                    "todos", "deleted_at", ct))
-            {
-                throw new InvalidDataException(
-                    "Schema version 4 columns exist without a version marker.");
-            }
 
-            command.CommandText = """
-                ALTER TABLE occurrences ADD COLUMN deleted_at TEXT NULL;
-                ALTER TABLE todos ADD COLUMN deleted_at TEXT NULL;
-                INSERT INTO schema_info(version) VALUES (4);
-                """;
+        await UpgradeToVersionFourAsync(command, ct);
+        foreach (var indexSql in DatabaseSchemaValidator.CreateVersionFourIndexesSql)
+        {
+            command.CommandText = indexSql;
             await command.ExecuteNonQueryAsync(ct);
         }
+
+        command.CommandText = "INSERT INTO schema_info(version) VALUES (4);";
+        await command.ExecuteNonQueryAsync(ct);
 
         await DatabaseSchemaValidator.ValidateVersionFourAsync(
             connection, (SqliteTransaction)transaction, ct);
 
-        command.CommandText = """
-            CREATE INDEX IF NOT EXISTS ix_occurrences_active_state_due_at_utc
-                ON occurrences(state, due_at_utc)
-                WHERE deleted_at IS NULL;
-            CREATE INDEX IF NOT EXISTS ix_occurrences_deleted_due_at_utc
-                ON occurrences(deleted_at, due_at_utc);
-            CREATE INDEX IF NOT EXISTS ix_occurrences_deleted_handled_at
-                ON occurrences(deleted_at, handled_at);
-            CREATE INDEX IF NOT EXISTS ix_todos_active_due_date
-                ON todos(due_date, id)
-                WHERE deleted_at IS NULL;
-            CREATE INDEX IF NOT EXISTS ix_todos_deleted_due_date
-                ON todos(deleted_at, due_date);
-            CREATE INDEX IF NOT EXISTS ix_todos_deleted_completed_at
-                ON todos(deleted_at, completed_at);
+        await transaction.CommitAsync(ct);
+    }
+
+    private static async Task UpgradeToVersionFourAsync(
+        SqliteCommand command,
+        CancellationToken ct)
+    {
+        var occurrencesSql = DatabaseSchemaValidator.CreateOccurrencesVersionFourSql.Replace(
+            "CREATE TABLE occurrences",
+            "CREATE TABLE occurrences_v4",
+            StringComparison.Ordinal);
+        var actionLogSql = DatabaseSchemaValidator.CreateActionLogVersionFourSql
+            .Replace(
+                "CREATE TABLE action_log",
+                "CREATE TABLE action_log_v4",
+                StringComparison.Ordinal)
+            .Replace(
+                "REFERENCES occurrences(id)",
+                "REFERENCES occurrences_v4(id)",
+                StringComparison.Ordinal);
+
+        command.CommandText = $"""
+            {occurrencesSql}
+            INSERT INTO occurrences_v4 (
+                id, item_id, due_at, due_at_utc, state,
+                handled_at, snooze_parent_id, deleted_at)
+            SELECT
+                id, item_id, due_at, due_at_utc, state,
+                handled_at, snooze_parent_id, NULL
+            FROM occurrences;
+
+            {actionLogSql}
+            INSERT INTO action_log_v4 (id, occurrence_id, state, handled_at)
+            SELECT id, occurrence_id, state, handled_at
+            FROM action_log;
+
+            DROP TABLE action_log;
+            DROP TABLE occurrences;
+            ALTER TABLE occurrences_v4 RENAME TO occurrences;
+            ALTER TABLE action_log_v4 RENAME TO action_log;
+            ALTER TABLE todos ADD COLUMN deleted_at TEXT NULL;
             """;
         await command.ExecuteNonQueryAsync(ct);
-
-        await transaction.CommitAsync(ct);
     }
 
     private static async Task<bool> HasColumnAsync(SqliteConnection connection, SqliteTransaction transaction,

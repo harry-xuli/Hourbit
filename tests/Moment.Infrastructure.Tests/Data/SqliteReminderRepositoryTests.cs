@@ -268,6 +268,95 @@ public sealed class SqliteReminderRepositoryTests
     }
 
     [Fact]
+    public async Task ApplyActionAsync_inserts_an_active_continuation_when_only_deleted_history_has_the_due_instant()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var repository = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var due = new DateTimeOffset(
+            2026, 8, 2, 9, 0, 0, TimeSpan.FromHours(8));
+        var item = new ReminderItem(
+            Guid.NewGuid(), "继续循环", ReminderKind.Plan,
+            ReminderImportance.Normal, due.AddHours(-1),
+            RecurrenceRule.Daily(new TimeOnly(9, 0)));
+        var current = ReminderOccurrence.Schedule(item.Id, due);
+        var deletedNext = ReminderOccurrence.Schedule(item.Id, due.AddDays(1));
+        await repository.SaveItemWithOccurrenceAsync(
+            item, current, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(deletedNext, CancellationToken.None);
+        await repository.DeleteAsync(
+            deletedNext.Id, SeriesScope.OccurrenceOnly,
+            due.AddMinutes(1), CancellationToken.None);
+        var activeNext = deletedNext with { Id = Guid.NewGuid() };
+
+        await repository.ApplyActionAsync(
+            current.Id, OccurrenceState.Completed,
+            due.AddMinutes(2), activeNext, CancellationToken.None);
+
+        var scheduled = Assert.Single(
+            await repository.GetScheduledAsync(CancellationToken.None));
+        Assert.Equal(activeNext.Id, scheduled.Occurrence.Id);
+        Assert.Equal(2, await ScalarIntAsync(path, """
+            SELECT COUNT(*)
+            FROM occurrences
+            WHERE item_id = $id AND due_at_utc = $dueAtUtc;
+            """, item.Id, ("$dueAtUtc", FormatUtcKey(activeNext.DueAt))));
+        Assert.Equal(1, await ScalarIntAsync(path, """
+            SELECT COUNT(*)
+            FROM occurrences
+            WHERE id = $id AND deleted_at IS NOT NULL;
+            """, deletedNext.Id));
+    }
+
+    [Fact]
+    public async Task SaveOccurrenceAsync_allows_only_one_concurrent_active_row_for_the_same_due_instant()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var repository = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var due = new DateTimeOffset(
+            2026, 8, 3, 9, 0, 0, TimeSpan.FromHours(8));
+        var item = ReminderItem.Create(
+            "并发唯一", ReminderKind.Plan, ReminderImportance.Normal,
+            due.AddHours(-1), due);
+        await repository.SaveItemWithOccurrenceAsync(
+            item, ReminderOccurrence.Schedule(item.Id, due),
+            CancellationToken.None);
+        var sharedDue = due.AddDays(1);
+        var first = ReminderOccurrence.Schedule(item.Id, sharedDue);
+        var second = ReminderOccurrence.Schedule(item.Id, sharedDue);
+        var start = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = new[] { first, second }.Select(async occurrence =>
+        {
+            await start.Task;
+            try
+            {
+                await repository.SaveOccurrenceAsync(
+                    occurrence, CancellationToken.None);
+                return true;
+            }
+            catch (SqliteException exception)
+                when (exception.SqliteErrorCode == 19)
+            {
+                return false;
+            }
+        }).ToArray();
+        start.SetResult();
+
+        Assert.Single(await Task.WhenAll(attempts), static inserted => inserted);
+        Assert.Equal(1, await ScalarIntAsync(path, """
+            SELECT COUNT(*)
+            FROM occurrences
+            WHERE item_id = $id
+              AND due_at_utc = $dueAtUtc
+              AND deleted_at IS NULL;
+            """, item.Id, ("$dueAtUtc", FormatUtcKey(sharedDue))));
+    }
+
+    [Fact]
     public async Task ApplyActionAsync_rolls_back_the_state_change_when_next_occurrence_breaks_a_constraint()
     {
         using var temp = new TempDirectory();
@@ -483,13 +572,16 @@ public sealed class SqliteReminderRepositoryTests
     private static async Task<int> ScalarIntAsync(
         string path,
         string sql,
-        Guid id)
+        Guid id,
+        params (string Name, object Value)[] parameters)
     {
         await using var connection =
             await DatabaseMigrator.OpenConnectionAsync(path, CancellationToken.None);
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         command.Parameters.AddWithValue("$id", id.ToString("D"));
+        foreach (var parameter in parameters)
+            command.Parameters.AddWithValue(parameter.Name, parameter.Value);
         return Convert.ToInt32(
             await command.ExecuteScalarAsync(CancellationToken.None),
             CultureInfo.InvariantCulture);
@@ -509,4 +601,7 @@ public sealed class SqliteReminderRepositoryTests
         return value is null or DBNull ? null : Convert.ToString(
             value, CultureInfo.InvariantCulture);
     }
+
+    private static string FormatUtcKey(DateTimeOffset value) =>
+        value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
 }

@@ -24,11 +24,11 @@ public interface IReminderRepository
         DateTimeOffset handledAt, ReminderOccurrence? nextOccurrence, CancellationToken ct);
     Task EditAsync(Guid occurrenceId, ReminderItem item,
         ReminderOccurrence occurrence, SeriesScope scope, CancellationToken ct);
-    Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct);
     Task DeleteAsync(
         Guid occurrenceId,
         SeriesScope scope,
         DateTimeOffset deletedAt,
-        CancellationToken ct) =>
-        DeleteAsync(occurrenceId, scope, ct);
+        CancellationToken ct);
+    Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
+        DeleteAsync(occurrenceId, scope, DateTimeOffset.UtcNow, ct);
 }

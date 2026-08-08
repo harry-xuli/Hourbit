@@ -8,6 +8,8 @@ public sealed class FakeTodoRepository : ITodoRepository
     private readonly object _gate = new();
     private readonly Dictionary<Guid, TodoItem> _items = [];
 
+    public DateTimeOffset? LastDeletedAt { get; private set; }
+
     public Task SaveAsync(TodoItem item, CancellationToken ct)
     {
         lock (_gate)
@@ -87,8 +89,12 @@ public sealed class FakeTodoRepository : ITodoRepository
         return Task.CompletedTask;
     }
 
-    public Task DeleteAsync(Guid id, CancellationToken ct)
+    public Task DeleteAsync(Guid id, CancellationToken ct) =>
+        DeleteAsync(id, DateTimeOffset.UtcNow, ct);
+
+    public Task DeleteAsync(Guid id, DateTimeOffset deletedAt, CancellationToken ct)
     {
+        LastDeletedAt = deletedAt;
         lock (_gate)
             _items.Remove(id);
         return Task.CompletedTask;

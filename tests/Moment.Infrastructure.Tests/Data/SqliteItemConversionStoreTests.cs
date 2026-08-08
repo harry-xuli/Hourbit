@@ -218,6 +218,50 @@ public sealed class SqliteItemConversionStoreTests
     }
 
     [Fact]
+    public async Task ItemConversion_occurrence_only_inserts_an_active_continuation_beside_deleted_history()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(path, default);
+        var source = Reminder(
+            OccurrenceState.Scheduled, null,
+            RecurrenceRule.Daily(new TimeOnly(10, 0)));
+        await reminders.SaveItemWithOccurrenceAsync(
+            source.Item, source.Occurrence, default);
+        var deletedContinuation = ReminderOccurrence.Schedule(
+            source.Item.Id, DueAt.AddDays(1));
+        await reminders.SaveOccurrenceAsync(deletedContinuation, default);
+        await reminders.DeleteAsync(
+            deletedContinuation.Id, SeriesScope.OccurrenceOnly,
+            DueAt.AddMinutes(1), default);
+        var activeContinuation = deletedContinuation with { Id = Guid.NewGuid() };
+        var destination = new TodoItem(
+            Guid.NewGuid(), "单次转待办", source.Item.CreatedAt, null,
+            ReminderImportance.Normal, false, null);
+        var store = await SqliteItemConversionStore.OpenAsync(path, default);
+
+        await store.ConvertReminderToTodoAsync(
+            new ReminderToTodoConversion(
+                source, destination, SeriesScope.OccurrenceOnly,
+                activeContinuation), default);
+
+        var remaining = Assert.Single(await reminders.GetScheduledAsync(default));
+        Assert.Equal(activeContinuation.Id, remaining.Occurrence.Id);
+        Assert.Equal(2, await ScalarIntAsync(path, """
+            SELECT COUNT(*)
+            FROM occurrences
+            WHERE item_id = $id AND due_at_utc = $value;
+            """,
+            ("$id", source.Item.Id.ToString("D")),
+            ("$value", FormatUtc(activeContinuation.DueAt))));
+        Assert.Equal(1, await ScalarIntAsync(path, """
+            SELECT COUNT(*)
+            FROM occurrences
+            WHERE id = $id AND deleted_at IS NOT NULL;
+            """, ("$id", deletedContinuation.Id.ToString("D"))));
+    }
+
+    [Fact]
     public async Task ItemConversion_occurrence_only_rejects_an_actionable_recurring_source_without_a_continuation()
     {
         using var temp = new TempDirectory();
@@ -617,8 +661,9 @@ public sealed class SqliteItemConversionStoreTests
             CancellationToken ct) =>
             inner.SetCompletedAsync(id, isCompleted, completedAt, ct);
 
-        public Task DeleteAsync(Guid id, CancellationToken ct) =>
-            inner.DeleteAsync(id, ct);
+        public Task DeleteAsync(Guid id, DateTimeOffset deletedAt,
+            CancellationToken ct) =>
+            inner.DeleteAsync(id, deletedAt, ct);
     }
 
     private sealed class RecordingSignal : ISchedulerSignal

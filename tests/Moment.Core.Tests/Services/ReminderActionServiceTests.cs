@@ -178,6 +178,7 @@ public sealed class ReminderActionServiceTests
 
         Assert.Null(await repository.GetScheduledReminderAsync(selected.Id, CancellationToken.None));
         Assert.NotNull(await repository.GetScheduledReminderAsync(later.Id, CancellationToken.None));
+        Assert.Equal(Now, repository.LastDeletedAt);
     }
 
     [Fact]
@@ -218,6 +219,7 @@ public sealed class ReminderActionServiceTests
 
         Assert.Equal("循环提醒", (await repository.GetScheduledReminderAsync(past.Id, CancellationToken.None))!.Item.Title);
         Assert.Empty(await repository.GetScheduledAsync(CancellationToken.None));
+        Assert.Equal(Now, repository.LastDeletedAt);
     }
 
     private static ReminderActionService CreateService(FakeReminderRepository repository) =>

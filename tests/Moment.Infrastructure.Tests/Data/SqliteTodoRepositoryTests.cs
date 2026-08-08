@@ -323,6 +323,22 @@ public sealed class SqliteTodoRepositoryTests
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM action_log WHERE id = $id;",
             fixture.ActionId));
+        Assert.Equal(0, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM pragma_foreign_key_check;"));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM occurrences
+            WHERE id = $id
+              AND state = 2
+              AND handled_at IS NOT NULL
+              AND deleted_at IS NULL;
+            """, fixture.OccurrenceId));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ux_occurrences_active_item_due_at_utc';
+            """));
         Assert.Equal(1, await ScalarIntAsync(connection, """
             SELECT COUNT(*)
             FROM sqlite_master
@@ -376,6 +392,101 @@ public sealed class SqliteTodoRepositoryTests
             FROM pragma_table_info('todos')
             WHERE name = 'deleted_at';
             """));
+    }
+
+    [Fact]
+    public async Task Migration_rejects_version_four_when_action_log_is_missing()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+        await ExecuteAsync(path, "DROP TABLE action_log;");
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+    }
+
+    [Fact]
+    public async Task Migration_rejects_version_four_with_a_malformed_occurrences_base_table()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+        await ExecuteAsync(path, """
+            DROP TABLE action_log;
+            DROP TABLE occurrences;
+            CREATE TABLE occurrences (
+                id TEXT PRIMARY KEY,
+                item_id TEXT NULL,
+                due_at TEXT NOT NULL,
+                due_at_utc TEXT NOT NULL,
+                state INTEGER NOT NULL,
+                handled_at TEXT NULL,
+                snooze_parent_id TEXT NULL,
+                deleted_at TEXT NULL
+            );
+            CREATE TABLE action_log (
+                id TEXT PRIMARY KEY,
+                occurrence_id TEXT NOT NULL REFERENCES occurrences(id) ON DELETE CASCADE,
+                state INTEGER NOT NULL,
+                handled_at TEXT NOT NULL
+            );
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Migration_rejects_version_four_with_a_missing_or_duplicate_earlier_marker(
+        bool duplicate)
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+        await ExecuteAsync(path, duplicate
+            ? "INSERT INTO schema_info(version) VALUES (2);"
+            : "DELETE FROM schema_info WHERE version = 2;");
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Migration_rejects_version_four_with_a_wrong_required_index(
+        bool wrongPartialPredicate)
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+        await ExecuteAsync(path, wrongPartialPredicate
+            ? """
+                DROP INDEX ix_occurrences_active_state_due_at_utc;
+                CREATE INDEX ix_occurrences_active_state_due_at_utc
+                    ON occurrences(state, due_at_utc)
+                    WHERE deleted_at IS NOT NULL;
+                """
+            : """
+                DROP INDEX ix_occurrences_active_state_due_at_utc;
+                CREATE INDEX ix_occurrences_active_state_due_at_utc
+                    ON occurrences(due_at_utc, state)
+                    WHERE deleted_at IS NULL;
+                """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
     }
 
     [Fact]
@@ -624,6 +735,13 @@ public sealed class SqliteTodoRepositoryTests
     private static async Task InitializeVersionThreeAsync(string path)
     {
         _ = await CreateVersionThreeDatabaseAsync(path);
+    }
+
+    private static async Task InitializeVersionFourAsync(string path)
+    {
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
     }
 
     private static async Task ExecuteAsync(string path, string sql)

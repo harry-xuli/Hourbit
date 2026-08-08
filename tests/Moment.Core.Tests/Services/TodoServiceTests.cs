@@ -135,6 +135,7 @@ public sealed class TodoServiceTests
         await service.DeleteAsync(existing.Id, default);
 
         Assert.Null(await todos.GetAsync(existing.Id, default));
+        Assert.Equal(Now, todos.LastDeletedAt);
         Assert.Equal(0, signal.RefreshCount);
     }
 
@@ -461,7 +462,8 @@ public sealed class TodoServiceTests
         public Task UpdateAsync(TodoItem item, CancellationToken ct) => Called();
         public Task SetCompletedAsync(Guid id, bool isCompleted,
             DateTimeOffset? completedAt, CancellationToken ct) => Called();
-        public Task DeleteAsync(Guid id, CancellationToken ct) => Called();
+        public Task DeleteAsync(Guid id, DateTimeOffset deletedAt,
+            CancellationToken ct) => Called();
 
         private Task Called()
         {
@@ -500,8 +502,9 @@ public sealed class TodoServiceTests
         public Task SetCompletedAsync(Guid id, bool isCompleted,
             DateTimeOffset? completedAt, CancellationToken ct) =>
             inner.SetCompletedAsync(id, isCompleted, completedAt, ct);
-        public Task DeleteAsync(Guid id, CancellationToken ct) =>
-            inner.DeleteAsync(id, ct);
+        public Task DeleteAsync(Guid id, DateTimeOffset deletedAt,
+            CancellationToken ct) =>
+            inner.DeleteAsync(id, deletedAt, ct);
     }
 
     private sealed class OrderedCompleteTodoRepository(
@@ -551,7 +554,8 @@ public sealed class TodoServiceTests
                 _firstCompletionWritten.TrySetResult();
         }
 
-        public Task DeleteAsync(Guid id, CancellationToken ct) =>
-            inner.DeleteAsync(id, ct);
+        public Task DeleteAsync(Guid id, DateTimeOffset deletedAt,
+            CancellationToken ct) =>
+            inner.DeleteAsync(id, deletedAt, ct);
     }
 }

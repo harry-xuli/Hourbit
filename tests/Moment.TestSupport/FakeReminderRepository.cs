@@ -6,6 +6,7 @@ namespace Moment.TestSupport;
 public class FakeReminderRepository : IReminderRepository
 {
     private readonly object _gate = new();
+    public DateTimeOffset? LastDeletedAt { get; private set; }
     private readonly Dictionary<Guid, ReminderItem> _items = [];
     private readonly Dictionary<Guid, ReminderOccurrence> _occurrences = [];
 
@@ -207,8 +208,19 @@ public class FakeReminderRepository : IReminderRepository
         return Task.CompletedTask;
     }
 
-    public virtual Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct)
+    public virtual Task DeleteAsync(
+        Guid occurrenceId,
+        SeriesScope scope,
+        CancellationToken ct) =>
+        DeleteAsync(occurrenceId, scope, DateTimeOffset.UtcNow, ct);
+
+    public virtual Task DeleteAsync(
+        Guid occurrenceId,
+        SeriesScope scope,
+        DateTimeOffset deletedAt,
+        CancellationToken ct)
     {
+        LastDeletedAt = deletedAt;
         lock (_gate)
         {
             if (!_occurrences.TryGetValue(occurrenceId, out var occurrence))

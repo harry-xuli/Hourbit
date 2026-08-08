@@ -13,10 +13,10 @@ public interface ITodoRepository
         bool isCompleted,
         DateTimeOffset? completedAt,
         CancellationToken ct);
-    Task DeleteAsync(Guid id, CancellationToken ct);
     Task DeleteAsync(
         Guid id,
         DateTimeOffset deletedAt,
-        CancellationToken ct) =>
-        DeleteAsync(id, ct);
+        CancellationToken ct);
+    Task DeleteAsync(Guid id, CancellationToken ct) =>
+        DeleteAsync(id, DateTimeOffset.UtcNow, ct);
 }
