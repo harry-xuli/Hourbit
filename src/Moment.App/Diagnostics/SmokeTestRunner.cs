@@ -7,6 +7,7 @@ using Microsoft.Data.Sqlite;
 using Moment.App.Settings;
 using Moment.App.Timeline;
 using Moment.Core.Abstractions;
+using Moment.Core.Analytics;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Recurrence;
@@ -319,8 +320,13 @@ internal static class SmokeTestRunner
         var first = await recovery.RecoverAsync(clock.Now, ct);
         var second = await recovery.RecoverAsync(clock.Now, ct);
         var persisted = await repository.GetScheduledReminderAsync(occurrence.Id, ct);
+        var timelineDate = DateOnly.FromDateTime(
+            TimeZoneInfo.ConvertTime(clock.Now, zone).DateTime);
         var snapshot = await new SqliteTimelineQuery(databasePath).GetTimelineAsync(
-            DateOnly.FromDateTime(clock.Now.UtcDateTime), zone, ct);
+            new LocalDateRange(timelineDate, timelineDate),
+            clock.Now,
+            zone,
+            ct);
         var visible = new TimelineItemViewModel(
             snapshot.Reminders.Single(row => row.OccurrenceId == occurrence.Id),
             clock.Now);

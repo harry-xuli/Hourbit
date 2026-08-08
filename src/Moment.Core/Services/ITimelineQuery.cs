@@ -1,3 +1,4 @@
+using Moment.Core.Analytics;
 using Moment.Core.Domain;
 
 namespace Moment.Core.Services;
@@ -5,14 +6,19 @@ namespace Moment.Core.Services;
 public interface ITimelineQuery
 {
     Task<TimelineSnapshot> GetTimelineAsync(
-        DateOnly localDate, TimeZoneInfo zone, CancellationToken ct);
+        LocalDateRange range,
+        DateTimeOffset now,
+        TimeZoneInfo zone,
+        CancellationToken ct);
 }
 
 public sealed record TimelineSnapshot(
     IReadOnlyList<TodoTimelineRow> Todos,
     IReadOnlyList<TimelineRow> Reminders,
     int TodosCompletedToday,
-    int RemindersCompletedToday);
+    int RemindersCompletedToday,
+    int PastSevenDaysCompleted = 0,
+    int NextFourteenDaysPlanned = 0);
 
 public sealed record TodoTimelineRow(
     Guid TodoId,

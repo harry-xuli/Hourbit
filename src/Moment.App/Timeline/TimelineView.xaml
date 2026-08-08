@@ -185,14 +185,123 @@
 
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="52" />
+                    <RowDefinition Height="72" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="42" />
                     <RowDefinition Height="56" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
+                <Grid Grid.Row="0" Margin="26,6,26,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="PreviousPeriodButton"
+                            Grid.Column="0"
+                            Command="{Binding PreviousPeriodCommand}"
+                            automation:AutomationProperties.Name="上一时段"
+                            Content="‹"
+                            FontSize="22"
+                            MinWidth="42"
+                            Margin="0,0,10,0" />
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <RadioButton x:Name="DayPeriodButton"
+                                     GroupName="TimelinePeriod"
+                                     Content="日"
+                                     Command="{Binding SelectDayPeriodCommand}"
+                                     IsChecked="{Binding IsDayPeriodSelected, Mode=OneWay}"
+                                     automation:AutomationProperties.Name="按日查看"
+                                     VerticalAlignment="Center"
+                                     Padding="8,4"
+                                     Margin="0,0,4,0" />
+                        <RadioButton x:Name="WeekPeriodButton"
+                                     GroupName="TimelinePeriod"
+                                     Content="周"
+                                     Command="{Binding SelectWeekPeriodCommand}"
+                                     IsChecked="{Binding IsWeekPeriodSelected, Mode=OneWay}"
+                                     automation:AutomationProperties.Name="按周查看"
+                                     VerticalAlignment="Center"
+                                     Padding="8,4"
+                                     Margin="0,0,4,0" />
+                        <RadioButton x:Name="MonthPeriodButton"
+                                     GroupName="TimelinePeriod"
+                                     Content="月"
+                                     Command="{Binding SelectMonthPeriodCommand}"
+                                     IsChecked="{Binding IsMonthPeriodSelected, Mode=OneWay}"
+                                     automation:AutomationProperties.Name="按月查看"
+                                     VerticalAlignment="Center"
+                                     Padding="8,4" />
+                    </StackPanel>
+                    <TextBlock x:Name="PeriodLabel"
+                               Grid.Column="2"
+                               Text="{Binding PeriodLabel}"
+                               automation:AutomationProperties.Name="{Binding PeriodLabel, StringFormat=当前时段：{0}}"
+                               FontSize="18"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="NextPeriodButton"
+                            Grid.Column="3"
+                            Command="{Binding NextPeriodCommand}"
+                            automation:AutomationProperties.Name="下一时段"
+                            Content="›"
+                            FontSize="22"
+                            MinWidth="42"
+                            Margin="10,0,0,0" />
+                </Grid>
+
+                <UniformGrid Grid.Row="1"
+                             Rows="1"
+                             Columns="2"
+                             Margin="26,4,26,8">
+                    <Button x:Name="PastSevenDaysCard"
+                            Command="{Binding OpenPastSevenDaysAnalyticsCommand}"
+                            automation:AutomationProperties.Name="{Binding PastSevenDaysCompleted, StringFormat='过去 7 天已完成：{0}，打开分析'}"
+                            Margin="0,0,6,0"
+                            HorizontalContentAlignment="Stretch">
+                        <Grid Margin="12,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="过去 7 天已完成"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding PastSevenDaysCompleted}"
+                                       FontSize="22"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Button>
+                    <Button x:Name="NextFourteenDaysCard"
+                            Command="{Binding OpenNextFourteenDaysAnalyticsCommand}"
+                            automation:AutomationProperties.Name="{Binding NextFourteenDaysPlanned, StringFormat='未来 14 天计划：{0}，打开分析'}"
+                            Margin="6,0,0,0"
+                            HorizontalContentAlignment="Stretch">
+                        <Grid Margin="12,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="未来 14 天计划"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding NextFourteenDaysPlanned}"
+                                       FontSize="22"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Button>
+                </UniformGrid>
+
                 <StackPanel x:Name="TodoSection"
-                            Grid.Row="0"
+                            Grid.Row="2"
                             Margin="26,8,26,0">
                     <TextBlock x:Name="TodoSectionHeader"
                                Text="待办事项"
@@ -272,7 +381,7 @@
                 </StackPanel>
 
                 <TextBlock x:Name="ReminderSectionHeader"
-                           Grid.Row="1"
+                           Grid.Row="3"
                            Text="定时提醒"
                            automation:AutomationProperties.Name="定时提醒"
                            FontSize="20"
@@ -282,7 +391,7 @@
                            Margin="26,0" />
 
                 <Border x:Name="TimelineHeader"
-                        Grid.Row="2" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                        Grid.Row="4" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                         BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,0,0,1">
                     <Grid Margin="54,0,26,0">
                         <Grid.ColumnDefinitions>
@@ -300,7 +409,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="3">
+                <Grid Grid.Row="5">
                     <Border Margin="12,8,12,0"
                             Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                             BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"

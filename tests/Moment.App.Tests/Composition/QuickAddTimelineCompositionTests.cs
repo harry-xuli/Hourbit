@@ -1,5 +1,6 @@
 using Moment.App.Timeline;
 using Moment.Core.Abstractions;
+using Moment.Core.Analytics;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
@@ -107,7 +108,8 @@ public sealed class QuickAddTimelineCompositionTests
         public Exception? RefreshFailure { get; set; }
 
         public async Task<TimelineSnapshot> GetTimelineAsync(
-            DateOnly localDate, TimeZoneInfo zone, CancellationToken ct)
+            LocalDateRange range, DateTimeOffset now,
+            TimeZoneInfo zone, CancellationToken ct)
         {
             if (Interlocked.Increment(ref _calls) == 1)
                 return new TimelineSnapshot([], [], 0, 0);

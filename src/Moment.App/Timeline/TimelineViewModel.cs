@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using Moment.App.Commands;
 using Moment.Core.Abstractions;
+using Moment.Core.Analytics;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
@@ -26,12 +28,19 @@ public sealed class TimelineViewModel : ObservableObject
     private readonly ITimelineDialogService _dialogs;
     private readonly ITodoDialogService _todoDialogs;
     private readonly TimeZoneInfo _zone;
+    private readonly CultureInfo _culture;
+    private readonly Action<LocalDateRange> _openAnalytics;
     private CancellationTokenSource? _loadCancellation;
     private TimelineItemViewModel? _selectedItem;
     private TodoTimelineItemViewModel? _selectedTodo;
     private string? _errorMessage;
     private int _todosCompletedToday;
     private int _remindersCompletedToday;
+    private int _pastSevenDaysCompleted;
+    private int _nextFourteenDaysPlanned;
+    private DateOnly _selectedDate;
+    private TimelinePeriodKind _selectedPeriodKind;
+    private TimelinePeriod _currentPeriod;
 
     public TimelineViewModel(
         ITimelineQuery query,
@@ -41,7 +50,9 @@ public sealed class TimelineViewModel : ObservableObject
         ITodoService todos,
         ITimelineDialogService dialogs,
         ITodoDialogService todoDialogs,
-        TimeZoneInfo zone)
+        TimeZoneInfo zone,
+        CultureInfo? culture = null,
+        Action<LocalDateRange>? openAnalytics = null)
     {
         _query = query;
         _clock = clock;
@@ -51,6 +62,12 @@ public sealed class TimelineViewModel : ObservableObject
         _dialogs = dialogs;
         _todoDialogs = todoDialogs;
         _zone = zone;
+        _culture = culture ?? CultureInfo.CurrentCulture;
+        _openAnalytics = openAnalytics ?? (_ => { });
+        _selectedDate = LocalToday;
+        _selectedPeriodKind = TimelinePeriodKind.Day;
+        _currentPeriod = TimelinePeriod.Create(
+            _selectedDate, _selectedPeriodKind, _culture);
         Groups = new[] { "已错过", "接下来", "已完成" }
             .Select(static name => new TimelineGroupViewModel(name)).ToArray();
         LoadCommand = new AsyncCommand((_, _) => LoadAsync());
@@ -66,6 +83,17 @@ public sealed class TimelineViewModel : ObservableObject
             _dialogs.OpenQuickAdd();
             return Task.CompletedTask;
         }));
+        SelectDayPeriodCommand = CreatePeriodSelectionCommand(TimelinePeriodKind.Day);
+        SelectWeekPeriodCommand = CreatePeriodSelectionCommand(TimelinePeriodKind.Week);
+        SelectMonthPeriodCommand = CreatePeriodSelectionCommand(TimelinePeriodKind.Month);
+        PreviousPeriodCommand = new AsyncCommand(
+            (_, _) => ObserveAsync(() => MovePeriodAsync(-1)));
+        NextPeriodCommand = new AsyncCommand(
+            (_, _) => ObserveAsync(() => MovePeriodAsync(1)));
+        OpenPastSevenDaysAnalyticsCommand = new AsyncCommand(
+            (_, _) => ObserveAsync(() => OpenAnalyticsAsync(PastSevenDaysRange)));
+        OpenNextFourteenDaysAnalyticsCommand = new AsyncCommand(
+            (_, _) => ObserveAsync(() => OpenAnalyticsAsync(NextFourteenDaysRange)));
     }
 
     public ObservableCollection<TimelineItemViewModel> Items { get; } = [];
@@ -77,6 +105,13 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand DeleteCommand { get; }
     public IAsyncCommand CompleteCommand { get; }
     public IAsyncCommand OpenQuickAddCommand { get; }
+    public IAsyncCommand SelectDayPeriodCommand { get; }
+    public IAsyncCommand SelectWeekPeriodCommand { get; }
+    public IAsyncCommand SelectMonthPeriodCommand { get; }
+    public IAsyncCommand PreviousPeriodCommand { get; }
+    public IAsyncCommand NextPeriodCommand { get; }
+    public IAsyncCommand OpenPastSevenDaysAnalyticsCommand { get; }
+    public IAsyncCommand OpenNextFourteenDaysAnalyticsCommand { get; }
     public string ProductName => "Hourbit 日程";
     public string DateText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString(
         "yyyy年M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
@@ -92,6 +127,26 @@ public sealed class TimelineViewModel : ObservableObject
     public int CompletedCount => _todosCompletedToday + _remindersCompletedToday;
     public string CompletedTooltipText =>
         $"待办：{_todosCompletedToday}，提醒：{_remindersCompletedToday}";
+    public TimelinePeriodKind SelectedPeriodKind => _selectedPeriodKind;
+    public bool IsDayPeriodSelected =>
+        _selectedPeriodKind == TimelinePeriodKind.Day;
+    public bool IsWeekPeriodSelected =>
+        _selectedPeriodKind == TimelinePeriodKind.Week;
+    public bool IsMonthPeriodSelected =>
+        _selectedPeriodKind == TimelinePeriodKind.Month;
+    public TimelinePeriod CurrentPeriod => _currentPeriod;
+    public string PeriodLabel => _currentPeriod.Label;
+    public int PastSevenDaysCompleted => _pastSevenDaysCompleted;
+    public int NextFourteenDaysPlanned => _nextFourteenDaysPlanned;
+
+    private DateOnly LocalToday => DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTime(_clock.Now, _zone).DateTime);
+
+    private LocalDateRange PastSevenDaysRange =>
+        new(LocalToday.AddDays(-6), LocalToday);
+
+    private LocalDateRange NextFourteenDaysRange =>
+        new(LocalToday, LocalToday.AddDays(13));
 
     private bool HasSelection => SelectedItem is not null || SelectedTodo is not null;
 
@@ -148,9 +203,14 @@ public sealed class TimelineViewModel : ObservableObject
         previous?.Dispose();
         try
         {
-            var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.Now, _zone).DateTime);
+            var localDate = LocalToday;
+            var period = _currentPeriod;
+            var now = _clock.Now;
             var snapshot = await _query.GetTimelineAsync(
-                localDate, _zone, cancellation.Token);
+                period.Range,
+                now,
+                _zone,
+                cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
             ErrorMessage = null;
             SelectedTodo = null;
@@ -189,6 +249,8 @@ public sealed class TimelineViewModel : ObservableObject
             }
             _todosCompletedToday = snapshot.TodosCompletedToday;
             _remindersCompletedToday = snapshot.RemindersCompletedToday;
+            _pastSevenDaysCompleted = snapshot.PastSevenDaysCompleted;
+            _nextFourteenDaysPlanned = snapshot.NextFourteenDaysPlanned;
             if (PendingTodos.FirstOrDefault() is { } firstTodo)
                 SelectedTodo = firstTodo;
             else
@@ -196,19 +258,67 @@ public sealed class TimelineViewModel : ObservableObject
             OnPropertyChanged(nameof(NextReminderText));
             OnPropertyChanged(nameof(CompletedCount));
             OnPropertyChanged(nameof(CompletedTooltipText));
+            OnPropertyChanged(nameof(PastSevenDaysCompleted));
+            OnPropertyChanged(nameof(NextFourteenDaysPlanned));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            ErrorMessage = exception.Message;
+            if (!cancellation.IsCancellationRequested)
+                ErrorMessage = exception.Message;
         }
         finally
         {
             if (ReferenceEquals(Interlocked.CompareExchange(ref _loadCancellation, null, cancellation), cancellation))
                 cancellation.Dispose();
         }
+    }
+
+    private IAsyncCommand CreatePeriodSelectionCommand(TimelinePeriodKind kind) =>
+        new AsyncCommand((_, _) => ObserveAsync(() => SelectPeriodAsync(kind)));
+
+    private async Task SelectPeriodAsync(TimelinePeriodKind kind)
+    {
+        SetPeriod(kind, _selectedDate);
+        await LoadAsync();
+    }
+
+    private async Task MovePeriodAsync(int direction)
+    {
+        _selectedDate = _selectedPeriodKind switch
+        {
+            TimelinePeriodKind.Day => _selectedDate.AddDays(direction),
+            TimelinePeriodKind.Week => _selectedDate.AddDays(checked(direction * 7)),
+            TimelinePeriodKind.Month => _selectedDate.AddMonths(direction),
+            _ => throw new InvalidOperationException("Unknown timeline period kind.")
+        };
+        SetPeriod(_selectedPeriodKind, _selectedDate);
+        await LoadAsync();
+    }
+
+    private void SetPeriod(TimelinePeriodKind kind, DateOnly selectedDate)
+    {
+        _selectedPeriodKind = kind;
+        _currentPeriod = TimelinePeriod.Create(selectedDate, kind, _culture);
+        PublishPeriodChanged();
+    }
+
+    private void PublishPeriodChanged()
+    {
+        OnPropertyChanged(nameof(SelectedPeriodKind));
+        OnPropertyChanged(nameof(IsDayPeriodSelected));
+        OnPropertyChanged(nameof(IsWeekPeriodSelected));
+        OnPropertyChanged(nameof(IsMonthPeriodSelected));
+        OnPropertyChanged(nameof(CurrentPeriod));
+        OnPropertyChanged(nameof(PeriodLabel));
+    }
+
+    private Task OpenAnalyticsAsync(LocalDateRange range)
+    {
+        _openAnalytics(range);
+        return Task.CompletedTask;
     }
 
     private async Task EditAsync(CancellationToken ct)

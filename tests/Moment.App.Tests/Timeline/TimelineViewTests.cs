@@ -1,5 +1,8 @@
+using System.Globalization;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -7,6 +10,7 @@ using System.Windows.Input;
 using Moment.App.Timeline;
 using Moment.App.Styles;
 using Moment.Core.Abstractions;
+using Moment.Core.Analytics;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
@@ -17,6 +21,80 @@ namespace Moment.App.Tests.Timeline;
 public sealed class TimelineViewTests
 {
     private static readonly string[] ExpectedGroups = ["已错过", "接下来", "已完成"];
+
+    [Fact]
+    public Task Period_selectors_and_summary_cards_are_keyboard_accessible_above_the_sections() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var opened = new List<LocalDateRange>();
+            var query = new QueryStub(new TimelineSnapshot(
+                [], [], 0, 0,
+                PastSevenDaysCompleted: 3,
+                NextFourteenDaysPlanned: 5));
+            var viewModel = Create(
+                query,
+                analyticsNavigation: opened.Add,
+                culture: CultureInfo.GetCultureInfo("zh-CN"));
+            await viewModel.LoadAsync();
+            var view = Show(viewModel);
+            var day = Assert.IsType<RadioButton>(view.FindName("DayPeriodButton"));
+            var week = Assert.IsType<RadioButton>(view.FindName("WeekPeriodButton"));
+            var month = Assert.IsType<RadioButton>(view.FindName("MonthPeriodButton"));
+            var previous = Assert.IsType<Button>(view.FindName("PreviousPeriodButton"));
+            var next = Assert.IsType<Button>(view.FindName("NextPeriodButton"));
+            var past = Assert.IsType<Button>(view.FindName("PastSevenDaysCard"));
+            var future = Assert.IsType<Button>(view.FindName("NextFourteenDaysCard"));
+            var periodLabel = Assert.IsType<TextBlock>(view.FindName("PeriodLabel"));
+            var todoSection = Assert.IsType<StackPanel>(view.FindName("TodoSection"));
+
+            Assert.Equal(["日", "周", "月"],
+                new[] { day, week, month }.Select(button => button.Content));
+            Assert.DoesNotContain(
+                Descendants<RadioButton>(view),
+                button => Equals(button.Content, "年"));
+            Assert.True(day.IsChecked);
+            Assert.Equal("按日查看", PeerName(day));
+            Assert.Equal("按周查看", PeerName(week));
+            Assert.Equal("按月查看", PeerName(month));
+            Assert.Equal("上一时段", PeerName(previous));
+            Assert.Equal("下一时段", PeerName(next));
+            Assert.Equal("过去 7 天已完成：3，打开分析", PeerName(past));
+            Assert.Equal("未来 14 天计划：5，打开分析", PeerName(future));
+            Assert.Equal("2026年7月29日 星期三", periodLabel.Text);
+            Assert.All(
+                new Control[] { day, week, month, previous, next, past, future },
+                control => Assert.True(Peer(control).IsKeyboardFocusable()));
+            Assert.True(past.TranslatePoint(new Point(), view).Y <
+                        todoSection.TranslatePoint(new Point(), view).Y);
+            Assert.True(future.TranslatePoint(new Point(), view).Y <
+                        todoSection.TranslatePoint(new Point(), view).Y);
+
+            Assert.True(week.Focus());
+            RaiseKeyStroke(week, Key.Space);
+            await System.Windows.Threading.Dispatcher.Yield();
+            Assert.Equal(TimelinePeriodKind.Week, viewModel.SelectedPeriodKind);
+            Assert.True(week.IsChecked);
+            Assert.True(previous.Focus());
+            RaiseKeyStroke(previous, Key.Space);
+            await System.Windows.Threading.Dispatcher.Yield();
+            Assert.Equal("2026年7月20日 – 2026年7月26日", periodLabel.Text);
+            Assert.True(next.Focus());
+            RaiseKeyStroke(next, Key.Space);
+            await System.Windows.Threading.Dispatcher.Yield();
+            Assert.Equal("2026年7月27日 – 2026年8月2日", periodLabel.Text);
+            Assert.IsAssignableFrom<IInvokeProvider>(
+                Peer(past).GetPattern(PatternInterface.Invoke)).Invoke();
+            Assert.IsAssignableFrom<IInvokeProvider>(
+                Peer(future).GetPattern(PatternInterface.Invoke)).Invoke();
+            await System.Windows.Threading.Dispatcher.Yield();
+
+            Assert.Equal(
+                [
+                    new LocalDateRange(new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                    new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))
+                ],
+                opened);
+        });
 
     [Fact]
     public Task New_reminder_vector_icon_and_label_are_vertically_centered() =>
@@ -430,10 +508,12 @@ public sealed class TimelineViewTests
 
     private static string PeerName(FrameworkElement element)
     {
-        var peer = FrameworkElementAutomationPeer.CreatePeerForElement(element);
-        Assert.NotNull(peer);
-        return peer!.GetName();
+        return Peer(element).GetName();
     }
+
+    private static AutomationPeer Peer(FrameworkElement element) =>
+        FrameworkElementAutomationPeer.CreatePeerForElement(element)
+        ?? throw new InvalidOperationException("The control must have an automation peer.");
 
     private static KeyEventArgs RaiseKey(
         UIElement target,
@@ -456,6 +536,25 @@ public sealed class TimelineViewTests
         };
         target.RaiseEvent(eventArgs);
         return eventArgs;
+    }
+
+    private static void RaiseKeyStroke(UIElement target, Key key)
+    {
+        var window = Window.GetWindow(target)
+            ?? throw new InvalidOperationException("The target must belong to a shown window.");
+        var source = HwndSource.FromHwnd(new WindowInteropHelper(window).Handle)
+            ?? throw new InvalidOperationException("The shown window must have an HWND source.");
+        var keyboard = new TestKeyboardDevice(ModifierKeys.None);
+        target.RaiseEvent(new KeyEventArgs(
+            keyboard, source, Environment.TickCount, key)
+        {
+            RoutedEvent = Keyboard.KeyDownEvent
+        });
+        target.RaiseEvent(new KeyEventArgs(
+            keyboard, source, Environment.TickCount, key)
+        {
+            RoutedEvent = Keyboard.KeyUpEvent
+        });
     }
 
     private static IEnumerable<string> VisibleText(DependencyObject root) =>
@@ -507,13 +606,17 @@ public sealed class TimelineViewTests
         ActionServiceStub? actions = null,
         TodoServiceStub? todos = null,
         ReminderServiceStub? reminders = null,
-        DialogStub? dialogs = null) =>
+        DialogStub? dialogs = null,
+        Action<LocalDateRange>? analyticsNavigation = null,
+        CultureInfo? culture = null) =>
         new(query, new FakeClock("2026-07-29T09:00:00+08:00"),
             reminders ?? new ReminderServiceStub(), actions ?? new ActionServiceStub(),
             todos ?? new TodoServiceStub(), dialogs ?? new DialogStub(),
             dialogs ?? new DialogStub(),
             TimeZoneInfo.CreateCustomTimeZone(
-                "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
+                "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+            culture,
+            analyticsNavigation);
 
     private static TimelineViewModel CreateTraversalViewModel()
     {
@@ -570,7 +673,8 @@ public sealed class TimelineViewTests
         public QueryStub(TimelineSnapshot snapshot) => _snapshot = snapshot;
 
         public Task<TimelineSnapshot> GetTimelineAsync(
-            DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
+            LocalDateRange range, DateTimeOffset now,
+            TimeZoneInfo zone, CancellationToken ct) =>
             Task.FromResult(_snapshot);
     }
 

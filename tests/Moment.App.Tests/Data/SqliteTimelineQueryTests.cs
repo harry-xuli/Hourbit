@@ -1,3 +1,4 @@
+using Moment.Core.Analytics;
 using Moment.Core.Domain;
 using Moment.Core.Services;
 using Moment.Infrastructure.Data;
@@ -8,6 +9,73 @@ namespace Moment.App.Tests.Data;
 
 public sealed class SqliteTimelineQueryTests
 {
+    [Fact]
+    public async Task Range_query_filters_both_item_types_pins_overdue_todos_and_returns_card_totals()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var todos = await SqliteTodoRepository.OpenAsync(
+            path, CancellationToken.None);
+        var zone = TimeZoneInfo.CreateCustomTimeZone(
+            "UTC+08-range", TimeSpan.FromHours(8), "UTC+08", "UTC+08");
+        var now = DateTimeOffset.Parse("2026-08-01T12:00:00+08:00");
+        var createdAt = now.AddDays(-20);
+
+        var overdue = Todo(Guid.NewGuid(), "逾期置顶", createdAt, new DateOnly(2026, 7, 31));
+        var inRange = Todo(Guid.NewGuid(), "范围内待办", createdAt, new DateOnly(2026, 8, 5));
+        var futureOutsideRange = Todo(Guid.NewGuid(), "卡片内待办", createdAt, new DateOnly(2026, 8, 10));
+        var outsideFuture = Todo(Guid.NewGuid(), "卡片外待办", createdAt, new DateOnly(2026, 8, 15));
+        var undated = Todo(Guid.NewGuid(), "无日期待办", createdAt, null);
+        var completedAtStart = Todo(
+            Guid.NewGuid(), "七天起点完成", createdAt, new DateOnly(2026, 8, 6), true,
+            DateTimeOffset.Parse("2026-07-26T00:00:00+08:00"));
+        var completedBeforeStart = Todo(
+            Guid.NewGuid(), "七天前完成", createdAt, new DateOnly(2026, 8, 7), true,
+            DateTimeOffset.Parse("2026-07-25T23:59:59.9999999+08:00"));
+        foreach (var todo in new[]
+                 {
+                     overdue, inRange, futureOutsideRange, outsideFuture,
+                     undated, completedAtStart, completedBeforeStart
+                 })
+        {
+            await todos.SaveAsync(todo, CancellationToken.None);
+        }
+
+        var inRangeReminder = await SaveScheduledReminderAsync(
+            reminders, "范围内提醒", DateTimeOffset.Parse("2026-08-06T09:00:00+08:00"));
+        _ = await SaveScheduledReminderAsync(
+            reminders, "卡片内提醒", DateTimeOffset.Parse("2026-08-10T09:00:00+08:00"));
+        _ = await SaveScheduledReminderAsync(
+            reminders, "正好现在", now);
+        _ = await SaveScheduledReminderAsync(
+            reminders, "十四天终点", DateTimeOffset.Parse("2026-08-15T00:00:00+08:00"));
+        await SaveCompletedReminderAsync(
+            reminders, "七天内完成提醒",
+            DateTimeOffset.Parse("2026-07-20T09:00:00+08:00"),
+            DateTimeOffset.Parse("2026-07-31T15:00:00+08:00"));
+        await SaveCompletedReminderAsync(
+            reminders, "七天终点完成提醒",
+            DateTimeOffset.Parse("2026-07-20T10:00:00+08:00"),
+            DateTimeOffset.Parse("2026-08-02T00:00:00+08:00"));
+
+        var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
+            new LocalDateRange(
+                new DateOnly(2026, 8, 3),
+                new DateOnly(2026, 8, 9)),
+            now,
+            zone,
+            CancellationToken.None);
+
+        Assert.Equal(
+            [overdue.Id, inRange.Id, undated.Id, completedAtStart.Id, completedBeforeStart.Id],
+            snapshot.Todos.Select(todo => todo.TodoId));
+        Assert.Equal(inRangeReminder.Id, Assert.Single(snapshot.Reminders).OccurrenceId);
+        Assert.Equal(2, snapshot.PastSevenDaysCompleted);
+        Assert.Equal(4, snapshot.NextFourteenDaysPlanned);
+    }
+
     [Fact]
     public async Task Query_uses_inclusive_start_and_exclusive_end_for_offset_local_date()
     {
@@ -24,7 +92,8 @@ public sealed class SqliteTimelineQueryTests
         await repository.SaveOccurrenceAsync(atEnd, CancellationToken.None);
 
         var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
-            new DateOnly(2026, 7, 30), zone, CancellationToken.None);
+            Day(2026, 7, 30), AtNoon(2026, 7, 30, zone), zone,
+            CancellationToken.None);
 
         var row = Assert.Single(snapshot.Reminders);
         Assert.Equal(atStart.Id, row.OccurrenceId);
@@ -44,20 +113,25 @@ public sealed class SqliteTimelineQueryTests
         var atStart = ReminderOccurrence.Schedule(item.Id, DateTimeOffset.Parse("2026-03-08T00:00:00-05:00"));
         var beforeEnd = ReminderOccurrence.Schedule(item.Id, DateTimeOffset.Parse("2026-03-08T23:59:59-04:00"));
         var atEnd = ReminderOccurrence.Schedule(item.Id, DateTimeOffset.Parse("2026-03-09T00:00:00-04:00"));
+        var atFutureCardEnd = ReminderOccurrence.Schedule(
+            item.Id, DateTimeOffset.Parse("2026-03-22T00:00:00-04:00"));
         await repository.SaveItemWithOccurrenceAsync(item, atStart, CancellationToken.None);
         await repository.SaveOccurrenceAsync(beforeEnd, CancellationToken.None);
         await repository.SaveOccurrenceAsync(atEnd, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(atFutureCardEnd, CancellationToken.None);
 
         var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
-            new DateOnly(2026, 3, 8), zone, CancellationToken.None);
+            Day(2026, 3, 8), AtNoon(2026, 3, 8, zone), zone,
+            CancellationToken.None);
 
         Assert.Equal(
             [atStart.Id, beforeEnd.Id],
             snapshot.Reminders.Select(row => row.OccurrenceId));
+        Assert.Equal(2, snapshot.NextFourteenDaysPlanned);
     }
 
     [Fact]
-    public async Task Query_returns_all_todos_in_action_order_and_counts_completions_by_local_day()
+    public async Task Day_query_returns_overdue_undated_and_in_range_todos_and_counts_local_completions()
     {
         using var temp = new TempDirectory();
         var path = Path.Combine(temp.Path, "moment.db");
@@ -105,12 +179,13 @@ public sealed class SqliteTimelineQueryTests
             DateTimeOffset.Parse("2026-07-29T23:59:59+08:00"));
 
         var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
-            new DateOnly(2026, 7, 30), zone, CancellationToken.None);
+            Day(2026, 7, 30), AtNoon(2026, 7, 30, zone), zone,
+            CancellationToken.None);
 
         Assert.Equal(
-            [overdueFirst, overdueSecond, today, future, undated],
+            [overdueFirst, overdueSecond, today, undated],
             snapshot.Todos.Where(todo => !todo.IsCompleted).Select(todo => todo.TodoId));
-        Assert.Equal(7, snapshot.Todos.Count);
+        Assert.Equal(5, snapshot.Todos.Count);
         Assert.Empty(snapshot.Reminders);
         Assert.Equal(1, snapshot.TodosCompletedToday);
         Assert.Equal(1, snapshot.RemindersCompletedToday);
@@ -130,6 +205,10 @@ public sealed class SqliteTimelineQueryTests
             Guid.NewGuid(), "已删除待办", completedAt.AddDays(-1),
             new DateOnly(2026, 7, 30), true, completedAt);
         await todos.SaveAsync(todo, CancellationToken.None);
+        var futureTodo = Todo(
+            Guid.NewGuid(), "已删除未来待办", completedAt.AddDays(-1),
+            new DateOnly(2026, 7, 30));
+        await todos.SaveAsync(futureTodo, CancellationToken.None);
         var item = ReminderItem.Create(
             "已删除提醒", ReminderKind.Plan, ReminderImportance.Normal,
             completedAt.AddDays(-1), completedAt.AddMinutes(-5));
@@ -138,20 +217,33 @@ public sealed class SqliteTimelineQueryTests
             OccurrenceState.Completed, completedAt, null);
         await reminders.SaveItemWithOccurrenceAsync(
             item, occurrence, CancellationToken.None);
+        var futureOccurrence = await SaveScheduledReminderAsync(
+            reminders,
+            "已删除未来提醒",
+            DateTimeOffset.Parse("2026-07-30T14:00:00+08:00"));
 
         await todos.DeleteAsync(
             todo.Id, completedAt.AddMinutes(1), CancellationToken.None);
+        await todos.DeleteAsync(
+            futureTodo.Id, completedAt.AddMinutes(1), CancellationToken.None);
         await reminders.DeleteAsync(
             occurrence.Id, SeriesScope.OccurrenceOnly,
             completedAt.AddMinutes(1), CancellationToken.None);
+        await reminders.DeleteAsync(
+            futureOccurrence.Id, SeriesScope.OccurrenceOnly,
+            completedAt.AddMinutes(1), CancellationToken.None);
 
         var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
-            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+            Day(2026, 7, 30),
+            AtNoon(2026, 7, 30, FixedZone()),
+            FixedZone(), CancellationToken.None);
 
         Assert.Empty(snapshot.Todos);
         Assert.Empty(snapshot.Reminders);
         Assert.Equal(0, snapshot.TodosCompletedToday);
         Assert.Equal(0, snapshot.RemindersCompletedToday);
+        Assert.Equal(0, snapshot.PastSevenDaysCompleted);
+        Assert.Equal(0, snapshot.NextFourteenDaysPlanned);
     }
 
     [Fact]
@@ -183,7 +275,9 @@ public sealed class SqliteTimelineQueryTests
             });
 
         var queryTask = query.GetTimelineAsync(
-            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+            Day(2026, 7, 30),
+            AtNoon(2026, 7, 30, FixedZone()),
+            FixedZone(), CancellationToken.None);
         await firstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
         try
         {
@@ -201,12 +295,18 @@ public sealed class SqliteTimelineQueryTests
 
         var duringCommit = await queryTask.WaitAsync(TimeSpan.FromSeconds(5));
         var nextQuery = await new SqliteTimelineQuery(path).GetTimelineAsync(
-            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+            Day(2026, 7, 30),
+            AtNoon(2026, 7, 30, FixedZone()),
+            FixedZone(), CancellationToken.None);
 
         Assert.False(Assert.Single(duringCommit.Todos).IsCompleted);
         Assert.Equal(0, duringCommit.TodosCompletedToday);
+        Assert.Equal(0, duringCommit.PastSevenDaysCompleted);
+        Assert.Equal(1, duringCommit.NextFourteenDaysPlanned);
         Assert.True(Assert.Single(nextQuery.Todos).IsCompleted);
         Assert.Equal(1, nextQuery.TodosCompletedToday);
+        Assert.Equal(1, nextQuery.PastSevenDaysCompleted);
+        Assert.Equal(0, nextQuery.NextFourteenDaysPlanned);
     }
 
     [Fact]
@@ -239,7 +339,9 @@ public sealed class SqliteTimelineQueryTests
             });
 
         var queryTask = query.GetTimelineAsync(
-            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+            Day(2026, 7, 30),
+            AtNoon(2026, 7, 30, FixedZone()),
+            FixedZone(), CancellationToken.None);
         await remindersRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
         try
         {
@@ -257,16 +359,22 @@ public sealed class SqliteTimelineQueryTests
 
         var duringCommit = await queryTask.WaitAsync(TimeSpan.FromSeconds(5));
         var nextQuery = await new SqliteTimelineQuery(path).GetTimelineAsync(
-            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+            Day(2026, 7, 30),
+            AtNoon(2026, 7, 30, FixedZone()),
+            FixedZone(), CancellationToken.None);
 
         Assert.Equal(
             OccurrenceState.Scheduled,
             Assert.Single(duringCommit.Reminders).State);
         Assert.Equal(0, duringCommit.RemindersCompletedToday);
+        Assert.Equal(0, duringCommit.PastSevenDaysCompleted);
+        Assert.Equal(0, duringCommit.NextFourteenDaysPlanned);
         Assert.Equal(
             OccurrenceState.Completed,
             Assert.Single(nextQuery.Reminders).State);
         Assert.Equal(1, nextQuery.RemindersCompletedToday);
+        Assert.Equal(1, nextQuery.PastSevenDaysCompleted);
+        Assert.Equal(0, nextQuery.NextFourteenDaysPlanned);
     }
 
     private static TodoItem Todo(
@@ -295,9 +403,55 @@ public sealed class SqliteTimelineQueryTests
             item, occurrence, CancellationToken.None);
     }
 
+    private static async Task<ReminderOccurrence> SaveScheduledReminderAsync(
+        SqliteReminderRepository repository,
+        string title,
+        DateTimeOffset dueAt)
+    {
+        var item = ReminderItem.Create(
+            title, ReminderKind.Plan, ReminderImportance.Normal,
+            dueAt.AddDays(-20), dueAt);
+        var occurrence = ReminderOccurrence.Schedule(item.Id, dueAt);
+        await repository.SaveItemWithOccurrenceAsync(
+            item, occurrence, CancellationToken.None);
+        return occurrence;
+    }
+
+    private static async Task SaveCompletedReminderAsync(
+        SqliteReminderRepository repository,
+        string title,
+        DateTimeOffset dueAt,
+        DateTimeOffset completedAt)
+    {
+        var occurrence = await SaveScheduledReminderAsync(
+            repository, title, dueAt);
+        await repository.ApplyActionAsync(
+            occurrence.Id,
+            OccurrenceState.Completed,
+            completedAt,
+            nextOccurrence: null,
+            CancellationToken.None);
+    }
+
     private static TimeZoneInfo FixedZone() =>
         TimeZoneInfo.CreateCustomTimeZone(
             "UTC+08-snapshot", TimeSpan.FromHours(8), "UTC+08", "UTC+08");
+
+    private static LocalDateRange Day(int year, int month, int day)
+    {
+        var date = new DateOnly(year, month, day);
+        return new LocalDateRange(date, date);
+    }
+
+    private static DateTimeOffset AtNoon(
+        int year,
+        int month,
+        int day,
+        TimeZoneInfo zone)
+    {
+        var local = new DateTime(year, month, day, 12, 0, 0, DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, zone.GetUtcOffset(local));
+    }
 
     private static async Task EnableWalAsync(string path)
     {

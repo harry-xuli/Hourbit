@@ -1,5 +1,7 @@
+using System.Globalization;
 using Moment.App.Commands;
 using Moment.App.Timeline;
+using Moment.Core.Analytics;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
@@ -10,6 +12,154 @@ namespace Moment.App.Tests.Timeline;
 
 public sealed class TimelineViewModelTests
 {
+    [Fact]
+    public void Timeline_period_uses_the_active_culture_week_start()
+    {
+        var culture = CultureInfo.GetCultureInfo("fr-FR");
+
+        var period = TimelinePeriod.Create(
+            new DateOnly(2026, 7, 29), TimelinePeriodKind.Week, culture);
+
+        Assert.Equal(
+            new LocalDateRange(
+                new DateOnly(2026, 7, 27),
+                new DateOnly(2026, 8, 2)),
+            period.Range);
+        Assert.Equal("2026年7月27日 – 2026年8月2日", period.Label);
+    }
+
+    [Fact]
+    public void Timeline_period_month_handles_leap_day_and_moves_by_calendar_month()
+    {
+        var culture = CultureInfo.GetCultureInfo("zh-CN");
+        var february = TimelinePeriod.Create(
+            new DateOnly(2024, 2, 29), TimelinePeriodKind.Month, culture);
+
+        var march = TimelinePeriod.Create(
+            new DateOnly(2024, 3, 29), TimelinePeriodKind.Month, culture);
+
+        Assert.Equal(
+            new LocalDateRange(
+                new DateOnly(2024, 2, 1),
+                new DateOnly(2024, 2, 29)),
+            february.Range);
+        Assert.Equal("2024年2月", february.Label);
+        Assert.Equal(
+            new LocalDateRange(
+                new DateOnly(2024, 3, 1),
+                new DateOnly(2024, 3, 31)),
+            march.Range);
+        Assert.Equal("2024年3月", march.Label);
+    }
+
+    [Fact]
+    public async Task Timeline_defaults_to_day_and_moves_each_period_by_its_calendar_unit()
+    {
+        var query = new RecordingPeriodQuery();
+        var vm = Create(
+            query,
+            culture: CultureInfo.GetCultureInfo("en-US"));
+
+        await vm.LoadAsync();
+        Assert.Equal(TimelinePeriodKind.Day, vm.SelectedPeriodKind);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 7, 29)),
+            query.Ranges[^1]);
+        Assert.Equal("2026年7月29日 Wednesday", vm.PeriodLabel);
+
+        await vm.PreviousPeriodCommand.ExecuteAsync(null);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 7, 28), new DateOnly(2026, 7, 28)),
+            query.Ranges[^1]);
+        await vm.NextPeriodCommand.ExecuteAsync(null);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 7, 29)),
+            query.Ranges[^1]);
+
+        await vm.SelectWeekPeriodCommand.ExecuteAsync(null);
+        Assert.Equal(TimelinePeriodKind.Week, vm.SelectedPeriodKind);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 7, 26), new DateOnly(2026, 8, 1)),
+            query.Ranges[^1]);
+        await vm.NextPeriodCommand.ExecuteAsync(null);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 8, 2), new DateOnly(2026, 8, 8)),
+            query.Ranges[^1]);
+
+        await vm.SelectMonthPeriodCommand.ExecuteAsync(null);
+        Assert.Equal(TimelinePeriodKind.Month, vm.SelectedPeriodKind);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 31)),
+            query.Ranges[^1]);
+        await vm.PreviousPeriodCommand.ExecuteAsync(null);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)),
+            query.Ranges[^1]);
+    }
+
+    [Fact]
+    public async Task Timeline_publishes_summary_cards_and_navigates_to_their_exact_ranges()
+    {
+        var opened = new List<LocalDateRange>();
+        var query = new FakeTimelineQuery(new TimelineSnapshot(
+            [], [], 0, 0,
+            PastSevenDaysCompleted: 7,
+            NextFourteenDaysPlanned: 14));
+        var vm = Create(query, analyticsNavigation: opened.Add);
+
+        await vm.LoadAsync();
+        await vm.OpenPastSevenDaysAnalyticsCommand.ExecuteAsync(null);
+        await vm.OpenNextFourteenDaysAnalyticsCommand.ExecuteAsync(null);
+
+        Assert.Equal(7, vm.PastSevenDaysCompleted);
+        Assert.Equal(14, vm.NextFourteenDaysPlanned);
+        Assert.Equal(
+            [
+                new LocalDateRange(new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))
+            ],
+            opened);
+    }
+
+    [Fact]
+    public async Task Period_switch_cancels_the_stale_day_load_and_publishes_only_the_week_snapshot()
+    {
+        var query = new CancelDayThenReturnWeekQuery();
+        var vm = Create(
+            query,
+            culture: CultureInfo.GetCultureInfo("fr-FR"));
+
+        var dayLoad = vm.LoadAsync();
+        await query.DayStarted.Task;
+        await vm.SelectWeekPeriodCommand.ExecuteAsync(null);
+        await dayLoad;
+
+        Assert.True(query.DayCancellationObserved);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 7, 27), new DateOnly(2026, 8, 2)),
+            query.Ranges[^1]);
+        Assert.Equal("周视图", Assert.Single(vm.Items).Title);
+        Assert.Null(vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Stale_period_failure_cannot_replace_the_latest_successful_snapshot()
+    {
+        var query = new StaleFailureAfterWeekQuery();
+        var vm = Create(
+            query,
+            culture: CultureInfo.GetCultureInfo("fr-FR"));
+
+        var dayLoad = vm.LoadAsync();
+        await query.DayStarted.Task;
+        await vm.SelectWeekPeriodCommand.ExecuteAsync(null);
+        query.ReleaseDayFailure.TrySetResult();
+        await dayLoad;
+
+        Assert.Equal("最新周视图", Assert.Single(vm.Items).Title);
+        Assert.Null(vm.ErrorMessage);
+    }
+
     [Fact]
     public async Task Timeline_orders_by_due_time_and_exposes_text_status()
     {
@@ -326,7 +476,9 @@ public sealed class TimelineViewModelTests
         IReminderService? service = null,
         ITimelineDialogService? dialogs = null,
         IReminderActionService? actions = null,
-        ITodoService? todos = null)
+        ITodoService? todos = null,
+        CultureInfo? culture = null,
+        Action<LocalDateRange>? analyticsNavigation = null)
     {
         var reminderDialogs = dialogs ?? new Dialogs();
         var todoDialogs = reminderDialogs as ITodoDialogService ?? new Dialogs();
@@ -337,7 +489,83 @@ public sealed class TimelineViewModelTests
             todos ?? new RecordingTodoService(),
             reminderDialogs,
             todoDialogs,
-            TimeZoneInfo.CreateCustomTimeZone("UTC+08-vm", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
+            TimeZoneInfo.CreateCustomTimeZone("UTC+08-vm", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+            culture,
+            analyticsNavigation);
+    }
+
+    private sealed class RecordingPeriodQuery : ITimelineQuery
+    {
+        public List<LocalDateRange> Ranges { get; } = [];
+
+        public Task<TimelineSnapshot> GetTimelineAsync(
+            LocalDateRange range,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            CancellationToken ct)
+        {
+            Ranges.Add(range);
+            return Task.FromResult(new TimelineSnapshot([], [], 0, 0));
+        }
+    }
+
+    private sealed class CancelDayThenReturnWeekQuery : ITimelineQuery
+    {
+        public TaskCompletionSource DayStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<LocalDateRange> Ranges { get; } = [];
+        public bool DayCancellationObserved { get; private set; }
+
+        public async Task<TimelineSnapshot> GetTimelineAsync(
+            LocalDateRange range,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            CancellationToken ct)
+        {
+            Ranges.Add(range);
+            if (Ranges.Count == 1)
+            {
+                DayStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    DayCancellationObserved = true;
+                    throw;
+                }
+            }
+
+            return new TimelineSnapshot(
+                [], [TestData.Row("周视图", "2026-07-29T10:00:00+08:00")], 0, 0);
+        }
+    }
+
+    private sealed class StaleFailureAfterWeekQuery : ITimelineQuery
+    {
+        private int _calls;
+        public TaskCompletionSource DayStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseDayFailure { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<TimelineSnapshot> GetTimelineAsync(
+            LocalDateRange range,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            CancellationToken ct)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                DayStarted.TrySetResult();
+                await ReleaseDayFailure.Task;
+                throw new InvalidOperationException("旧查询失败");
+            }
+
+            return new TimelineSnapshot(
+                [], [TestData.Row("最新周视图", "2026-07-29T10:00:00+08:00")], 0, 0);
+        }
     }
 
     private sealed class FakeTimelineQuery : ITimelineQuery
@@ -352,7 +580,8 @@ public sealed class TimelineViewModelTests
         public FakeTimelineQuery(TimelineSnapshot snapshot) => _snapshot = snapshot;
 
         public Task<TimelineSnapshot> GetTimelineAsync(
-            DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
+            LocalDateRange range, DateTimeOffset now,
+            TimeZoneInfo zone, CancellationToken ct) =>
             Task.FromResult(_snapshot);
     }
 
@@ -362,7 +591,8 @@ public sealed class TimelineViewModelTests
         public int Calls { get; private set; }
 
         public Task<TimelineSnapshot> GetTimelineAsync(
-            DateOnly localDate, TimeZoneInfo zone, CancellationToken ct)
+            LocalDateRange range, DateTimeOffset now,
+            TimeZoneInfo zone, CancellationToken ct)
         {
             Calls++;
             return Task.FromResult(Snapshot);
@@ -372,7 +602,8 @@ public sealed class TimelineViewModelTests
     private sealed class ThrowingTimelineQuery(Exception exception) : ITimelineQuery
     {
         public Task<TimelineSnapshot> GetTimelineAsync(
-            DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
+            LocalDateRange range, DateTimeOffset now,
+            TimeZoneInfo zone, CancellationToken ct) =>
             Task.FromException<TimelineSnapshot>(exception);
     }
 
@@ -384,7 +615,8 @@ public sealed class TimelineViewModelTests
         public bool FirstCancellationObserved { get; private set; }
 
         public async Task<TimelineSnapshot> GetTimelineAsync(
-            DateOnly localDate, TimeZoneInfo zone, CancellationToken ct)
+            LocalDateRange range, DateTimeOffset now,
+            TimeZoneInfo zone, CancellationToken ct)
         {
             if (Interlocked.Increment(ref _calls) == 1)
             {
