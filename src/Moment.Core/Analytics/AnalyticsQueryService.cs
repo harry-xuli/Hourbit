@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using Moment.Core.Domain;
 
@@ -56,7 +57,7 @@ public sealed class AnalyticsQueryService
         foreach (var todo in history.Todos)
         {
             ct.ThrowIfCancellationRequested();
-            if (!ShouldInclude(todo, range, zone, now))
+            if (!ShouldInclude(todo, range, zone))
                 continue;
 
             details.Add(new AnalyticsDetailRow(
@@ -104,15 +105,18 @@ public sealed class AnalyticsQueryService
                 GetReminderStatus(reminder)));
         }
 
-        details = details
+        var orderedDetails = details
             .OrderBy(static row => row.IsDeleted)
-            .ThenBy(static row => row.DueDate ?? LocalDate(row.DueAt) ?? DateOnly.MaxValue)
-            .ThenBy(static row => row.DueAt)
+            .ThenBy(row => row.DueDate ?? LocalDate(row.DueAt, zone) ?? DateOnly.MaxValue)
+            .ThenBy(row => LocalTime(row.DueAt, zone))
+            .ThenBy(static row => row.DueAt?.UtcTicks)
             .ThenBy(static row => row.ItemType)
             .ThenBy(static row => row.RecordId)
-            .ToList();
+            .ToImmutableArray();
 
-        var active = details.Where(static row => !row.IsDeleted).ToArray();
+        var active = orderedDetails
+            .Where(static row => !row.IsDeleted)
+            .ToImmutableArray();
         var completed = active.Count(row =>
             row.Status == AnalyticsRecordStatus.Completed &&
             IsInRange(row.CompletedAt, range, zone));
@@ -123,7 +127,7 @@ public sealed class AnalyticsQueryService
             completed,
             futurePlanned,
             overdue,
-            details.Count(static row => row.IsDeleted),
+            orderedDetails.Count(static row => row.IsDeleted),
             active.Count(static row => row.ItemType == AnalyticsItemType.Todo),
             active.Count(static row => row.ItemType == AnalyticsItemType.Reminder),
             active.Count(static row => row.ItemType == AnalyticsItemType.Todo && row.DueDate is null));
@@ -138,14 +142,13 @@ public sealed class AnalyticsQueryService
             CreateTypeDistribution(active),
             CreateImportanceDistribution(active),
             CreateTrend(range, active, zone, _culture.DateTimeFormat.FirstDayOfWeek),
-            details.AsReadOnly());
+            orderedDetails);
     }
 
     private static bool ShouldInclude(
         AnalyticsTodoHistoryRow todo,
         LocalDateRange range,
-        TimeZoneInfo zone,
-        DateTimeOffset now)
+        TimeZoneInfo zone)
     {
         if (todo.DeletedAt is not null)
         {
@@ -159,7 +162,7 @@ public sealed class AnalyticsQueryService
             return true;
         if (IsInRange(todo.CompletedAt, range, zone) || IsInRange(todo.DeletedAt, range, zone))
             return true;
-        return !todo.IsCompleted && todo.DueDate < DateOnly.FromDateTime(now.DateTime);
+        return false;
     }
 
     private static bool ShouldInclude(
@@ -216,34 +219,31 @@ public sealed class AnalyticsQueryService
                row.DueAt is not null && row.DueAt > now && IsInRange(row.DueAt, range, zone);
     }
 
-    private static IReadOnlyList<DistributionSlice> CreateStatusDistribution(
-        IReadOnlyCollection<AnalyticsDetailRow> rows) =>
-        new[]
-        {
+    private static ImmutableArray<DistributionSlice> CreateStatusDistribution(
+        ImmutableArray<AnalyticsDetailRow> rows) =>
+        [
             new DistributionSlice("completed", "已完成", rows.Count(static row => row.Status == AnalyticsRecordStatus.Completed)),
             new DistributionSlice("incomplete", "未完成", rows.Count(static row => row.Status == AnalyticsRecordStatus.Incomplete)),
             new DistributionSlice("overdue", "已逾期", rows.Count(static row => row.Status == AnalyticsRecordStatus.Overdue))
-        };
+        ];
 
-    private static IReadOnlyList<DistributionSlice> CreateTypeDistribution(
-        IReadOnlyCollection<AnalyticsDetailRow> rows) =>
-        new[]
-        {
+    private static ImmutableArray<DistributionSlice> CreateTypeDistribution(
+        ImmutableArray<AnalyticsDetailRow> rows) =>
+        [
             new DistributionSlice("todo", "待办", rows.Count(static row => row.ItemType == AnalyticsItemType.Todo)),
             new DistributionSlice("reminder", "提醒", rows.Count(static row => row.ItemType == AnalyticsItemType.Reminder))
-        };
+        ];
 
-    private static IReadOnlyList<DistributionSlice> CreateImportanceDistribution(
-        IReadOnlyCollection<AnalyticsDetailRow> rows) =>
-        new[]
-        {
+    private static ImmutableArray<DistributionSlice> CreateImportanceDistribution(
+        ImmutableArray<AnalyticsDetailRow> rows) =>
+        [
             new DistributionSlice("normal", "普通", rows.Count(static row => row.Importance == ReminderImportance.Normal)),
             new DistributionSlice("important", "重要", rows.Count(static row => row.Importance == ReminderImportance.Important))
-        };
+        ];
 
-    private static IReadOnlyList<TrendBucket> CreateTrend(
+    private static ImmutableArray<TrendBucket> CreateTrend(
         LocalDateRange range,
-        IReadOnlyCollection<AnalyticsDetailRow> rows,
+        ImmutableArray<AnalyticsDetailRow> rows,
         TimeZoneInfo zone,
         DayOfWeek firstDayOfWeek)
     {
@@ -255,10 +255,10 @@ public sealed class AnalyticsQueryService
                     row.CompletedAt is not null &&
                     IsWithinBucket(row.CompletedAt.Value, bucket, zone))
             })
-            .ToArray();
+            .ToImmutableArray();
     }
 
-    private static IReadOnlyList<TrendBucket> CreateEmptyBuckets(
+    private static ImmutableArray<TrendBucket> CreateEmptyBuckets(
         LocalDateRange range,
         DayOfWeek firstDayOfWeek)
     {
@@ -268,7 +268,7 @@ public sealed class AnalyticsQueryService
             return Enumerable.Range(0, dayCount)
                 .Select(offset => range.Start.AddDays(offset))
                 .Select(date => new TrendBucket(date, date, FormatDate(date), 0))
-                .ToArray();
+                .ToImmutableArray();
         }
 
         var buckets = new List<TrendBucket>();
@@ -283,7 +283,7 @@ public sealed class AnalyticsQueryService
                 buckets.Add(new TrendBucket(start, end, $"{FormatDate(start)} – {FormatDate(end)}", 0));
                 start = end.AddDays(1);
             }
-            return buckets;
+            return buckets.ToImmutableArray();
         }
 
         var monthStart = range.Start;
@@ -297,7 +297,7 @@ public sealed class AnalyticsQueryService
                 monthStart.ToString("yyyy-MM", CultureInfo.InvariantCulture), 0));
             monthStart = monthEnd.AddDays(1);
         }
-        return buckets;
+        return buckets.ToImmutableArray();
     }
 
     private static bool IsWithinBucket(
@@ -320,8 +320,15 @@ public sealed class AnalyticsQueryService
         return date >= range.Start && date <= range.End;
     }
 
-    private static DateOnly? LocalDate(DateTimeOffset? value) =>
-        value is null ? null : DateOnly.FromDateTime(value.Value.DateTime);
+    private static DateOnly? LocalDate(DateTimeOffset? value, TimeZoneInfo zone) =>
+        value is null
+            ? null
+            : DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.Value, zone).DateTime);
+
+    private static TimeOnly LocalTime(DateTimeOffset? value, TimeZoneInfo zone) =>
+        value is null
+            ? TimeOnly.MinValue
+            : TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(value.Value, zone).DateTime);
 
     private static DateOnly Min(DateOnly left, DateOnly right) => left <= right ? left : right;
 

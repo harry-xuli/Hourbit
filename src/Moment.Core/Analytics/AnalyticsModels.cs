@@ -1,20 +1,52 @@
+using System.Collections.Immutable;
 using Moment.Core.Domain;
 
 namespace Moment.Core.Analytics;
 
 public sealed record LocalDateRange(DateOnly Start, DateOnly End);
 
-public sealed record AnalyticsSnapshot(
-    Guid SnapshotId,
-    DateTimeOffset GeneratedAt,
-    LocalDateRange Range,
-    string TimeZoneId,
-    AnalyticsTotals Totals,
-    IReadOnlyList<DistributionSlice> Status,
-    IReadOnlyList<DistributionSlice> ItemTypes,
-    IReadOnlyList<DistributionSlice> Importance,
-    IReadOnlyList<TrendBucket> Trend,
-    IReadOnlyList<AnalyticsDetailRow> Details);
+public sealed record AnalyticsSnapshot
+{
+    public AnalyticsSnapshot(
+        Guid snapshotId,
+        DateTimeOffset generatedAt,
+        LocalDateRange range,
+        string timeZoneId,
+        AnalyticsTotals totals,
+        IEnumerable<DistributionSlice> status,
+        IEnumerable<DistributionSlice> itemTypes,
+        IEnumerable<DistributionSlice> importance,
+        IEnumerable<TrendBucket> trend,
+        IEnumerable<AnalyticsDetailRow> details)
+    {
+        SnapshotId = snapshotId;
+        GeneratedAt = generatedAt;
+        Range = range ?? throw new ArgumentNullException(nameof(range));
+        TimeZoneId = timeZoneId ?? throw new ArgumentNullException(nameof(timeZoneId));
+        Totals = totals ?? throw new ArgumentNullException(nameof(totals));
+        Status = ToImmutable(status, nameof(status));
+        ItemTypes = ToImmutable(itemTypes, nameof(itemTypes));
+        Importance = ToImmutable(importance, nameof(importance));
+        Trend = ToImmutable(trend, nameof(trend));
+        Details = ToImmutable(details, nameof(details));
+    }
+
+    public Guid SnapshotId { get; }
+    public DateTimeOffset GeneratedAt { get; }
+    public LocalDateRange Range { get; }
+    public string TimeZoneId { get; }
+    public AnalyticsTotals Totals { get; }
+    public ImmutableArray<DistributionSlice> Status { get; }
+    public ImmutableArray<DistributionSlice> ItemTypes { get; }
+    public ImmutableArray<DistributionSlice> Importance { get; }
+    public ImmutableArray<TrendBucket> Trend { get; }
+    public ImmutableArray<AnalyticsDetailRow> Details { get; }
+
+    private static ImmutableArray<T> ToImmutable<T>(
+        IEnumerable<T> values,
+        string parameterName) =>
+        (values ?? throw new ArgumentNullException(parameterName)).ToImmutableArray();
+}
 
 public sealed record AnalyticsTotals(
     int Active,
@@ -66,15 +98,23 @@ public sealed record AnalyticsDetailRow(
     public bool IsDeleted => DeletedAt.HasValue;
 }
 
-public sealed record AnalyticsHistory(
-    IReadOnlyList<AnalyticsTodoHistoryRow> Todos,
-    IReadOnlyList<AnalyticsReminderHistoryRow> Reminders,
-    IReadOnlyList<AnalyticsActionHistoryRow> Actions)
+public sealed record AnalyticsHistory
 {
-    public static AnalyticsHistory Empty { get; } = new(
-        Array.Empty<AnalyticsTodoHistoryRow>(),
-        Array.Empty<AnalyticsReminderHistoryRow>(),
-        Array.Empty<AnalyticsActionHistoryRow>());
+    public AnalyticsHistory(
+        IEnumerable<AnalyticsTodoHistoryRow> todos,
+        IEnumerable<AnalyticsReminderHistoryRow> reminders,
+        IEnumerable<AnalyticsActionHistoryRow> actions)
+    {
+        Todos = (todos ?? throw new ArgumentNullException(nameof(todos))).ToImmutableArray();
+        Reminders = (reminders ?? throw new ArgumentNullException(nameof(reminders))).ToImmutableArray();
+        Actions = (actions ?? throw new ArgumentNullException(nameof(actions))).ToImmutableArray();
+    }
+
+    public ImmutableArray<AnalyticsTodoHistoryRow> Todos { get; }
+    public ImmutableArray<AnalyticsReminderHistoryRow> Reminders { get; }
+    public ImmutableArray<AnalyticsActionHistoryRow> Actions { get; }
+
+    public static AnalyticsHistory Empty { get; } = new([], [], []);
 }
 
 public sealed record AnalyticsTodoHistoryRow(

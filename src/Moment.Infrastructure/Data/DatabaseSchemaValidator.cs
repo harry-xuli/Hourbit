@@ -57,8 +57,16 @@ internal static class DatabaseSchemaValidator
         "CREATE INDEX ix_occurrences_deleted_handled_at ON occurrences(deleted_at, handled_at);",
         "CREATE INDEX ix_todos_active_due_date ON todos(due_date, id) WHERE deleted_at IS NULL;",
         "CREATE INDEX ix_todos_deleted_due_date ON todos(deleted_at, due_date);",
-        "CREATE INDEX ix_todos_deleted_completed_at ON todos(deleted_at, completed_at);"
+        "CREATE INDEX ix_todos_deleted_completed_at ON todos(deleted_at, completed_at);",
+        "CREATE INDEX ix_occurrences_due_at_utc_id ON occurrences(due_at_utc, id);",
+        "CREATE INDEX ix_occurrences_handled_at_id ON occurrences(handled_at, id);",
+        "CREATE INDEX ix_todos_due_date_id ON todos(due_date, id);",
+        "CREATE INDEX ix_todos_completed_at_id ON todos(completed_at, id);",
+        "CREATE INDEX ix_action_log_handled_at_occurrence_id ON action_log(handled_at, occurrence_id, id);"
     ];
+
+    internal static IReadOnlyList<string> CreateVersionFourAnalyticsIndexesSql =>
+        CreateVersionFourIndexesSql.AsSpan(8).ToArray();
 
     private const string CreateSchemaInfoSql =
         "CREATE TABLE schema_info (version INTEGER NOT NULL);";
@@ -206,7 +214,17 @@ internal static class DatabaseSchemaValidator
         new("todos", "ix_todos_deleted_due_date", false, false,
             ["deleted_at", "due_date"], CreateVersionFourIndexesSql[6]),
         new("todos", "ix_todos_deleted_completed_at", false, false,
-            ["deleted_at", "completed_at"], CreateVersionFourIndexesSql[7])
+            ["deleted_at", "completed_at"], CreateVersionFourIndexesSql[7]),
+        new("occurrences", "ix_occurrences_due_at_utc_id", false, false,
+            ["due_at_utc", "id"], CreateVersionFourIndexesSql[8]),
+        new("occurrences", "ix_occurrences_handled_at_id", false, false,
+            ["handled_at", "id"], CreateVersionFourIndexesSql[9]),
+        new("todos", "ix_todos_due_date_id", false, false,
+            ["due_date", "id"], CreateVersionFourIndexesSql[10]),
+        new("todos", "ix_todos_completed_at_id", false, false,
+            ["completed_at", "id"], CreateVersionFourIndexesSql[11]),
+        new("action_log", "ix_action_log_handled_at_occurrence_id", false, false,
+            ["handled_at", "occurrence_id", "id"], CreateVersionFourIndexesSql[12])
     ];
 
     internal static async Task<int> CountVersionMarkersAsync(
@@ -298,6 +316,20 @@ internal static class DatabaseSchemaValidator
     internal static async Task ValidateVersionFourAsync(
         SqliteConnection connection,
         SqliteTransaction? transaction,
+        CancellationToken ct) =>
+        await ValidateVersionFourAsync(
+            connection, transaction, VersionFourIndexes.Length, ct);
+
+    internal static async Task ValidateVersionFourUpgradeBaseAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct) =>
+        await ValidateVersionFourAsync(connection, transaction, 8, ct);
+
+    private static async Task ValidateVersionFourAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        int requiredIndexCount,
         CancellationToken ct)
     {
         await ValidateExactMarkersAsync(
@@ -329,7 +361,7 @@ internal static class DatabaseSchemaValidator
             connection, transaction, "settings", SettingsColumns,
             CreateSettingsSql, [], ct);
 
-        foreach (var index in VersionFourIndexes)
+        foreach (var index in VersionFourIndexes.Take(requiredIndexCount))
             await ValidateIndexAsync(connection, transaction, index, ct);
         await ValidateForeignKeyCheckAsync(connection, transaction, ct);
     }

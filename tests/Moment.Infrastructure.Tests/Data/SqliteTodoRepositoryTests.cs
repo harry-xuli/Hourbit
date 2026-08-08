@@ -490,6 +490,46 @@ public sealed class SqliteTodoRepositoryTests
     }
 
     [Fact]
+    public async Task Migration_repairs_a_missing_version_four_analytics_index()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+        await ExecuteAsync(path,
+            "DROP INDEX IF EXISTS ix_action_log_handled_at_occurrence_id;");
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ix_action_log_handled_at_occurrence_id';
+            """));
+    }
+
+    [Fact]
+    public async Task Migration_rejects_a_wrong_same_name_version_four_analytics_index()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+        await ExecuteAsync(path, """
+            DROP INDEX IF EXISTS ix_action_log_handled_at_occurrence_id;
+            CREATE INDEX ix_action_log_handled_at_occurrence_id
+                ON action_log(occurrence_id, handled_at, id);
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DatabaseMigrator.MigrateAsync(connection, default));
+    }
+
+    [Fact]
     public async Task Todo_rows_never_enter_reminder_scheduler_queries()
     {
         using var temp = new TempDirectory();

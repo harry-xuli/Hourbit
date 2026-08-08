@@ -54,6 +54,9 @@ public static class DatabaseMigrator
                 connection, (SqliteTransaction)transaction, 4, ct);
         if (versionFourMarkers > 0)
         {
+            await DatabaseSchemaValidator.ValidateVersionFourUpgradeBaseAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            await EnsureVersionFourAnalyticsIndexesAsync(command, ct);
             await DatabaseSchemaValidator.ValidateVersionFourAsync(
                 connection, (SqliteTransaction)transaction, ct);
             await transaction.CommitAsync(ct);
@@ -179,6 +182,20 @@ public static class DatabaseMigrator
             connection, (SqliteTransaction)transaction, ct);
 
         await transaction.CommitAsync(ct);
+    }
+
+    private static async Task EnsureVersionFourAnalyticsIndexesAsync(
+        SqliteCommand command,
+        CancellationToken ct)
+    {
+        foreach (var indexSql in DatabaseSchemaValidator.CreateVersionFourAnalyticsIndexesSql)
+        {
+            command.CommandText = indexSql.Replace(
+                "CREATE INDEX ",
+                "CREATE INDEX IF NOT EXISTS ",
+                StringComparison.Ordinal);
+            await command.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private static async Task UpgradeToVersionFourAsync(

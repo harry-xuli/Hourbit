@@ -7,6 +7,36 @@ namespace Moment.Core.Tests.Analytics;
 public sealed class AnalyticsQueryServiceTests
 {
     [Fact]
+    public async Task Analytics_history_and_snapshot_collections_cannot_be_mutated_through_sources_or_casts()
+    {
+        var rawTodo = Todo(
+            "70000000-0000-0000-0000-000000000001", "不可变待办",
+            new DateOnly(2026, 8, 1));
+        var sourceTodos = new List<AnalyticsTodoHistoryRow> { rawTodo };
+        var history = new AnalyticsHistory(sourceTodos, [], []);
+        sourceTodos.Clear();
+        var service = new AnalyticsQueryService(
+            new RecordingAnalyticsQuery { Result = history },
+            new FixedTimeProvider(DateTimeOffset.Parse(
+                "2026-08-01T08:00:00+08:00", CultureInfo.InvariantCulture)),
+            CultureInfo.InvariantCulture);
+
+        var snapshot = await service.CreateSnapshotAsync(
+            new LocalDateRange(new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 1)),
+            FixedZone(), CancellationToken.None);
+        var snapshotId = snapshot.SnapshotId;
+        var originalStatus = snapshot.Status[0];
+        var mutableStatus = Assert.IsAssignableFrom<IList<DistributionSlice>>(snapshot.Status);
+
+        Assert.Single(history.Todos);
+        Assert.Throws<NotSupportedException>(() => mutableStatus[0] =
+            new DistributionSlice("corrupt", "篡改", 999));
+        Assert.Equal(snapshotId, snapshot.SnapshotId);
+        Assert.Equal(originalStatus, snapshot.Status[0]);
+        Assert.Equal(rawTodo.TodoId, Assert.Single(snapshot.Details).RecordId);
+    }
+
+    [Fact]
     public async Task CreateSnapshot_converts_inclusive_leap_and_DST_dates_to_one_half_open_UTC_query()
     {
         var query = new RecordingAnalyticsQuery();
@@ -94,7 +124,7 @@ public sealed class AnalyticsQueryServiceTests
         Assert.Equal(
             [("normal", 5), ("important", 3)],
             snapshot.Importance.Select(slice => (slice.Key, slice.Count)));
-        Assert.Equal(10, snapshot.Details.Count);
+        Assert.Equal(10, snapshot.Details.Length);
         Assert.Equal(2, snapshot.Details.Count(row => row.IsDeleted));
         Assert.Equal(2, snapshot.Details.Count(row => row.ItemId == recurringItemId));
         Assert.Equal(4, snapshot.Trend.Sum(bucket => bucket.Completed));
@@ -120,6 +150,45 @@ public sealed class AnalyticsQueryServiceTests
     }
 
     [Fact]
+    public async Task CreateSnapshot_orders_details_by_snapshot_timezone_not_each_values_original_offset()
+    {
+        var laterLocalDay = Reminder(
+            "71000000-0000-0000-0000-000000000001", Guid.NewGuid(), "快照次日",
+            "2026-07-01T09:00:00Z", "2026-08-01T23:30:00-05:00",
+            OccurrenceState.Scheduled);
+        var earlierLocalDay = Reminder(
+            "71000000-0000-0000-0000-000000000002", Guid.NewGuid(), "快照当日",
+            "2026-07-01T09:00:00Z", "2026-08-02T00:15:00+14:00",
+            OccurrenceState.Scheduled);
+        var sameInstantLowId = Reminder(
+            "71000000-0000-0000-0000-000000000003", Guid.NewGuid(), "同一瞬间一",
+            "2026-07-01T09:00:00Z", "2026-08-01T20:00:00+08:00",
+            OccurrenceState.Scheduled);
+        var sameInstantHighId = Reminder(
+            "71000000-0000-0000-0000-000000000004", Guid.NewGuid(), "同一瞬间二",
+            "2026-07-01T09:00:00Z", "2026-08-01T08:00:00-04:00",
+            OccurrenceState.Scheduled);
+        var service = new AnalyticsQueryService(
+            new RecordingAnalyticsQuery
+            {
+                Result = new AnalyticsHistory(
+                    [], [laterLocalDay, sameInstantHighId, earlierLocalDay, sameInstantLowId], [])
+            },
+            new FixedTimeProvider(DateTimeOffset.Parse(
+                "2026-08-01T00:00:00+08:00", CultureInfo.InvariantCulture)),
+            CultureInfo.InvariantCulture);
+
+        var snapshot = await service.CreateSnapshotAsync(
+            new LocalDateRange(new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 2)),
+            FixedZone(), CancellationToken.None);
+
+        Assert.Equal(
+            [earlierLocalDay.OccurrenceId, sameInstantLowId.OccurrenceId,
+                sameInstantHighId.OccurrenceId, laterLocalDay.OccurrenceId],
+            snapshot.Details.Select(row => row.RecordId));
+    }
+
+    [Fact]
     public async Task CreateSnapshot_uses_daily_then_monthly_buckets_and_returns_useful_zero_data()
     {
         var service = new AnalyticsQueryService(
@@ -135,7 +204,7 @@ public sealed class AnalyticsQueryServiceTests
         Assert.Equal(
             ["2024-02-27", "2024-02-28", "2024-02-29", "2024-03-01", "2024-03-02"],
             daily.Trend.Select(bucket => bucket.Label));
-        Assert.Equal(12, monthly.Trend.Count);
+        Assert.Equal(12, monthly.Trend.Length);
         Assert.Equal("2026-01", monthly.Trend[0].Label);
         Assert.Equal("2026-12", monthly.Trend[^1].Label);
         Assert.Equal(new AnalyticsTotals(0, 0, 0, 0, 0, 0, 0, 0), daily.Totals);

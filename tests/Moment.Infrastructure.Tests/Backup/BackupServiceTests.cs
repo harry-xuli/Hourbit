@@ -129,6 +129,8 @@ public sealed class BackupServiceTests
     [Theory]
     [InlineData("DROP TABLE action_log;")]
     [InlineData("DROP INDEX ix_occurrences_active_state_due_at_utc; CREATE INDEX ix_occurrences_active_state_due_at_utc ON occurrences(due_at_utc, state) WHERE deleted_at IS NULL;")]
+    [InlineData("DROP INDEX ix_action_log_handled_at_occurrence_id;")]
+    [InlineData("DROP INDEX ix_action_log_handled_at_occurrence_id; CREATE INDEX ix_action_log_handled_at_occurrence_id ON action_log(occurrence_id, handled_at, id);")]
     [InlineData("DELETE FROM schema_info WHERE version = 2;")]
     public async Task Export_rejects_an_incomplete_or_malformed_version_four_schema(
         string corruptionSql)
@@ -249,6 +251,10 @@ public sealed class BackupServiceTests
                     ON todos(deleted_at, due_date);
                 CREATE INDEX ix_todos_deleted_completed_at
                     ON todos(deleted_at, completed_at);
+                CREATE INDEX ix_todos_due_date_id
+                    ON todos(due_date, id);
+                CREATE INDEX ix_todos_completed_at_id
+                    ON todos(completed_at, id);
                 """;
             await rebuild.ExecuteNonQueryAsync();
         }

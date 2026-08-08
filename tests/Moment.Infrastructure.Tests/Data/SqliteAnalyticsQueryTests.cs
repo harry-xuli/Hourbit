@@ -121,6 +121,163 @@ public sealed class SqliteAnalyticsQueryTests
     }
 
     [Fact]
+    public async Task Read_applies_exact_half_open_ticks_after_SQL_candidate_filtering_for_all_timestamp_paths()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(path, CancellationToken.None);
+        var todos = await SqliteTodoRepository.OpenAsync(path, CancellationToken.None);
+        var start = Parse("2026-08-01T00:00:00Z");
+        var end = Parse("2026-08-02T00:00:00Z");
+        var beforeEnd = end.AddTicks(-1);
+        var oldDue = start.AddDays(-30);
+
+        var dueBefore = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000001", "到期前一tick",
+            ReminderKind.Alarm, beforeEnd, OccurrenceState.Scheduled);
+        _ = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000002", "到期正好end",
+            ReminderKind.Alarm, end, OccurrenceState.Scheduled);
+        var handledBefore = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000003", "处理前一tick",
+            ReminderKind.Plan, oldDue, OccurrenceState.Completed,
+            beforeEnd.ToOffset(TimeSpan.FromHours(9)));
+        _ = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000004", "处理正好end",
+            ReminderKind.Plan, oldDue.AddMinutes(1), OccurrenceState.Completed,
+            end.ToOffset(TimeSpan.FromHours(-5)));
+        var actionBefore = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000005", "动作前一tick",
+            ReminderKind.Countdown, oldDue.AddMinutes(2), OccurrenceState.Scheduled);
+        await InsertActionAsync(
+            path, "75000000-0000-0000-0000-000000000001", actionBefore.Id,
+            OccurrenceState.Completed, beforeEnd.ToOffset(TimeSpan.FromHours(13)));
+        var actionAtEnd = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000006", "动作正好end",
+            ReminderKind.Countdown, oldDue.AddMinutes(3), OccurrenceState.Scheduled);
+        await InsertActionAsync(
+            path, "75000000-0000-0000-0000-000000000002", actionAtEnd.Id,
+            OccurrenceState.Completed, end.ToOffset(TimeSpan.FromHours(-11)));
+        var deletedBefore = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000007", "删除前一tick",
+            ReminderKind.Plan, oldDue.AddMinutes(4), OccurrenceState.Scheduled);
+        await reminders.DeleteAsync(
+            deletedBefore.Id, SeriesScope.OccurrenceOnly,
+            beforeEnd.ToOffset(TimeSpan.FromHours(14)), CancellationToken.None);
+        var deletedAtEnd = await SaveReminderAsync(
+            reminders, "72000000-0000-0000-0000-000000000008", "删除正好end",
+            ReminderKind.Plan, oldDue.AddMinutes(5), OccurrenceState.Scheduled);
+        await reminders.DeleteAsync(
+            deletedAtEnd.Id, SeriesScope.OccurrenceOnly,
+            end.ToOffset(TimeSpan.FromHours(-12)), CancellationToken.None);
+
+        var completedTodoBefore = Todo(
+            "73000000-0000-0000-0000-000000000001", "待办完成前一tick",
+            new DateOnly(2026, 1, 1), true,
+            beforeEnd.ToOffset(TimeSpan.FromHours(10)).ToString("O", CultureInfo.InvariantCulture));
+        var completedTodoAtEnd = Todo(
+            "73000000-0000-0000-0000-000000000002", "待办完成正好end",
+            new DateOnly(2026, 1, 2), true,
+            end.ToOffset(TimeSpan.FromHours(-8)).ToString("O", CultureInfo.InvariantCulture));
+        var deletedTodoBefore = Todo(
+            "73000000-0000-0000-0000-000000000003", "待办删除前一tick",
+            new DateOnly(2026, 1, 3));
+        var deletedTodoAtEnd = Todo(
+            "73000000-0000-0000-0000-000000000004", "待办删除正好end",
+            new DateOnly(2026, 1, 4));
+        foreach (var todo in new[]
+                 {
+                     completedTodoBefore, completedTodoAtEnd,
+                     deletedTodoBefore, deletedTodoAtEnd
+                 })
+        {
+            await todos.SaveAsync(todo, CancellationToken.None);
+        }
+        await todos.DeleteAsync(
+            deletedTodoBefore.Id, beforeEnd.ToOffset(TimeSpan.FromHours(12)), CancellationToken.None);
+        await todos.DeleteAsync(
+            deletedTodoAtEnd.Id, end.ToOffset(TimeSpan.FromHours(-9)), CancellationToken.None);
+
+        var history = await new SqliteAnalyticsQuery(path).ReadAsync(
+            start, end, includeDeleted: true, CancellationToken.None);
+
+        Assert.Equal(
+            [dueBefore.Id, handledBefore.Id, actionBefore.Id, deletedBefore.Id],
+            history.Reminders.Select(row => row.OccurrenceId).Order());
+        var action = Assert.Single(history.Actions);
+        Assert.Equal(actionBefore.Id, action.OccurrenceId);
+        Assert.Equal(beforeEnd, action.HandledAt);
+        Assert.Equal(
+            [completedTodoBefore.Id, deletedTodoBefore.Id],
+            history.Todos.Select(row => row.TodoId).Order());
+    }
+
+    [Fact]
+    public async Task Read_bounds_a_large_dated_todo_history_but_retains_active_undated_todos()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var todos = await SqliteTodoRepository.OpenAsync(path, CancellationToken.None);
+        for (var index = 0; index < 200; index++)
+        {
+            await todos.SaveAsync(
+                new TodoItem(
+                    Guid.NewGuid(), $"远期历史 {index}", Parse("2020-01-01T00:00:00Z"),
+                    new DateOnly(2020, 1, 1).AddDays(index), ReminderImportance.Normal,
+                    false, null),
+                CancellationToken.None);
+        }
+        var inRange = Todo(
+            "74000000-0000-0000-0000-000000000001", "范围内",
+            new DateOnly(2026, 8, 1));
+        var undated = Todo(
+            "74000000-0000-0000-0000-000000000002", "活动无日期", null);
+        await todos.SaveAsync(inRange, CancellationToken.None);
+        await todos.SaveAsync(undated, CancellationToken.None);
+
+        var history = await new SqliteAnalyticsQuery(path).ReadAsync(
+            Parse("2026-08-01T00:00:00Z"), Parse("2026-08-02T00:00:00Z"),
+            includeDeleted: false, CancellationToken.None);
+
+        Assert.Equal(
+            [inRange.Id, undated.Id],
+            history.Todos.Select(row => row.TodoId).Order());
+    }
+
+    [Fact]
+    public async Task Schema_and_action_range_predicate_use_the_canonical_handled_at_index()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        _ = await SqliteReminderRepository.OpenAsync(path, CancellationToken.None);
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(
+            path, CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            EXPLAIN QUERY PLAN
+            SELECT a.id, a.occurrence_id, a.state, a.handled_at
+            FROM action_log a
+            INNER JOIN occurrences o ON o.id = a.occurrence_id
+            WHERE ($includeDeleted = 1 OR o.deleted_at IS NULL)
+              AND a.handled_at >= $safeStartText
+              AND a.handled_at < $safeEndText
+            ORDER BY a.handled_at, a.id COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue("$includeDeleted", 1);
+        command.Parameters.AddWithValue("$safeStartText", "2026-07-31");
+        command.Parameters.AddWithValue("$safeEndText", "2026-08-04");
+        var details = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+            details.Add(reader.GetString(3));
+
+        Assert.Contains(details, detail => detail.Contains(
+            "ix_action_log_handled_at_occurrence_id", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(details, detail => detail.Contains(
+            "SCAN a", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Read_honors_pre_cancelled_token()
     {
         using var temp = new TempDirectory();
@@ -152,14 +309,15 @@ public sealed class SqliteAnalyticsQueryTests
         string title,
         ReminderKind kind,
         DateTimeOffset dueAt,
-        OccurrenceState state)
+        OccurrenceState state,
+        DateTimeOffset? handledAt = null)
     {
         var item = ReminderItem.Create(
             title, kind, ReminderImportance.Normal,
             dueAt.AddDays(-10), dueAt);
         var occurrence = new ReminderOccurrence(
             Guid.Parse(occurrenceId), item.Id, dueAt, state,
-            state == OccurrenceState.Scheduled ? null : dueAt.AddMinutes(1), null);
+            state == OccurrenceState.Scheduled ? null : handledAt ?? dueAt.AddMinutes(1), null);
         await repository.SaveItemWithOccurrenceAsync(item, occurrence, CancellationToken.None);
         return occurrence;
     }
@@ -174,5 +332,27 @@ public sealed class SqliteAnalyticsQueryTests
         command.CommandText = "PRAGMA journal_mode=WAL;";
         Assert.Equal("wal", Convert.ToString(
             await command.ExecuteScalarAsync(CancellationToken.None), CultureInfo.InvariantCulture));
+    }
+
+    private static async Task InsertActionAsync(
+        string path,
+        string actionId,
+        Guid occurrenceId,
+        OccurrenceState state,
+        DateTimeOffset handledAt)
+    {
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(
+            path, CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO action_log(id, occurrence_id, state, handled_at)
+            VALUES ($id, $occurrenceId, $state, $handledAt);
+            """;
+        command.Parameters.AddWithValue("$id", actionId);
+        command.Parameters.AddWithValue("$occurrenceId", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$state", (int)state);
+        command.Parameters.AddWithValue(
+            "$handledAt", handledAt.ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(CancellationToken.None);
     }
 }
