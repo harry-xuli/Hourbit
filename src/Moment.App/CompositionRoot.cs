@@ -1,10 +1,12 @@
 using Moment.App.Alerts;
+using Moment.App.Analytics;
 using Moment.App.QuickAdd;
 using Moment.App.Settings;
 using Moment.App.Shell;
 using Moment.App.Timeline;
 using Moment.App.Startup;
 using Moment.Core.Abstractions;
+using Moment.Core.Analytics;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Recurrence;
@@ -45,6 +47,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     private readonly EventHandler _schedulerStateChanged;
     private readonly IDisposable _runtimeFailureReporting;
     private SettingsView? _settingsWindow;
+    private AnalyticsWindow? _analyticsWindow;
     private bool _started;
     private int _disposed;
 
@@ -69,6 +72,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         string dataFolder,
         SettingsViewModel settings,
         TimelineViewModel timeline,
+        AnalyticsViewModel analytics,
         QuickAddViewModel quickAdd,
         MainWindow mainWindow,
         QuickAddWindowController quickAddWindow)
@@ -96,12 +100,14 @@ public sealed class CompositionRoot : IAsyncDisposable
         _dataFolder = dataFolder;
         Settings = settings;
         Timeline = timeline;
+        Analytics = analytics;
         QuickAdd = quickAdd;
         MainWindow = mainWindow;
         QuickAddWindow = quickAddWindow;
     }
 
     public TimelineViewModel Timeline { get; }
+    public AnalyticsViewModel Analytics { get; }
     public QuickAddViewModel QuickAdd { get; }
     public SettingsViewModel Settings { get; }
     public MainWindow MainWindow { get; }
@@ -199,9 +205,17 @@ public sealed class CompositionRoot : IAsyncDisposable
                     throw new InvalidOperationException(currentTimeline.ErrorMessage);
             });
         var timelineQuery = new SqliteTimelineQuery(databasePath);
+        var analytics = ComposeAnalytics(
+            new SqliteAnalyticsQuery(databasePath),
+            TimeProvider.System,
+            zone,
+            CultureInfo.CurrentCulture);
+        CompositionRoot? root = null;
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, todos,
-            dialogs, dialogs, zone);
+            dialogs, dialogs, zone,
+            CultureInfo.CurrentCulture,
+            range => root?.ShowAnalytics(range));
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);
@@ -233,7 +247,6 @@ public sealed class CompositionRoot : IAsyncDisposable
                 reminderRecovery.RecoverAndRefreshAsync(resumeCancellation));
         var singleInstance = new SingleInstanceCoordinator();
 
-        CompositionRoot? root = null;
         var tray = TrayIconController.CreateWindows(
             async () => (await repository.GetScheduledAsync(CancellationToken.None)).Count > 0,
             mainWindow.ShowAndActivate,
@@ -243,6 +256,7 @@ public sealed class CompositionRoot : IAsyncDisposable
                 if (root is not null)
                     _ = root.CreateCountdownObservedAsync(delay);
             },
+            () => root?.ShowAnalytics(),
             () => root?.ShowSettings(),
             () =>
             {
@@ -259,7 +273,7 @@ public sealed class CompositionRoot : IAsyncDisposable
             notificationSink, importantAlertPresenter,
             windowPlacement, lifetime,
             dataFolder,
-            settings, timeline, quickAdd, mainWindow, quickWindow);
+            settings, timeline, analytics, quickAdd, mainWindow, quickWindow);
         return root;
     }
 
@@ -279,6 +293,24 @@ public sealed class CompositionRoot : IAsyncDisposable
             if (!string.IsNullOrWhiteSpace(timeline.ErrorMessage))
                 throw new InvalidOperationException(timeline.ErrorMessage);
         });
+
+    internal static AnalyticsViewModel ComposeAnalytics(
+        IAnalyticsQuery query,
+        TimeProvider timeProvider,
+        TimeZoneInfo zone,
+        CultureInfo culture)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(zone);
+        ArgumentNullException.ThrowIfNull(culture);
+        var service = new AnalyticsQueryService(query, timeProvider, culture);
+        return new AnalyticsViewModel(
+            (range, ct) => service.CreateSnapshotAsync(range, zone, ct),
+            timeProvider,
+            zone,
+            culture);
+    }
 
     internal static async Task TryCreateDailyBackupAsync(
         IBackupService backupService,
@@ -350,6 +382,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         _tray.ErrorOccurred -= OnRuntimeError;
         _lifetime.Cancel();
         _tray.Dispose();
+        _analyticsWindow?.Close();
         _settingsWindow?.Close();
         _hotkey.Dispose();
         await _resumeMonitor.DisposeAsync();
@@ -522,6 +555,40 @@ public sealed class CompositionRoot : IAsyncDisposable
         view.Show();
         _windowPlacement.Place(view);
         view.Activate();
+    }
+
+    public void ShowAnalytics() => ShowAnalyticsCore(null);
+
+    private void ShowAnalytics(LocalDateRange range) => ShowAnalyticsCore(range);
+
+    private void ShowAnalyticsCore(LocalDateRange? range)
+    {
+        if (!MainWindow.Dispatcher.CheckAccess())
+        {
+            _ = MainWindow.Dispatcher.BeginInvoke(
+                new Action(() => ShowAnalyticsCore(range)));
+            return;
+        }
+
+        if (_analyticsWindow is not { IsLoaded: true } window)
+        {
+            window = new AnalyticsWindow
+            {
+                DataContext = Analytics,
+                Owner = MainWindow
+            };
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_analyticsWindow, window))
+                    _analyticsWindow = null;
+            };
+            _analyticsWindow = window;
+        }
+
+        window.ShowAndActivate();
+        _ = range is null
+            ? Analytics.SelectRangeAsync(Analytics.SelectedRangeKind)
+            : Analytics.LoadRangeAsync(range);
     }
 
     private static IImportantAlertAudio CreateAppAlertAudio(Func<int> volume) =>

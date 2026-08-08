@@ -12,6 +12,14 @@
     <Color x:Key="CompletedColor">#287A43</Color>
     <Color x:Key="SelectionBackgroundColor">#F3F7FD</Color>
     <Color x:Key="SelectionTextColor">#18212F</Color>
+    <Color x:Key="ChartCompletedColor">#287A43</Color>
+    <Color x:Key="ChartIncompleteColor">#64748B</Color>
+    <Color x:Key="ChartOverdueColor">#C42B1C</Color>
+    <Color x:Key="ChartTodoColor">#0F5CC0</Color>
+    <Color x:Key="ChartReminderColor">#7C3AED</Color>
+    <Color x:Key="ChartNormalColor">#64748B</Color>
+    <Color x:Key="ChartImportantColor">#C83B19</Color>
+    <Color x:Key="ChartOtherColor">#A16207</Color>
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
     <SolidColorBrush x:Key="SubtleBackgroundBrush" Color="{StaticResource SubtleBackgroundColor}" />
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="{StaticResource PrimaryTextColor}" />
@@ -24,4 +32,12 @@
     <SolidColorBrush x:Key="CompletedBrush" Color="{StaticResource CompletedColor}" />
     <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="{StaticResource SelectionBackgroundColor}" />
     <SolidColorBrush x:Key="SelectionTextBrush" Color="{StaticResource SelectionTextColor}" />
+    <SolidColorBrush x:Key="ChartCompletedBrush" Color="{StaticResource ChartCompletedColor}" />
+    <SolidColorBrush x:Key="ChartIncompleteBrush" Color="{StaticResource ChartIncompleteColor}" />
+    <SolidColorBrush x:Key="ChartOverdueBrush" Color="{StaticResource ChartOverdueColor}" />
+    <SolidColorBrush x:Key="ChartTodoBrush" Color="{StaticResource ChartTodoColor}" />
+    <SolidColorBrush x:Key="ChartReminderBrush" Color="{StaticResource ChartReminderColor}" />
+    <SolidColorBrush x:Key="ChartNormalBrush" Color="{StaticResource ChartNormalColor}" />
+    <SolidColorBrush x:Key="ChartImportantBrush" Color="{StaticResource ChartImportantColor}" />
+    <SolidColorBrush x:Key="ChartOtherBrush" Color="{StaticResource ChartOtherColor}" />
 </ResourceDictionary>

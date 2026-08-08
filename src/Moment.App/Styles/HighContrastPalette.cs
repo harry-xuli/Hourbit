@@ -11,7 +11,10 @@ internal static class HighContrastPalette
         "WindowBackgroundBrush", "SubtleBackgroundBrush",
         "PrimaryTextBrush", "SecondaryTextBrush", "BorderBrush",
         "AccentBrush", "FocusBrush", "ImportantBrush", "MissedBrush",
-        "CompletedBrush", "SelectionBackgroundBrush", "SelectionTextBrush"
+        "CompletedBrush", "SelectionBackgroundBrush", "SelectionTextBrush",
+        "ChartCompletedBrush", "ChartIncompleteBrush", "ChartOverdueBrush",
+        "ChartTodoBrush", "ChartReminderBrush", "ChartNormalBrush",
+        "ChartImportantBrush", "ChartOtherBrush"
     ];
 
     internal static void Apply(
@@ -44,6 +47,8 @@ internal static class HighContrastPalette
         var highlightText = Resolve(
             WpfSystemColors.HighlightTextBrushKey,
             WpfSystemColors.HighlightTextBrush);
+        var grayText = Resolve(
+            WpfSystemColors.GrayTextBrushKey, WpfSystemColors.GrayTextBrush);
 
         resources["WindowBackgroundBrush"] = window;
         resources["SubtleBackgroundBrush"] = control;
@@ -57,5 +62,13 @@ internal static class HighContrastPalette
         resources["CompletedBrush"] = windowText;
         resources["SelectionBackgroundBrush"] = highlight;
         resources["SelectionTextBrush"] = highlightText;
+        resources["ChartCompletedBrush"] = highlight;
+        resources["ChartIncompleteBrush"] = windowText;
+        resources["ChartOverdueBrush"] = grayText;
+        resources["ChartTodoBrush"] = highlight;
+        resources["ChartReminderBrush"] = windowText;
+        resources["ChartNormalBrush"] = grayText;
+        resources["ChartImportantBrush"] = highlight;
+        resources["ChartOtherBrush"] = windowText;
     }
 }
