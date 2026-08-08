@@ -59,6 +59,8 @@ public sealed class SqliteTimelineQuery : ITimelineQuery
         var tomorrowStart = ResolveLocal(today.AddDays(1).ToDateTime(TimeOnly.MinValue), zone);
         var pastStart = ResolveLocal(today.AddDays(-6).ToDateTime(TimeOnly.MinValue), zone);
         var futureEnd = ResolveLocal(today.AddDays(14).ToDateTime(TimeOnly.MinValue), zone);
+        var pastSevenDaysRange = new LocalDateRange(today.AddDays(-6), today);
+        var nextFourteenDaysRange = new LocalDateRange(today, today.AddDays(13));
 
         await using var connection = await DatabaseMigrator.OpenConnectionAsync(
             _databasePath, ct, SqliteCacheMode.Private);
@@ -89,7 +91,9 @@ public sealed class SqliteTimelineQuery : ITimelineQuery
             todosCompletedToday,
             remindersCompletedToday,
             pastSevenDaysCompleted,
-            nextFourteenDaysPlanned);
+            nextFourteenDaysPlanned,
+            pastSevenDaysRange,
+            nextFourteenDaysRange);
     }
 
     private static async Task<IReadOnlyList<TodoTimelineRow>> ReadTodosAsync(

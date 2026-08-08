@@ -104,7 +104,11 @@ public sealed class TimelineViewModelTests
         var query = new FakeTimelineQuery(new TimelineSnapshot(
             [], [], 0, 0,
             PastSevenDaysCompleted: 7,
-            NextFourteenDaysPlanned: 14));
+            NextFourteenDaysPlanned: 14,
+            PastSevenDaysRange: new LocalDateRange(
+                new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+            NextFourteenDaysRange: new LocalDateRange(
+                new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))));
         var vm = Create(query, analyticsNavigation: opened.Add);
 
         await vm.LoadAsync();
@@ -122,12 +126,103 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task Summary_card_counts_and_ranges_stay_on_the_loaded_day_until_a_new_snapshot_succeeds()
+    {
+        var clock = new MutableClock(
+            DateTimeOffset.Parse("2026-07-29T23:59:00+08:00"));
+        var query = new ClockBasedCardQuery();
+        var opened = new List<LocalDateRange>();
+        var vm = Create(
+            query,
+            clock: clock,
+            analyticsNavigation: opened.Add);
+
+        Assert.False(vm.OpenPastSevenDaysAnalyticsCommand.CanExecute(null));
+        Assert.False(vm.OpenNextFourteenDaysAnalyticsCommand.CanExecute(null));
+        await vm.LoadAsync();
+        Assert.Equal(29, vm.PastSevenDaysCompleted);
+        Assert.Equal(129, vm.NextFourteenDaysPlanned);
+        Assert.True(vm.OpenPastSevenDaysAnalyticsCommand.CanExecute(null));
+        Assert.True(vm.OpenNextFourteenDaysAnalyticsCommand.CanExecute(null));
+
+        clock.Now = DateTimeOffset.Parse("2026-07-30T00:01:00+08:00");
+        await vm.OpenPastSevenDaysAnalyticsCommand.ExecuteAsync(null);
+        await vm.OpenNextFourteenDaysAnalyticsCommand.ExecuteAsync(null);
+
+        Assert.Equal(29, vm.PastSevenDaysCompleted);
+        Assert.Equal(129, vm.NextFourteenDaysPlanned);
+        Assert.Equal(
+            [
+                new LocalDateRange(new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))
+            ],
+            opened);
+
+        opened.Clear();
+        await vm.LoadAsync();
+        await vm.OpenPastSevenDaysAnalyticsCommand.ExecuteAsync(null);
+        await vm.OpenNextFourteenDaysAnalyticsCommand.ExecuteAsync(null);
+
+        Assert.Equal(30, vm.PastSevenDaysCompleted);
+        Assert.Equal(130, vm.NextFourteenDaysPlanned);
+        Assert.Equal(
+            [
+                new LocalDateRange(new DateOnly(2026, 7, 24), new DateOnly(2026, 7, 30)),
+                new LocalDateRange(new DateOnly(2026, 7, 30), new DateOnly(2026, 8, 12))
+            ],
+            opened);
+    }
+
+    [Fact]
+    public async Task Initial_load_failure_keeps_summary_navigation_disabled()
+    {
+        var vm = Create(new ThrowingTimelineQuery(
+            new InvalidOperationException("统计不可用")));
+
+        Assert.False(vm.OpenPastSevenDaysAnalyticsCommand.CanExecute(null));
+        Assert.False(vm.OpenNextFourteenDaysAnalyticsCommand.CanExecute(null));
+
+        await vm.LoadAsync();
+
+        Assert.Equal("统计不可用", vm.ErrorMessage);
+        Assert.False(vm.OpenPastSevenDaysAnalyticsCommand.CanExecute(null));
+        Assert.False(vm.OpenNextFourteenDaysAnalyticsCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Failed_reload_keeps_the_last_valid_summary_counts_ranges_and_navigation()
+    {
+        var query = new SuccessThenFailureCardQuery();
+        var opened = new List<LocalDateRange>();
+        var vm = Create(query, analyticsNavigation: opened.Add);
+        await vm.LoadAsync();
+
+        await vm.LoadAsync();
+
+        Assert.Equal("刷新统计失败", vm.ErrorMessage);
+        Assert.Equal(7, vm.PastSevenDaysCompleted);
+        Assert.Equal(14, vm.NextFourteenDaysPlanned);
+        Assert.True(vm.OpenPastSevenDaysAnalyticsCommand.CanExecute(null));
+        Assert.True(vm.OpenNextFourteenDaysAnalyticsCommand.CanExecute(null));
+        await vm.OpenPastSevenDaysAnalyticsCommand.ExecuteAsync(null);
+        await vm.OpenNextFourteenDaysAnalyticsCommand.ExecuteAsync(null);
+        Assert.Equal(
+            [
+                new LocalDateRange(new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))
+            ],
+            opened);
+    }
+
+    [Fact]
     public async Task Period_switch_cancels_the_stale_day_load_and_publishes_only_the_week_snapshot()
     {
         var query = new CancelDayThenReturnWeekQuery();
+        var opened = new List<LocalDateRange>();
         var vm = Create(
             query,
-            culture: CultureInfo.GetCultureInfo("fr-FR"));
+            culture: CultureInfo.GetCultureInfo("fr-FR"),
+            analyticsNavigation: opened.Add);
 
         var dayLoad = vm.LoadAsync();
         await query.DayStarted.Task;
@@ -139,16 +234,28 @@ public sealed class TimelineViewModelTests
             new LocalDateRange(new DateOnly(2026, 7, 27), new DateOnly(2026, 8, 2)),
             query.Ranges[^1]);
         Assert.Equal("周视图", Assert.Single(vm.Items).Title);
+        Assert.Equal(70, vm.PastSevenDaysCompleted);
+        Assert.Equal(140, vm.NextFourteenDaysPlanned);
         Assert.Null(vm.ErrorMessage);
+        await vm.OpenPastSevenDaysAnalyticsCommand.ExecuteAsync(null);
+        await vm.OpenNextFourteenDaysAnalyticsCommand.ExecuteAsync(null);
+        Assert.Equal(
+            [
+                new LocalDateRange(new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))
+            ],
+            opened);
     }
 
     [Fact]
     public async Task Stale_period_failure_cannot_replace_the_latest_successful_snapshot()
     {
         var query = new StaleFailureAfterWeekQuery();
+        var opened = new List<LocalDateRange>();
         var vm = Create(
             query,
-            culture: CultureInfo.GetCultureInfo("fr-FR"));
+            culture: CultureInfo.GetCultureInfo("fr-FR"),
+            analyticsNavigation: opened.Add);
 
         var dayLoad = vm.LoadAsync();
         await query.DayStarted.Task;
@@ -157,7 +264,17 @@ public sealed class TimelineViewModelTests
         await dayLoad;
 
         Assert.Equal("最新周视图", Assert.Single(vm.Items).Title);
+        Assert.Equal(80, vm.PastSevenDaysCompleted);
+        Assert.Equal(150, vm.NextFourteenDaysPlanned);
         Assert.Null(vm.ErrorMessage);
+        await vm.OpenPastSevenDaysAnalyticsCommand.ExecuteAsync(null);
+        await vm.OpenNextFourteenDaysAnalyticsCommand.ExecuteAsync(null);
+        Assert.Equal(
+            [
+                new LocalDateRange(new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))
+            ],
+            opened);
     }
 
     [Fact]
@@ -478,12 +595,13 @@ public sealed class TimelineViewModelTests
         IReminderActionService? actions = null,
         ITodoService? todos = null,
         CultureInfo? culture = null,
-        Action<LocalDateRange>? analyticsNavigation = null)
+        Action<LocalDateRange>? analyticsNavigation = null,
+        IClock? clock = null)
     {
         var reminderDialogs = dialogs ?? new Dialogs();
         var todoDialogs = reminderDialogs as ITodoDialogService ?? new Dialogs();
         return new TimelineViewModel(
-            query, new FakeClock("2026-07-29T09:00:00+08:00"),
+            query, clock ?? new FakeClock("2026-07-29T09:00:00+08:00"),
             service ?? new RecordingReminderService(),
             actions ?? new BlockingActionService(completesImmediately: true),
             todos ?? new RecordingTodoService(),
@@ -492,6 +610,61 @@ public sealed class TimelineViewModelTests
             TimeZoneInfo.CreateCustomTimeZone("UTC+08-vm", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
             culture,
             analyticsNavigation);
+    }
+
+    private sealed class MutableClock(DateTimeOffset now) : IClock
+    {
+        public DateTimeOffset Now { get; set; } = now;
+
+        public Task DelayUntilAsync(
+            DateTimeOffset dueAt,
+            CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class ClockBasedCardQuery : ITimelineQuery
+    {
+        public Task<TimelineSnapshot> GetTimelineAsync(
+            LocalDateRange range,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            CancellationToken ct)
+        {
+            var today = DateOnly.FromDateTime(
+                TimeZoneInfo.ConvertTime(now, zone).DateTime);
+            return Task.FromResult(new TimelineSnapshot(
+                [], [], 0, 0,
+                PastSevenDaysCompleted: today.Day,
+                NextFourteenDaysPlanned: 100 + today.Day,
+                PastSevenDaysRange: new LocalDateRange(today.AddDays(-6), today),
+                NextFourteenDaysRange: new LocalDateRange(today, today.AddDays(13))));
+        }
+    }
+
+    private sealed class SuccessThenFailureCardQuery : ITimelineQuery
+    {
+        private int _calls;
+
+        public Task<TimelineSnapshot> GetTimelineAsync(
+            LocalDateRange range,
+            DateTimeOffset now,
+            TimeZoneInfo zone,
+            CancellationToken ct)
+        {
+            if (Interlocked.Increment(ref _calls) > 1)
+            {
+                return Task.FromException<TimelineSnapshot>(
+                    new InvalidOperationException("刷新统计失败"));
+            }
+
+            return Task.FromResult(new TimelineSnapshot(
+                [], [], 0, 0,
+                PastSevenDaysCompleted: 7,
+                NextFourteenDaysPlanned: 14,
+                PastSevenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                NextFourteenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))));
+        }
     }
 
     private sealed class RecordingPeriodQuery : ITimelineQuery
@@ -533,12 +706,25 @@ public sealed class TimelineViewModelTests
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     DayCancellationObserved = true;
-                    throw;
+                    return new TimelineSnapshot(
+                        [], [TestData.Row("旧日视图", "2026-07-29T09:30:00+08:00")], 0, 0,
+                        PastSevenDaysCompleted: 99,
+                        NextFourteenDaysPlanned: 199,
+                        PastSevenDaysRange: new LocalDateRange(
+                            new DateOnly(2026, 7, 22), new DateOnly(2026, 7, 28)),
+                        NextFourteenDaysRange: new LocalDateRange(
+                            new DateOnly(2026, 7, 28), new DateOnly(2026, 8, 10)));
                 }
             }
 
             return new TimelineSnapshot(
-                [], [TestData.Row("周视图", "2026-07-29T10:00:00+08:00")], 0, 0);
+                [], [TestData.Row("周视图", "2026-07-29T10:00:00+08:00")], 0, 0,
+                PastSevenDaysCompleted: 70,
+                NextFourteenDaysPlanned: 140,
+                PastSevenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                NextFourteenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11)));
         }
     }
 
@@ -564,7 +750,13 @@ public sealed class TimelineViewModelTests
             }
 
             return new TimelineSnapshot(
-                [], [TestData.Row("最新周视图", "2026-07-29T10:00:00+08:00")], 0, 0);
+                [], [TestData.Row("最新周视图", "2026-07-29T10:00:00+08:00")], 0, 0,
+                PastSevenDaysCompleted: 80,
+                NextFourteenDaysPlanned: 150,
+                PastSevenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                NextFourteenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11)));
         }
     }
 

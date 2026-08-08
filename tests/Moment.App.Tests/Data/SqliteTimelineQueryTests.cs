@@ -74,6 +74,14 @@ public sealed class SqliteTimelineQueryTests
         Assert.Equal(inRangeReminder.Id, Assert.Single(snapshot.Reminders).OccurrenceId);
         Assert.Equal(2, snapshot.PastSevenDaysCompleted);
         Assert.Equal(4, snapshot.NextFourteenDaysPlanned);
+        Assert.Equal(
+            new LocalDateRange(
+                new DateOnly(2026, 7, 26), new DateOnly(2026, 8, 1)),
+            snapshot.PastSevenDaysRange);
+        Assert.Equal(
+            new LocalDateRange(
+                new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 14)),
+            snapshot.NextFourteenDaysRange);
     }
 
     [Fact]

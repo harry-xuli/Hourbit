@@ -30,7 +30,11 @@ public sealed class TimelineViewTests
             var query = new QueryStub(new TimelineSnapshot(
                 [], [], 0, 0,
                 PastSevenDaysCompleted: 3,
-                NextFourteenDaysPlanned: 5));
+                NextFourteenDaysPlanned: 5,
+                PastSevenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 23), new DateOnly(2026, 7, 29)),
+                NextFourteenDaysRange: new LocalDateRange(
+                    new DateOnly(2026, 7, 29), new DateOnly(2026, 8, 11))));
             var viewModel = Create(
                 query,
                 analyticsNavigation: opened.Add,

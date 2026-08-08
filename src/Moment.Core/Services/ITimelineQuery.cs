@@ -18,7 +18,9 @@ public sealed record TimelineSnapshot(
     int TodosCompletedToday,
     int RemindersCompletedToday,
     int PastSevenDaysCompleted = 0,
-    int NextFourteenDaysPlanned = 0);
+    int NextFourteenDaysPlanned = 0,
+    LocalDateRange? PastSevenDaysRange = null,
+    LocalDateRange? NextFourteenDaysRange = null);
 
 public sealed record TodoTimelineRow(
     Guid TodoId,

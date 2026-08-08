@@ -38,6 +38,8 @@ public sealed class TimelineViewModel : ObservableObject
     private int _remindersCompletedToday;
     private int _pastSevenDaysCompleted;
     private int _nextFourteenDaysPlanned;
+    private LocalDateRange? _pastSevenDaysRange;
+    private LocalDateRange? _nextFourteenDaysRange;
     private DateOnly _selectedDate;
     private TimelinePeriodKind _selectedPeriodKind;
     private TimelinePeriod _currentPeriod;
@@ -91,9 +93,11 @@ public sealed class TimelineViewModel : ObservableObject
         NextPeriodCommand = new AsyncCommand(
             (_, _) => ObserveAsync(() => MovePeriodAsync(1)));
         OpenPastSevenDaysAnalyticsCommand = new AsyncCommand(
-            (_, _) => ObserveAsync(() => OpenAnalyticsAsync(PastSevenDaysRange)));
+            (_, _) => ObserveAsync(() => OpenAnalyticsAsync(_pastSevenDaysRange)),
+            _ => _pastSevenDaysRange is not null);
         OpenNextFourteenDaysAnalyticsCommand = new AsyncCommand(
-            (_, _) => ObserveAsync(() => OpenAnalyticsAsync(NextFourteenDaysRange)));
+            (_, _) => ObserveAsync(() => OpenAnalyticsAsync(_nextFourteenDaysRange)),
+            _ => _nextFourteenDaysRange is not null);
     }
 
     public ObservableCollection<TimelineItemViewModel> Items { get; } = [];
@@ -141,12 +145,6 @@ public sealed class TimelineViewModel : ObservableObject
 
     private DateOnly LocalToday => DateOnly.FromDateTime(
         TimeZoneInfo.ConvertTime(_clock.Now, _zone).DateTime);
-
-    private LocalDateRange PastSevenDaysRange =>
-        new(LocalToday.AddDays(-6), LocalToday);
-
-    private LocalDateRange NextFourteenDaysRange =>
-        new(LocalToday, LocalToday.AddDays(13));
 
     private bool HasSelection => SelectedItem is not null || SelectedTodo is not null;
 
@@ -251,6 +249,8 @@ public sealed class TimelineViewModel : ObservableObject
             _remindersCompletedToday = snapshot.RemindersCompletedToday;
             _pastSevenDaysCompleted = snapshot.PastSevenDaysCompleted;
             _nextFourteenDaysPlanned = snapshot.NextFourteenDaysPlanned;
+            _pastSevenDaysRange = snapshot.PastSevenDaysRange;
+            _nextFourteenDaysRange = snapshot.NextFourteenDaysRange;
             if (PendingTodos.FirstOrDefault() is { } firstTodo)
                 SelectedTodo = firstTodo;
             else
@@ -260,6 +260,8 @@ public sealed class TimelineViewModel : ObservableObject
             OnPropertyChanged(nameof(CompletedTooltipText));
             OnPropertyChanged(nameof(PastSevenDaysCompleted));
             OnPropertyChanged(nameof(NextFourteenDaysPlanned));
+            OpenPastSevenDaysAnalyticsCommand.RaiseCanExecuteChanged();
+            OpenNextFourteenDaysAnalyticsCommand.RaiseCanExecuteChanged();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -315,9 +317,10 @@ public sealed class TimelineViewModel : ObservableObject
         OnPropertyChanged(nameof(PeriodLabel));
     }
 
-    private Task OpenAnalyticsAsync(LocalDateRange range)
+    private Task OpenAnalyticsAsync(LocalDateRange? range)
     {
-        _openAnalytics(range);
+        if (range is not null)
+            _openAnalytics(range);
         return Task.CompletedTask;
     }
 
