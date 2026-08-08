@@ -42,7 +42,8 @@ public sealed class TodoTimelineItemViewModel : ObservableObject
     public string StatusText => IsCompleted ? "已完成" : IsOverdue ? "已逾期" : "待办中";
     public string StatusSymbol => IsCompleted ? "✓" : IsOverdue ? "!" : "□";
     public string? CompletedTimeText => CompletedAt?.ToString("HH:mm", CultureInfo.InvariantCulture);
-    public string AccessibleName => $"待办：{Title}，{DueDateText}，{StatusText}";
+    public string AccessibleName =>
+        $"待办：{Title}，{DueDateText}，{ImportanceText}，{StatusText}";
 
     public TodoItem Item => new(
         TodoId,

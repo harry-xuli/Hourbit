@@ -4,9 +4,11 @@ using Moment.Core.Services;
 
 namespace Moment.App.Timeline;
 
+public readonly record struct TodoDialogResult(bool RequiresCallerRefresh);
+
 public interface ITodoDialogService
 {
-    Task EditTodoAsync(TodoItem item, CancellationToken ct);
+    Task<TodoDialogResult> EditTodoAsync(TodoItem item, CancellationToken ct);
 }
 
 public sealed class TimelineDialogService : ITimelineDialogService, ITodoDialogService
@@ -129,7 +131,9 @@ public sealed class TimelineDialogService : ITimelineDialogService, ITodoDialogS
         return null;
     }
 
-    public Task EditTodoAsync(TodoItem item, CancellationToken ct)
+    public Task<TodoDialogResult> EditTodoAsync(
+        TodoItem item,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(item);
         ct.ThrowIfCancellationRequested();
@@ -138,7 +142,8 @@ public sealed class TimelineDialogService : ITimelineDialogService, ITodoDialogS
         var window = new EditTodoWindow { DataContext = viewModel };
         SetOwner(window);
         window.ShowDialog();
-        return Task.CompletedTask;
+        return Task.FromResult(new TodoDialogResult(
+            RequiresCallerRefresh: false));
     }
 
     public void OpenQuickAdd() => _openQuickAdd();

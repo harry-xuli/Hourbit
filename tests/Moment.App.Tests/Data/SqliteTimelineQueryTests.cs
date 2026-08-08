@@ -116,6 +116,121 @@ public sealed class SqliteTimelineQueryTests
         Assert.Equal(1, snapshot.RemindersCompletedToday);
     }
 
+    [Fact]
+    public async Task Query_keeps_todo_row_and_count_on_one_snapshot_during_concurrent_completion()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        _ = await SqliteReminderRepository.OpenAsync(path, CancellationToken.None);
+        var todos = await SqliteTodoRepository.OpenAsync(path, CancellationToken.None);
+        await EnableWalAsync(path);
+        var todo = Todo(
+            Guid.NewGuid(),
+            "并发待办",
+            DateTimeOffset.Parse("2026-07-29T08:00:00+08:00"),
+            new DateOnly(2026, 7, 30));
+        await todos.SaveAsync(todo, CancellationToken.None);
+        var firstRead = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueQuery = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var query = new SqliteTimelineQuery(
+            path,
+            async (stage, ct) =>
+            {
+                if (stage != TimelineQueryReadStage.TodosRead)
+                    return;
+                firstRead.TrySetResult();
+                await continueQuery.Task.WaitAsync(ct);
+            });
+
+        var queryTask = query.GetTimelineAsync(
+            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+        await firstRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            await todos.SetCompletedAsync(
+                    todo.Id,
+                    true,
+                    DateTimeOffset.Parse("2026-07-30T09:00:00+08:00"),
+                    CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            continueQuery.TrySetResult();
+        }
+
+        var duringCommit = await queryTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var nextQuery = await new SqliteTimelineQuery(path).GetTimelineAsync(
+            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+
+        Assert.False(Assert.Single(duringCommit.Todos).IsCompleted);
+        Assert.Equal(0, duringCommit.TodosCompletedToday);
+        Assert.True(Assert.Single(nextQuery.Todos).IsCompleted);
+        Assert.Equal(1, nextQuery.TodosCompletedToday);
+    }
+
+    [Fact]
+    public async Task Query_keeps_reminder_row_and_count_on_one_snapshot_during_concurrent_completion()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        await EnableWalAsync(path);
+        var dueAt = DateTimeOffset.Parse("2026-07-30T10:00:00+08:00");
+        var item = ReminderItem.Create(
+            "并发提醒", ReminderKind.Plan, ReminderImportance.Normal,
+            dueAt.AddDays(-1), dueAt);
+        var occurrence = ReminderOccurrence.Schedule(item.Id, dueAt);
+        await reminders.SaveItemWithOccurrenceAsync(
+            item, occurrence, CancellationToken.None);
+        var remindersRead = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueQuery = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var query = new SqliteTimelineQuery(
+            path,
+            async (stage, ct) =>
+            {
+                if (stage != TimelineQueryReadStage.RemindersRead)
+                    return;
+                remindersRead.TrySetResult();
+                await continueQuery.Task.WaitAsync(ct);
+            });
+
+        var queryTask = query.GetTimelineAsync(
+            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+        await remindersRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            await reminders.SetOccurrenceStateAsync(
+                    occurrence.Id,
+                    OccurrenceState.Completed,
+                    DateTimeOffset.Parse("2026-07-30T10:05:00+08:00"),
+                    CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            continueQuery.TrySetResult();
+        }
+
+        var duringCommit = await queryTask.WaitAsync(TimeSpan.FromSeconds(5));
+        var nextQuery = await new SqliteTimelineQuery(path).GetTimelineAsync(
+            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+
+        Assert.Equal(
+            OccurrenceState.Scheduled,
+            Assert.Single(duringCommit.Reminders).State);
+        Assert.Equal(0, duringCommit.RemindersCompletedToday);
+        Assert.Equal(
+            OccurrenceState.Completed,
+            Assert.Single(nextQuery.Reminders).State);
+        Assert.Equal(1, nextQuery.RemindersCompletedToday);
+    }
+
     private static TodoItem Todo(
         Guid id,
         string title,
@@ -140,6 +255,23 @@ public sealed class SqliteTimelineQueryTests
             Guid.NewGuid(), item.Id, dueAt, state, handledAt, null);
         await repository.SaveItemWithOccurrenceAsync(
             item, occurrence, CancellationToken.None);
+    }
+
+    private static TimeZoneInfo FixedZone() =>
+        TimeZoneInfo.CreateCustomTimeZone(
+            "UTC+08-snapshot", TimeSpan.FromHours(8), "UTC+08", "UTC+08");
+
+    private static async Task EnableWalAsync(string path)
+    {
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(
+            path, CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=WAL;";
+        Assert.Equal(
+            "wal",
+            Convert.ToString(
+                await command.ExecuteScalarAsync(CancellationToken.None),
+                System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private static TimeZoneInfo CreateEasternTestZone()

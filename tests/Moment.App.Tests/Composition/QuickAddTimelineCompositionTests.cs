@@ -182,7 +182,10 @@ public sealed class QuickAddTimelineCompositionTests
             Task.FromResult(false);
         public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult<ReminderDraft?>(null);
-        public Task EditTodoAsync(TodoItem item, CancellationToken ct) => Task.CompletedTask;
+        public Task<TodoDialogResult> EditTodoAsync(
+            TodoItem item,
+            CancellationToken ct) =>
+            Task.FromResult(new TodoDialogResult(false));
         public void OpenQuickAdd() { }
     }
 }

@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using ListBox = System.Windows.Controls.ListBox;
 using SelectionChangedEventArgs = System.Windows.Controls.SelectionChangedEventArgs;
 using UserControl = System.Windows.Controls.UserControl;
@@ -18,6 +20,29 @@ public partial class TimelineView : UserControl
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        PreviewKeyDown += OnPreviewKeyDown;
+    }
+
+    private void OnPreviewKeyDown(object sender, KeyEventArgs eventArgs)
+    {
+        if (_viewModel is null)
+            return;
+
+        var modifiers = eventArgs.KeyboardDevice.Modifiers;
+        var command = (eventArgs.Key, modifiers) switch
+        {
+            (Key.Enter, ModifierKeys.None) => _viewModel.EditCommand,
+            (Key.Delete, ModifierKeys.None) => _viewModel.DeleteCommand,
+            (Key.N, ModifierKeys.Control) => _viewModel.OpenQuickAddCommand,
+            (Key.Space, ModifierKeys.Control | ModifierKeys.Shift) =>
+                _viewModel.CompleteCommand,
+            _ => null
+        };
+        if (command?.CanExecute(null) != true)
+            return;
+
+        eventArgs.Handled = true;
+        command.Execute(null);
     }
 
     private void OnTimelineSelectionChanged(

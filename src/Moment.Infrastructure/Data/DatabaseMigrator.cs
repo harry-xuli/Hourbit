@@ -5,7 +5,15 @@ namespace Moment.Infrastructure.Data;
 
 public static class DatabaseMigrator
 {
-    public static async Task<SqliteConnection> OpenConnectionAsync(string databasePath, CancellationToken ct)
+    public static Task<SqliteConnection> OpenConnectionAsync(
+        string databasePath,
+        CancellationToken ct) =>
+        OpenConnectionAsync(databasePath, ct, SqliteCacheMode.Shared);
+
+    internal static async Task<SqliteConnection> OpenConnectionAsync(
+        string databasePath,
+        CancellationToken ct,
+        SqliteCacheMode cache)
     {
         var directory = Path.GetDirectoryName(databasePath);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -17,7 +25,7 @@ public static class DatabaseMigrator
         {
             DataSource = databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
+            Cache = cache,
             Pooling = false
         };
         var connection = new SqliteConnection(builder.ConnectionString);

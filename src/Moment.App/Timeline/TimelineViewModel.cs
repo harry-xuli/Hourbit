@@ -215,8 +215,9 @@ public sealed class TimelineViewModel : ObservableObject
     {
         if (SelectedTodo is { } todo)
         {
-            await _todoDialogs.EditTodoAsync(todo.Item, ct);
-            await LoadAsync();
+            var result = await _todoDialogs.EditTodoAsync(todo.Item, ct);
+            if (result.RequiresCallerRefresh)
+                await LoadAsync();
             return;
         }
         var item = SelectedItem;

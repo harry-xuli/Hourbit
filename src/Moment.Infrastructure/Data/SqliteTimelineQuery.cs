@@ -5,11 +5,33 @@ using Moment.Core.Services;
 
 namespace Moment.Infrastructure.Data;
 
-public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
+internal enum TimelineQueryReadStage
 {
-    private readonly string _databasePath = string.IsNullOrWhiteSpace(databasePath)
-        ? throw new ArgumentException("A database path is required.", nameof(databasePath))
-        : databasePath;
+    TodosRead,
+    RemindersRead
+}
+
+public sealed class SqliteTimelineQuery : ITimelineQuery
+{
+    private readonly string _databasePath;
+    private readonly Func<TimelineQueryReadStage, CancellationToken, Task> _readObserver;
+
+    public SqliteTimelineQuery(string databasePath)
+        : this(databasePath, static (_, _) => Task.CompletedTask)
+    {
+    }
+
+    internal SqliteTimelineQuery(
+        string databasePath,
+        Func<TimelineQueryReadStage, CancellationToken, Task> readObserver)
+    {
+        _databasePath = string.IsNullOrWhiteSpace(databasePath)
+            ? throw new ArgumentException(
+                "A database path is required.", nameof(databasePath))
+            : databasePath;
+        _readObserver = readObserver
+            ?? throw new ArgumentNullException(nameof(readObserver));
+    }
 
     public async Task<TimelineSnapshot> GetTimelineAsync(
         DateOnly localDate, TimeZoneInfo zone, CancellationToken ct)
@@ -18,14 +40,23 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
         var start = ResolveLocal(localDate.ToDateTime(TimeOnly.MinValue), zone);
         var end = ResolveLocal(localDate.AddDays(1).ToDateTime(TimeOnly.MinValue), zone);
 
-        await using var connection = await DatabaseMigrator.OpenConnectionAsync(_databasePath, ct);
-        var todos = await ReadTodosAsync(connection, localDate, ct);
-        var reminders = await ReadRemindersAsync(connection, start, end, ct);
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(
+            _databasePath, ct, SqliteCacheMode.Private);
+        await using var transaction = connection.BeginTransaction(deferred: true);
+        var todos = await ReadTodosAsync(
+            connection, transaction, localDate, ct);
+        await _readObserver(TimelineQueryReadStage.TodosRead, ct);
+        var reminders = await ReadRemindersAsync(
+            connection, transaction, start, end, ct);
+        await _readObserver(TimelineQueryReadStage.RemindersRead, ct);
         var todosCompletedToday = await CountCompletedAsync(
-            connection, "todos", "is_completed", 1, start, end, ct);
+            connection, transaction,
+            "todos", "is_completed", 1, start, end, ct);
         var remindersCompletedToday = await CountCompletedAsync(
-            connection, "occurrences", "state", (int)OccurrenceState.Completed,
+            connection, transaction,
+            "occurrences", "state", (int)OccurrenceState.Completed,
             start, end, ct);
+        await transaction.CommitAsync(ct);
         return new TimelineSnapshot(
             todos,
             reminders,
@@ -35,10 +66,12 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
 
     private static async Task<IReadOnlyList<TodoTimelineRow>> ReadTodosAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         DateOnly localDate,
         CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT id, title, created_at, due_date, importance,
                    is_completed, completed_at
@@ -80,11 +113,13 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
 
     private static async Task<IReadOnlyList<TimelineRow>> ReadRemindersAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         DateTimeOffset start,
         DateTimeOffset end,
         CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             SELECT o.id, i.title, o.due_at, i.kind, i.importance, o.state,
                    r.kind, r.days_of_week
@@ -116,6 +151,7 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
 
     private static async Task<int> CountCompletedAsync(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         string table,
         string stateColumn,
         int completedState,
@@ -125,6 +161,7 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
     {
         var timestampColumn = table == "todos" ? "completed_at" : "handled_at";
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = $"""
             SELECT COUNT(*)
             FROM {table}

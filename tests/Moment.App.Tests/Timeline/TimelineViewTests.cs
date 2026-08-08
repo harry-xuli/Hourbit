@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Automation.Peers;
 using System.Windows.Controls;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Input;
 using Moment.App.Timeline;
@@ -126,11 +128,20 @@ public sealed class TimelineViewTests
                 view.FindName("CompletedTodosExpander"));
             var completedSummary = Assert.IsType<StackPanel>(
                 view.FindName("CompletedSummary"));
+            var todoSection = Assert.IsType<StackPanel>(
+                view.FindName("TodoSection"));
+            var pending = Assert.IsType<ListBox>(view.FindName("PendingTodoList"));
+            var todoRow = Assert.IsType<ListBoxItem>(
+                pending.ItemContainerGenerator.ContainerFromIndex(0));
 
             Assert.Equal("待办事项", todoHeader.Text);
-            Assert.Equal("待办事项", System.Windows.Automation.AutomationProperties.GetName(todoHeader));
+            Assert.Equal("待办事项", PeerName(todoSection));
+            Assert.Equal("待办事项", PeerName(todoHeader));
             Assert.Equal("定时提醒", reminderHeader.Text);
-            Assert.Equal("定时提醒", System.Windows.Automation.AutomationProperties.GetName(reminderHeader));
+            Assert.Equal("定时提醒", PeerName(reminderHeader));
+            Assert.Equal(
+                "待办：逾期任务，2026-07-28，重要，已逾期",
+                PeerName(todoRow));
             Assert.True(todoHeader.TranslatePoint(new Point(), view).Y <
                         reminderHeader.TranslatePoint(new Point(), view).Y);
             Assert.False(completed.IsExpanded);
@@ -142,8 +153,8 @@ public sealed class TimelineViewTests
         });
 
     [Fact]
-    public Task Todo_row_receives_keyboard_focus_and_commands_target_the_todo_type() =>
-        WpfTestHost.RunAsync(() =>
+    public Task Routed_keyboard_shortcuts_target_the_focused_todo_row() =>
+        WpfTestHost.RunAsync(async () =>
         {
             var todo = TodoRow("键盘待办", new DateOnly(2026, 7, 29));
             var query = new QueryStub(new TimelineSnapshot(
@@ -152,57 +163,96 @@ public sealed class TimelineViewTests
                 0,
                 0));
             var todos = new TodoServiceStub();
-            var viewModel = Create(query, todos: todos);
-            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var actions = new ActionServiceStub();
+            var dialogs = new DialogStub();
+            var reminders = new ReminderServiceStub();
+            var viewModel = Create(
+                query, actions, todos, reminders, dialogs);
+            await viewModel.LoadAsync();
             var view = Show(viewModel);
-            var create = Assert.IsType<Button>(view.FindName("NewReminderButton"));
-            Assert.True(create.Focus());
+            var list = Assert.IsType<ListBox>(view.FindName("PendingTodoList"));
+            var row = Assert.IsType<ListBoxItem>(
+                list.ItemContainerGenerator.ContainerFromIndex(0));
+            Assert.True(row.Focus());
+            Assert.Same(row, Keyboard.FocusedElement);
+            Assert.Same(viewModel.SelectedTodo, list.SelectedItem);
 
-            Assert.True(create.MoveFocus(
-                new TraversalRequest(FocusNavigationDirection.Next)));
-            var focused = Assert.IsAssignableFrom<DependencyObject>(
-                Keyboard.FocusedElement);
-            var list = focused as ListBox ?? Ancestor<ListBox>(focused);
-            Assert.NotNull(list);
-            var selected = Assert.IsType<TodoTimelineItemViewModel>(list.SelectedItem);
-            Assert.Same(selected, viewModel.SelectedTodo);
-            Assert.Null(viewModel.SelectedItem);
+            Assert.True(RaiseKey(row, Key.Enter).Handled);
+            Assert.Equal([todo.TodoId], dialogs.EditedTodoIds);
+            Assert.Empty(dialogs.EditedReminderIds);
 
-            var complete = Assert.Single(
-                view.InputBindings.OfType<KeyBinding>(),
-                binding => binding.Key == Key.Space &&
-                           binding.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift));
-            Assert.Same(viewModel.CompleteCommand, complete.Command);
-            Assert.True(complete.Command.CanExecute(complete.CommandParameter));
-            viewModel.CompleteCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+            Assert.True(RaiseKey(row, Key.Delete).Handled);
+            Assert.Equal([todo.TodoId], todos.DeletedTodoIds);
+            Assert.Empty(reminders.DeletedOccurrenceIds);
+
+            view.UpdateLayout();
+            row = Assert.IsType<ListBoxItem>(
+                list.ItemContainerGenerator.ContainerFromIndex(0));
+            Assert.True(row.Focus());
+            Assert.True(RaiseKey(
+                row, Key.Space,
+                ModifierKeys.Control | ModifierKeys.Shift).Handled);
             Assert.Equal([todo.TodoId], todos.CompletedTodoIds);
+            Assert.Empty(actions.CompletedOccurrenceIds);
+
+            view.UpdateLayout();
+            row = Assert.IsType<ListBoxItem>(
+                list.ItemContainerGenerator.ContainerFromIndex(0));
+            Assert.True(row.Focus());
+            Assert.True(RaiseKey(
+                row, Key.N, ModifierKeys.Control).Handled);
+            Assert.Equal(1, dialogs.QuickAddCalls);
+            await System.Windows.Threading.Dispatcher.Yield();
         });
 
     [Fact]
-    public Task Timeline_focus_moves_from_new_action_to_a_row_and_Enter_is_edit_command() =>
-        WpfTestHost.RunAsync(() =>
+    public Task Routed_keyboard_shortcuts_switch_to_the_focused_reminder_type() =>
+        WpfTestHost.RunAsync(async () =>
         {
-            var viewModel = CreateTraversalViewModel();
-            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var todo = TodoRow("键盘待办", new DateOnly(2026, 7, 29));
+            var reminder = TestData.Row(
+                "键盘提醒", "2026-07-29T10:00:00+08:00");
+            var query = new QueryStub(new TimelineSnapshot(
+                [todo], [reminder], 0, 0));
+            var todos = new TodoServiceStub();
+            var actions = new ActionServiceStub();
+            var dialogs = new DialogStub();
+            var reminders = new ReminderServiceStub();
+            var viewModel = Create(
+                query, actions, todos, reminders, dialogs);
+            await viewModel.LoadAsync();
             var view = Show(viewModel);
-            var create = Assert.IsType<Button>(
-                view.FindName("NewReminderButton"));
-            Assert.True(create.Focus());
+            var list = Descendants<ListBox>(view).Single(
+                candidate => candidate.Items.Contains(viewModel.Items[0]));
+            list.SelectedItem = viewModel.Items[0];
+            var row = Assert.IsType<ListBoxItem>(
+                list.ItemContainerGenerator.ContainerFromIndex(0));
+            Assert.True(row.Focus());
+            Assert.Same(row, Keyboard.FocusedElement);
+            Assert.Same(viewModel.SelectedItem, list.SelectedItem);
+            Assert.Null(viewModel.SelectedTodo);
 
-            Assert.True(create.MoveFocus(
-                new TraversalRequest(FocusNavigationDirection.Next)));
-            var focused = Assert.IsAssignableFrom<DependencyObject>(
-                Keyboard.FocusedElement);
-            var list = focused as ListBox ?? Ancestor<ListBox>(focused);
-            Assert.True(list is not null,
-                $"Focused element was {focused.GetType().FullName}.");
-            Assert.NotNull(list.SelectedItem);
+            Assert.True(RaiseKey(row, Key.Enter).Handled);
+            Assert.Equal([reminder.OccurrenceId], dialogs.EditedReminderIds);
+            Assert.Empty(dialogs.EditedTodoIds);
 
-            var enter = Assert.Single(
-                view.InputBindings.OfType<KeyBinding>(),
-                binding => binding.Key == Key.Enter);
-            Assert.Same(viewModel.EditCommand, enter.Command);
-            Assert.True(enter.Command.CanExecute(enter.CommandParameter));
+            Assert.True(RaiseKey(row, Key.Delete).Handled);
+            Assert.Equal([reminder.OccurrenceId], reminders.DeletedOccurrenceIds);
+            Assert.Empty(todos.DeletedTodoIds);
+
+            view.UpdateLayout();
+            list = Descendants<ListBox>(view).Single(
+                candidate => candidate.Items.Contains(viewModel.Items[0]));
+            list.SelectedItem = viewModel.Items[0];
+            row = Assert.IsType<ListBoxItem>(
+                list.ItemContainerGenerator.ContainerFromIndex(0));
+            Assert.True(row.Focus());
+            Assert.True(RaiseKey(
+                row, Key.Space,
+                ModifierKeys.Control | ModifierKeys.Shift).Handled);
+            Assert.Equal([reminder.OccurrenceId], actions.CompletedOccurrenceIds);
+            Assert.Empty(todos.CompletedTodoIds);
+            await System.Windows.Threading.Dispatcher.Yield();
         });
 
     [Fact]
@@ -329,6 +379,36 @@ public sealed class TimelineViewTests
         return view;
     }
 
+    private static string PeerName(FrameworkElement element)
+    {
+        var peer = FrameworkElementAutomationPeer.CreatePeerForElement(element)
+            ?? new FrameworkElementAutomationPeer(element);
+        return peer.GetName();
+    }
+
+    private static KeyEventArgs RaiseKey(
+        UIElement target,
+        Key key,
+        ModifierKeys modifiers = ModifierKeys.None)
+    {
+        var window = Window.GetWindow(target)
+            ?? throw new InvalidOperationException("The target must belong to a shown window.");
+        var source = HwndSource.FromHwnd(new WindowInteropHelper(window).Handle)
+            ?? throw new InvalidOperationException("The shown window must have an HWND source.");
+        var keyboard = new TestKeyboardDevice(modifiers);
+        Assert.Equal(modifiers, keyboard.Modifiers);
+        var eventArgs = new KeyEventArgs(
+            keyboard,
+            source,
+            Environment.TickCount,
+            key)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent
+        };
+        target.RaiseEvent(eventArgs);
+        return eventArgs;
+    }
+
     private static IEnumerable<string> VisibleText(DependencyObject root) =>
         Descendants<TextBlock>(root)
             .Where(text => text.IsVisible && !string.IsNullOrWhiteSpace(text.Text))
@@ -376,10 +456,13 @@ public sealed class TimelineViewTests
     private static TimelineViewModel Create(
         ITimelineQuery query,
         ActionServiceStub? actions = null,
-        TodoServiceStub? todos = null) =>
+        TodoServiceStub? todos = null,
+        ReminderServiceStub? reminders = null,
+        DialogStub? dialogs = null) =>
         new(query, new FakeClock("2026-07-29T09:00:00+08:00"),
-            new ReminderServiceStub(), actions ?? new ActionServiceStub(),
-            todos ?? new TodoServiceStub(), new DialogStub(), new DialogStub(),
+            reminders ?? new ReminderServiceStub(), actions ?? new ActionServiceStub(),
+            todos ?? new TodoServiceStub(), dialogs ?? new DialogStub(),
+            dialogs ?? new DialogStub(),
             TimeZoneInfo.CreateCustomTimeZone(
                 "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
 
@@ -452,12 +535,16 @@ public sealed class TimelineViewTests
 
     private sealed class ReminderServiceStub : IReminderService
     {
+        public List<Guid> DeletedOccurrenceIds { get; } = [];
         public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct) =>
             Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), draft.DueAt));
         public Task EditAsync(Guid occurrenceId, ReminderDraft draft, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
-        public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
-            Task.CompletedTask;
+        public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct)
+        {
+            DeletedOccurrenceIds.Add(occurrenceId);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class ActionServiceStub : IReminderActionService
@@ -479,6 +566,7 @@ public sealed class TimelineViewTests
     private sealed class TodoServiceStub : ITodoService
     {
         public List<Guid> CompletedTodoIds { get; } = [];
+        public List<Guid> DeletedTodoIds { get; } = [];
 
         public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
             Task.FromResult(new TodoItem(
@@ -491,7 +579,11 @@ public sealed class TimelineViewTests
             CompletedTodoIds.Add(todoId);
             return Task.CompletedTask;
         }
-        public Task DeleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task DeleteAsync(Guid todoId, CancellationToken ct)
+        {
+            DeletedTodoIds.Add(todoId);
+            return Task.CompletedTask;
+        }
         public Task ConvertToReminderAsync(
             Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
         public Task ConvertToTodoAsync(
@@ -503,6 +595,9 @@ public sealed class TimelineViewTests
 
     private sealed class DialogStub : ITimelineDialogService, ITodoDialogService
     {
+        public List<Guid> EditedReminderIds { get; } = [];
+        public List<Guid> EditedTodoIds { get; } = [];
+        public int QuickAddCalls { get; private set; }
         public Task<SeriesScope?> SelectEditScopeAsync(
             TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult<SeriesScope?>(null);
@@ -510,11 +605,39 @@ public sealed class TimelineViewTests
             TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult<SeriesScope?>(null);
         public Task<bool> ConfirmDeleteAsync(TimelineItemViewModel item, CancellationToken ct) =>
-            Task.FromResult(false);
-        public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct) =>
-            Task.FromResult<ReminderDraft?>(null);
-        public Task EditTodoAsync(TodoItem item, CancellationToken ct) => Task.CompletedTask;
-        public void OpenQuickAdd() { }
+            Task.FromResult(true);
+        public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct)
+        {
+            EditedReminderIds.Add(item.OccurrenceId);
+            return Task.FromResult<ReminderDraft?>(null);
+        }
+        public Task<TodoDialogResult> EditTodoAsync(
+            TodoItem item,
+            CancellationToken ct)
+        {
+            EditedTodoIds.Add(item.Id);
+            return Task.FromResult(new TodoDialogResult(false));
+        }
+        public void OpenQuickAdd() => QuickAddCalls++;
+    }
+
+    private sealed class TestKeyboardDevice(ModifierKeys modifiers)
+        : KeyboardDevice(InputManager.Current)
+    {
+        protected override KeyStates GetKeyStatesFromSystem(Key key)
+        {
+            var isDown = key switch
+            {
+                Key.LeftCtrl or Key.RightCtrl =>
+                    modifiers.HasFlag(ModifierKeys.Control),
+                Key.LeftShift or Key.RightShift =>
+                    modifiers.HasFlag(ModifierKeys.Shift),
+                Key.LeftAlt or Key.RightAlt =>
+                    modifiers.HasFlag(ModifierKeys.Alt),
+                _ => false
+            };
+            return isDown ? KeyStates.Down : KeyStates.None;
+        }
     }
 
     private static TodoTimelineRow TodoRow(

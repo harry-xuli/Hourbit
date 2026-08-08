@@ -97,13 +97,6 @@
             </DataTemplate.Triggers>
         </DataTemplate>
     </UserControl.Resources>
-    <UserControl.InputBindings>
-        <KeyBinding Key="Enter" Command="{Binding EditCommand}" />
-        <KeyBinding Key="Delete" Command="{Binding DeleteCommand}" />
-        <KeyBinding Key="N" Modifiers="Control" Command="{Binding OpenQuickAddCommand}" />
-        <KeyBinding Key="Space" Modifiers="Control+Shift" Command="{Binding CompleteCommand}" />
-    </UserControl.InputBindings>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="116" />
@@ -200,6 +193,7 @@
 
                 <StackPanel x:Name="TodoSection"
                             Grid.Row="0"
+                            automation:AutomationProperties.Name="待办事项"
                             Margin="26,8,26,0">
                     <TextBlock x:Name="TodoSectionHeader"
                                Text="待办事项"
@@ -212,7 +206,6 @@
                              ItemsSource="{Binding PendingTodos}"
                              ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
                              SelectionChanged="OnTimelineSelectionChanged"
-                             ItemContainerStyle="{StaticResource TimelineListItem}"
                              BorderThickness="0"
                              Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                              MaxHeight="150"
@@ -222,6 +215,13 @@
                              VirtualizingPanel.IsVirtualizing="True"
                              VirtualizingPanel.VirtualizationMode="Recycling"
                              automation:AutomationProperties.Name="待办事项列表">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="{x:Type ListBoxItem}"
+                                   BasedOn="{StaticResource TimelineListItem}">
+                                <Setter Property="automation:AutomationProperties.Name"
+                                        Value="{Binding AccessibleName}" />
+                            </Style>
+                        </ListBox.ItemContainerStyle>
                         <ListBox.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <VirtualizingStackPanel />
@@ -247,7 +247,6 @@
                                  ItemsSource="{Binding CompletedTodos}"
                                  ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
                                  SelectionChanged="OnTimelineSelectionChanged"
-                                 ItemContainerStyle="{StaticResource TimelineListItem}"
                                  BorderThickness="0"
                                  Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                                  MaxHeight="120"
@@ -257,6 +256,13 @@
                                  VirtualizingPanel.IsVirtualizing="True"
                                  VirtualizingPanel.VirtualizationMode="Recycling"
                                  automation:AutomationProperties.Name="已完成待办列表">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="{x:Type ListBoxItem}"
+                                       BasedOn="{StaticResource TimelineListItem}">
+                                    <Setter Property="automation:AutomationProperties.Name"
+                                            Value="{Binding AccessibleName}" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <VirtualizingStackPanel />
