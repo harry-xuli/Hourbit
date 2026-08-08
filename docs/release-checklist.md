@@ -1,104 +1,95 @@
 # Hourbit 日程 0.2.0 发布检查表
 
-- 检查日期：2026-08-01
-- 目标：Windows 11 x64，安装版与便携版
-- 签名状态：未签名测试发行版
-- 总体状态：**0.2.0 元数据门通过；完整打包与物理 Windows 11 矩阵待验证**
+- 发布日期：2026-08-01
+- 本次验证日期：2026-08-08
+- 目标平台：Windows 11 x64，安装版与便携版
+- 签名状态：`Hourbit.exe` 与 `Hourbit-Setup-x64.exe` 均为 `NotSigned`
+- 版本唯一来源：仓库根目录 `Version.props`
 
-`build-release.ps1 -ValidateOnly` 从已求值的 MSBuild 属性验证产品名、可执行文件名、
-SemVer 与发布日期。完整安装包、便携 ZIP 和 SHA-256 文件应在 0.2.0 所有核心功能
-合入后重新生成；未执行的物理 Windows 场景不能由自动证据替代。
+未签名测试构建可能被 Smart App Control、Microsoft Defender 或其他 Windows 安全
+策略拦截。不得关闭或绕过这些安全功能来完成发布检查；正式对外分发前应配置可信
+代码签名。
 
-## 已完成的自动证据
+## 本次自动验证证据
 
-| 检查 | 状态 | 证据 |
+| 检查 | 结果 | 证据 |
 |---|---|---|
-| Task 12 focused RED | 通过 | 首次 focused test 退出 1；CS0234 指出 `Moment.App.Diagnostics` 尚不存在 |
-| Task 12 focused GREEN | 通过 | `SmokeTestRunnerTests` 3/3，通过 0 失败 |
-| 直接 Release WinExe 自测 | 通过 | 进程等待后 1.3 秒退出 0；六个 JSONL 事件各一次 |
-| 相对输出路径拒绝 | 通过 | focused test 验证退出 2，且未创建相对目录 |
-| 隔离数据路径 | 通过 | focused test 验证数据库位于传入目录的 `data/moment-self-test.db` |
-| 清理安全正向验证 | 通过 | 只接受 `artifacts/publish` 与 `artifacts/portable` |
-| 清理安全反向验证 | 通过 | 以 `artifacts` 根为 probe 时退出 1、拒绝清理 |
-| 完整 Release 测试门 | 通过 | Core 81/81、Infrastructure 44/44、Windows 85/85、App 107/107；合计 317/317 |
-| 发布、Inno 编译、SHA-256 | 通过 | `build-release.ps1` 退出 0；Inno Setup 6.7.3 编译成功；四个发行文件存在 |
-| 便携 ZIP 烟雾测试 | 通过 | `smoke-test.ps1` 退出 0；最终 ZIP 内 WinExe 退出 0，六个事件各一次 |
-| Release 截图 | 待验证 | 最终发布包已生成；尚未启动实际 Release UI 捕获三张截图 |
+| 完整 Release 测试 | 通过 | Core 202、Infrastructure 99、Windows 88、App 183，共 572/572，0 失败 |
+| schema v1 升级 | 通过 | 最终便携包自检用隔离 v1 数据库升级到 v3，并由真实提醒仓储重新读取原提醒 |
+| schema v2 升级 | 通过 | 最终便携包自检用隔离 v2 数据库升级到 v3，并保留原提醒 |
+| todo 持久化 | 通过 | 在升级后的 v2 数据库创建有日期和无日期 todo，重开仓储后精确读取两项 |
+| todo 调度隔离 | 通过 | 有已有提醒作为对照时，`GetScheduledAsync` 与 `GetDueAsync` 都只返回该提醒 |
+| todo 备份恢复 | 通过 | 导出后从当前库删除 todo，再恢复备份，完整 `TodoItem` 回归 |
+| 手动备份默认名 | 通过 | `hourbit-export-20260808T111213Z.moment-backup` 精确测试通过 |
+| 版本与身份一致 | 通过 | 最终 EXE 自检元数据、设置页脚、Inno 安装器版本资源、ZIP/Setup 文件名均与 MSBuild 求值一致 |
+| 旧安装兼容静态门 | 通过 | AppId 保持 `{8E5D37F4-A701-4B84-A71E-B7C0A8E46D51}`；只清理旧 EXE/快捷方式，不删除数据 |
+| 旧启动项兼容门 | 通过 | 只迁移精确旧路径与 `--background`；`StartupApproved` 缺失或规范启用才迁移，读取错误失败关闭 |
+| 发布构建 | 通过 | `build-release.ps1` 退出 0；Inno Setup 6.7.3 编译完成 |
+| 最终便携包 smoke | 通过 | 12 个 JSONL 事件各一次；进程退出 0；CPU 时间 1031.25 ms |
 
-### 已观察的 JSONL
+最终 smoke 事件：
 
-```jsonl
-{"event":"normal-delivery","timestampUtc":"2026-07-31T01:22:36.1107807+00:00"}
-{"event":"important-delivery","timestampUtc":"2026-07-31T01:22:36.1373625+00:00"}
-{"event":"completed","timestampUtc":"2026-07-31T01:22:36.1508568+00:00"}
-{"event":"snoozed","timestampUtc":"2026-07-31T01:22:36.1611304+00:00"}
-{"event":"restart-recovered","timestampUtc":"2026-07-31T01:22:36.1711506+00:00"}
-{"event":"single-instance-protocol","timestampUtc":"2026-07-31T01:22:36.1892303+00:00"}
+```text
+schema-v1-upgrade
+schema-v2-upgrade
+todos-created
+todo-scheduler-exclusion
+normal-delivery
+important-delivery
+completed
+snoozed
+restart-recovered
+missed-recovery
+single-instance-protocol
+release-metadata
 ```
 
-最终便携 ZIP 的 2026-08-01 冒烟运行再次产生相同六类事件且各一次；时间戳因每次
-运行而变化。
+所有数据库升级与便携包自检都在任务专用目录或系统临时目录执行；没有读取、安装、
+替换或删除用户正式数据，也没有写入正式开机启动注册表项。
 
-## 自动门禁命令
+## 发行文件
 
-在
-`D:\Coding\window alert tool\.worktrees\moment-development` 中执行：
+| 文件 | 字节数 | SHA-256 |
+|---|---:|---|
+| `Hourbit-Portable-x64.zip` | 125114063 | `81f6919fb3cc35228c55bef5401653cad532a8a80389ec0568ae7247652a4ca3` |
+| `Hourbit-Setup-x64.exe` | 89050178 | `6f13f8f4feaba3ab63a153e2ba2917b8c837437ae865284b89568a5639e23723` |
+
+相邻 `.sha256` 文件已由发布脚本生成，内容与重新计算的哈希一致。
+
+## 发布命令
+
+在仓库根目录运行：
 
 ```powershell
-dotnet test Moment.slnx -c Release
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1 -ValidateOnly
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-test.ps1 -ValidateOnly
-Get-FileHash artifacts\Hourbit-Portable-x64.zip -Algorithm SHA256
-Get-FileHash artifacts\Hourbit-Setup-x64.exe -Algorithm SHA256
+dotnet test Moment.slnx --configuration Release --no-restore
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 ```
 
-`ValidateOnly` 必须先显示 `Hourbit.exe`、版本 `0.2.0`、发布日期
-`2026-08-01` 以及两个 Hourbit 发行文件名。只有完整打包和烟雾测试实际退出 0 后，
-才能在此记录新生成文件的大小与 SHA-256；不得沿用旧版本产物的结果。
+## 仍需物理 Windows 11 人工验收
 
-## 手动 Windows 11 矩阵
+下列项目不能由隔离自动测试冒充为人工通过，本轮也没有改变用户的全局区域、安全、
+通知或安装状态：
 
-以下项目没有被自动测试替代，也没有捏造为通过。
-
-| 场景 | 状态 | 待验证原因 / 方法 |
+| 场景 | 状态 | 自动证据与人工方法 |
 |---|---|---|
-| 主窗口关闭、托盘调度触发 | 待验证 | 需要实际 Release 应用驻留并等待到期 |
-| 锁屏提醒 | 待验证 | 需要锁定实际 Windows 会话 |
-| 睡眠超过 5 分钟后恢复 | 待验证 | 需要物理睡眠/恢复，自动门不唤醒电脑 |
-| 手动日期、时间、时区变化 | 待验证 | 会改变全局系统设置；本任务未获得新许可 |
-| 三个提醒同时到期 | 待验证 | 需观察 Release UI、通知合并和重要队列 |
-| 专注模式下普通通知 | 待验证 | 会改变 Windows 专注设置；未获得新许可 |
-| 重要提醒队列、循环声音、全部稍后值 | 待验证 | 需听觉和窗口交互验证 |
-| 禁用通知权限 | 待验证 | 会改变 Windows 全局通知设置；未获得新许可 |
-| 默认快捷键被占用 | 待验证 | 需另一个实际程序占用组合键 |
-| 自定义声音缺失 | 待验证 | 需 Release 设置页和实际音频回退 |
-| 安装/升级/卸载且数据保留 | 待验证 | 安装程序已生成；仍需实际安装、升级、卸载并核对数据目录 |
-| 移动便携目录、报告启动路径过期 | 待验证 | 便携 ZIP 已生成；仍需移动目录并核对启动项诊断 |
-| 100%、125%、150%、200% 缩放 | 待验证 | 会改变全局显示设置；未获得新许可 |
-| 高对比度、纯键盘操作 | 待验证 | 高对比度是全局设置；未获得新许可 |
-| 24 小时驻留稳定性 | 待验证 | 本轮没有经过连续 24 小时；必须记录调度器数、重复投递和内存趋势 |
+| `zh-CN`、`en-US`、`en-GB` 区域格式 | 待人工验证 | parser culture matrix 已自动通过；人工需逐一切换 Windows 短日期顺序、启动 Release 并按预览确认，最后恢复原区域 |
+| todo 不产生 Windows 通知 | 待人工观察 | 仓储与 packaged smoke 已证明 todo 不进入 scheduler；人工需跨过截止日观察通知中心 |
+| 旧安装原地升级且数据保留 | 待人工安装 | AppId、目录、清理和启动项 seam 已通过；必须在可回滚测试账户/虚拟机以旧版数据实际安装验证 |
+| 主窗口、托盘、设置页 Hourbit 身份 | 待人工观察 | 程序集和 WPF 自动化测试已通过；需从最终 Release 产物截图确认 |
+| 锁屏、睡眠、专注模式、通知权限 | 待人工验证 | 会改变系统状态，需在专用测试机执行并恢复设置 |
 
-## 安装生命周期数据保护检查
+安装升级人工测试不得使用用户正式数据。先复制旧版测试数据库到隔离测试账户或虚拟
+机，核对提醒、设置、AppId 与启动项后再卸载测试实例。
 
-`installer/Moment.iss` 的文件清单只从发布目录安装到
-`%LOCALAPPDATA%\Programs\Moment`。脚本不包含 `UninstallDelete` 或针对
-`%LOCALAPPDATA%\Moment\data` 的删除操作；应用设置仍独占开机启动注册。
-这项静态检查不能替代实际安装/升级/卸载测试。
+## 未来版本规则
 
-## 版本一致性检查
+未来发布只修改 `Version.props` 中的产品名、可执行文件名、语义版本或发布日期。
+不要在脚本、安装器、设置页或文档中维护第二份可执行版本号。修改后必须运行本检查
+表的三个发布命令，并确认：
 
-发布前只修改仓库根目录的 `Version.props`，再运行
-`scripts/build-release.ps1 -ValidateOnly`。确认 `Hourbit.exe` 的程序集属性、
-安装程序版本、设置页页脚以及 `Hourbit-Portable-x64.zip` 与
-`Hourbit-Setup-x64.exe` 的名称均来自同一组已求值的 MSBuild 属性。
-
-## Release 截图待办
-
-最终发布门通过后，从实际 Release 应用（不是设计图或 Debug 构建）捕获：
-
-1. 主时间轴（同时显示状态文字和图标）。
-2. 快速创建的明确预览。
-3. 设置页的通知、快捷键、启动和备份区域。
-
-不得为截图修改 Smart App Control、安全、通知、高对比度或显示缩放设置，除非用户
-另行明确许可。
+1. `Hourbit.exe` 的程序集元数据；
+2. 设置页脚 `版本 <version> · 发布于 <yyyy-MM-dd>`；
+3. 安装器 `ProductVersion`；
+4. 便携包与安装器的 Hourbit 发行文件名；
+5. 新生成的 SHA-256。

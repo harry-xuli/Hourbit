@@ -16,6 +16,17 @@ namespace Moment.App.Tests.Settings;
 public sealed class SettingsViewTests
 {
     [Fact]
+    public void Manual_backup_export_uses_the_hourbit_public_prefix()
+    {
+        var name = SettingsView.CreateBackupExportFileName(
+            DateTimeOffset.Parse("2026-08-08T11:12:13Z"));
+
+        Assert.Equal(
+            "hourbit-export-20260808T111213Z.moment-backup",
+            name);
+    }
+
+    [Fact]
     public Task Every_settings_action_follows_visible_keyboard_order() =>
         WpfTestHost.RunAsync(() =>
         {

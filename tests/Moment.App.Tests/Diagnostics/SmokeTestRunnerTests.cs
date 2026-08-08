@@ -14,7 +14,12 @@ public sealed class SmokeTestRunnerTests
         "snoozed",
         "restart-recovered",
         "missed-recovery",
-        "single-instance-protocol"
+        "single-instance-protocol",
+        "schema-v1-upgrade",
+        "schema-v2-upgrade",
+        "todos-created",
+        "todo-scheduler-exclusion",
+        "release-metadata"
     ];
 
     [Fact]
@@ -44,6 +49,21 @@ public sealed class SmokeTestRunnerTests
         Assert.Equal(ExpectedEvents.Order(), events.Order());
         Assert.All(ExpectedEvents, expected =>
             Assert.Equal(1, events.Count(actual => actual == expected)));
+
+        using var metadata = File.ReadLines(Path.Combine(output.Path, "self-test.jsonl"))
+            .Select(line => JsonDocument.Parse(line))
+            .Single(document => document.RootElement
+                .GetProperty("event").GetString() == "release-metadata");
+        Assert.Equal("Hourbit 日程",
+            metadata.RootElement.GetProperty("productName").GetString());
+        Assert.Equal("Hourbit",
+            metadata.RootElement.GetProperty("executableName").GetString());
+        Assert.Equal("0.2.0",
+            metadata.RootElement.GetProperty("semanticVersion").GetString());
+        Assert.Equal("2026-08-01",
+            metadata.RootElement.GetProperty("releaseDate").GetString());
+        Assert.Equal("版本 0.2.0 · 发布于 2026-08-01",
+            metadata.RootElement.GetProperty("settingsFooter").GetString());
     }
 
     [Fact]

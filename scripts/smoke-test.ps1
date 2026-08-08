@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$PortableArchive,
+    [string]$InstallerArtifact,
     [switch]$ValidateOnly,
     [string]$ResultFile
 )
@@ -15,18 +16,36 @@ $expectedEvents = @(
     'snoozed',
     'restart-recovered',
     'missed-recovery',
-    'single-instance-protocol'
+    'single-instance-protocol',
+    'schema-v1-upgrade',
+    'schema-v2-upgrade',
+    'todos-created',
+    'todo-scheduler-exclusion',
+    'release-metadata'
 )
 $repositoryRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $PSScriptRoot '..'))
 $applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
 $evaluatedProperties = (& dotnet msbuild $applicationProject `
     -nologo `
-    '-getProperty:AssemblyName,Product' | Out-String | ConvertFrom-Json).Properties
+    '-getProperty:AssemblyName,Product,Version,ReleaseDate' |
+    Out-String | ConvertFrom-Json).Properties
 $assemblyName = [string]$evaluatedProperties.AssemblyName
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($assemblyName)) {
-    throw 'Could not evaluate the application AssemblyName for smoke testing.'
+$productName = [string]$evaluatedProperties.Product
+$semanticVersion = [string]$evaluatedProperties.Version
+$releaseDate = [string]$evaluatedProperties.ReleaseDate
+if ($LASTEXITCODE -ne 0 -or
+    [string]::IsNullOrWhiteSpace($assemblyName) -or
+    [string]::IsNullOrWhiteSpace($productName) -or
+    [string]::IsNullOrWhiteSpace($semanticVersion) -or
+    [string]::IsNullOrWhiteSpace($releaseDate)) {
+    throw 'Could not evaluate complete application release metadata for smoke testing.'
 }
+$versionLabel = [string]::Concat([char]0x7248, [char]0x672C)
+$releasedOnLabel = [string]::Concat(
+    [char]0x53D1, [char]0x5E03, [char]0x4E8E)
+$settingsFooter =
+    "$versionLabel $semanticVersion $([char]0x00B7) $releasedOnLabel $releaseDate"
 if ([string]::IsNullOrWhiteSpace($PortableArchive)) {
     $PortableArchive = Join-Path $repositoryRoot (
         "artifacts\$assemblyName-Portable-x64.zip")
@@ -34,6 +53,13 @@ if ([string]::IsNullOrWhiteSpace($PortableArchive)) {
     $PortableArchive = Join-Path $repositoryRoot $PortableArchive
 }
 $PortableArchive = [System.IO.Path]::GetFullPath($PortableArchive)
+if ([string]::IsNullOrWhiteSpace($InstallerArtifact)) {
+    $InstallerArtifact = Join-Path $repositoryRoot (
+        "artifacts\$assemblyName-Setup-x64.exe")
+} elseif (-not [System.IO.Path]::IsPathFullyQualified($InstallerArtifact)) {
+    $InstallerArtifact = Join-Path $repositoryRoot $InstallerArtifact
+}
+$InstallerArtifact = [System.IO.Path]::GetFullPath($InstallerArtifact)
 
 function Test-SmokeResult {
     param(
@@ -46,6 +72,7 @@ function Test-SmokeResult {
     }
 
     $counts = @{}
+    $releaseMetadata = $null
     foreach ($expected in $expectedEvents) {
         $counts[$expected] = 0
     }
@@ -66,6 +93,9 @@ function Test-SmokeResult {
             throw "The self-test result contains an unknown event: $($entry.event)"
         }
         $counts[[string]$entry.event]++
+        if ([string]$entry.event -ceq 'release-metadata') {
+            $releaseMetadata = $entry
+        }
     }
 
     foreach ($expected in $expectedEvents) {
@@ -75,6 +105,22 @@ function Test-SmokeResult {
     }
     if ($lines.Count -ne $expectedEvents.Count) {
         throw "Expected exactly $($expectedEvents.Count) JSONL entries; observed $($lines.Count)."
+    }
+
+    if ($null -eq $releaseMetadata) {
+        throw 'The self-test result has no release metadata entry.'
+    }
+    $metadataChecks = @(
+        @{ Name = 'productName'; Actual = [string]$releaseMetadata.productName; Expected = $productName },
+        @{ Name = 'executableName'; Actual = [string]$releaseMetadata.executableName; Expected = $assemblyName },
+        @{ Name = 'semanticVersion'; Actual = [string]$releaseMetadata.semanticVersion; Expected = $semanticVersion },
+        @{ Name = 'releaseDate'; Actual = [string]$releaseMetadata.releaseDate; Expected = $releaseDate },
+        @{ Name = 'settingsFooter'; Actual = [string]$releaseMetadata.settingsFooter; Expected = $settingsFooter }
+    )
+    foreach ($check in $metadataChecks) {
+        if ($check.Actual -cne $check.Expected) {
+            throw "Release metadata '$($check.Name)' mismatch: expected '$($check.Expected)', observed '$($check.Actual)'."
+        }
     }
 
     return $lines
@@ -94,6 +140,17 @@ if (-not [string]::IsNullOrWhiteSpace($ResultFile)) {
 }
 if (-not (Test-Path -LiteralPath $PortableArchive -PathType Leaf)) {
     throw "Portable archive is missing: $PortableArchive"
+}
+if (-not (Test-Path -LiteralPath $InstallerArtifact -PathType Leaf)) {
+    throw "Installer artifact is missing: $InstallerArtifact"
+}
+$expectedPortableName = "$assemblyName-Portable-x64.zip"
+$expectedInstallerName = "$assemblyName-Setup-x64.exe"
+if ([System.IO.Path]::GetFileName($PortableArchive) -cne $expectedPortableName) {
+    throw "Portable artifact name must be '$expectedPortableName'."
+}
+if ([System.IO.Path]::GetFileName($InstallerArtifact) -cne $expectedInstallerName) {
+    throw "Installer artifact name must be '$expectedInstallerName'."
 }
 
 $temporaryRoot = [System.IO.Path]::GetFullPath(
@@ -123,6 +180,28 @@ try {
         throw 'portable.flag is missing from the portable archive.'
     }
 
+    $executableVersion =
+        [Diagnostics.FileVersionInfo]::GetVersionInfo($executable)
+    if ($executableVersion.ProductName -cne $productName -or
+        -not ($executableVersion.ProductVersion -ceq $semanticVersion -or
+            $executableVersion.ProductVersion.StartsWith(
+                $semanticVersion + '+',
+                [System.StringComparison]::Ordinal))) {
+        throw "Published EXE metadata does not agree with $productName $semanticVersion."
+    }
+    $installerVersion =
+        [Diagnostics.FileVersionInfo]::GetVersionInfo($InstallerArtifact)
+    # Inno Setup writes these fixed-width VERSIONINFO strings padded with
+    # trailing spaces. Normalize only that representation detail before the
+    # exact identity comparison.
+    $installerProductName = ([string]$installerVersion.ProductName).TrimEnd()
+    $installerProductVersion =
+        ([string]$installerVersion.ProductVersion).TrimEnd()
+    if ($installerProductName -cne $productName -or
+        $installerProductVersion -cne $semanticVersion) {
+        throw "Installer metadata does not agree with $productName $semanticVersion."
+    }
+
     $quotedOutputDirectory = '"' + $outputDirectory + '"'
     $process = Start-Process `
         -FilePath $executable `
@@ -145,6 +224,9 @@ try {
     $resultPath = Join-Path $outputDirectory 'self-test.jsonl'
     $resultLines = Test-SmokeResult -Path $resultPath
     $resultLines
+    Write-Output "Validated release agreement: $productName $semanticVersion ($releaseDate)."
+    Write-Output "Validated settings footer: $settingsFooter"
+    Write-Output "Validated artifacts: $expectedPortableName and $expectedInstallerName"
     Write-Output "Portable smoke test passed in $($process.TotalProcessorTime.TotalMilliseconds) ms CPU time."
 }
 finally {

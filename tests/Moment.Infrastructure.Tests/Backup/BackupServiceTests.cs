@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using Moment.Core.Domain;
 using Moment.Infrastructure.Backup;
 using Moment.Infrastructure.Data;
 using Moment.TestSupport;
@@ -13,14 +14,30 @@ public sealed class BackupServiceTests
     {
         using var temp = new TempDirectory();
         await TestBackupFactory.InitializeAsync(temp.Path);
+        var todo = new TodoItem(
+            Guid.NewGuid(),
+            "备份中的待办",
+            DateTimeOffset.Parse("2026-07-29T01:00:00Z"),
+            new DateOnly(2026, 8, 5),
+            ReminderImportance.Important,
+            IsCompleted: false,
+            CompletedAt: null);
+        var todos = await SqliteTodoRepository.OpenAsync(
+            TestBackupFactory.DatabasePath(temp.Path), default);
+        await todos.SaveAsync(todo, default);
         var service = TestBackupFactory.Create(temp.Path);
         var path = Path.Combine(temp.Path, "data.moment-backup");
         await service.ExportAsync(path, default);
         await TestBackupFactory.ChangeDatabaseAsync(temp.Path);
+        await todos.DeleteAsync(todo.Id, default);
 
         await service.RestoreAsync(path, default);
 
         Assert.Equal("original", await TestBackupFactory.ReadMarkerAsync(temp.Path));
+        var restoredTodos = await (await SqliteTodoRepository.OpenAsync(
+                TestBackupFactory.DatabasePath(temp.Path), default))
+            .GetAllAsync(default);
+        Assert.Equal(todo, Assert.Single(restoredTodos));
 
         await TestBackupFactory.TamperWithDatabaseEntryAsync(path);
         await Assert.ThrowsAsync<InvalidDataException>(

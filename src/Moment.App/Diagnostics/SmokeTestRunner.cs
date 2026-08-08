@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Moment.App.Settings;
 using Moment.App.Timeline;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
@@ -25,7 +27,12 @@ internal static class SmokeTestRunner
         "snoozed",
         "restart-recovered",
         "missed-recovery",
-        "single-instance-protocol"
+        "single-instance-protocol",
+        "schema-v1-upgrade",
+        "schema-v2-upgrade",
+        "todos-created",
+        "todo-scheduler-exclusion",
+        "release-metadata"
     ];
 
     public static async Task<int> RunAsync(
@@ -55,9 +62,11 @@ internal static class SmokeTestRunner
             Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
             await using (var events = await EventLog.CreateAsync(resultPath, ct))
             {
+                await ExerciseLegacyUpgradesAndTodosAsync(databasePath, events, ct);
                 await ExerciseReminderPipelineAsync(databasePath, events, ct);
                 await ExerciseMissedRecoveryAsync(databasePath, events, ct);
                 await ExerciseSingleInstanceProtocolAsync(events, ct);
+                await ExerciseReleaseMetadataAsync(events, ct);
             }
 
             await ValidateResultAsync(resultPath, ct);
@@ -76,6 +85,213 @@ internal static class SmokeTestRunner
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
+    }
+
+    private static async Task ExerciseLegacyUpgradesAndTodosAsync(
+        string versionTwoDatabasePath,
+        EventLog events,
+        CancellationToken ct)
+    {
+        var versionOneDatabasePath = Path.Combine(
+            Path.GetDirectoryName(versionTwoDatabasePath)!,
+            "moment-self-test-v1.db");
+        var versionOneReminder = await CreateLegacyDatabaseAsync(
+            versionOneDatabasePath, version: 1, ct);
+        await AssertLegacyReminderSurvivesUpgradeAsync(
+            versionOneDatabasePath,
+            versionOneReminder,
+            "schema-v1-upgrade",
+            events,
+            ct);
+
+        var versionTwoReminder = await CreateLegacyDatabaseAsync(
+            versionTwoDatabasePath, version: 2, ct);
+        await AssertLegacyReminderSurvivesUpgradeAsync(
+            versionTwoDatabasePath,
+            versionTwoReminder,
+            "schema-v2-upgrade",
+            events,
+            ct);
+
+        var todoRepository = await SqliteTodoRepository.OpenAsync(
+            versionTwoDatabasePath, ct);
+        var createdAt = new DateTimeOffset(
+            2026, 1, 5, 8, 0, 0, TimeSpan.Zero);
+        var dated = new TodoItem(
+            Guid.NewGuid(),
+            "升级后有日期待办",
+            createdAt,
+            new DateOnly(2026, 1, 7),
+            ReminderImportance.Important,
+            IsCompleted: false,
+            CompletedAt: null);
+        var undated = new TodoItem(
+            Guid.NewGuid(),
+            "升级后无日期待办",
+            createdAt,
+            DueDate: null,
+            ReminderImportance.Normal,
+            IsCompleted: false,
+            CompletedAt: null);
+        await todoRepository.SaveAsync(dated, ct);
+        await todoRepository.SaveAsync(undated, ct);
+
+        var persistedTodos = await todoRepository.GetAllAsync(ct);
+        if (persistedTodos.Count != 2 ||
+            persistedTodos.SingleOrDefault(todo => todo.Id == dated.Id) != dated ||
+            persistedTodos.SingleOrDefault(todo => todo.Id == undated.Id) != undated)
+        {
+            throw new InvalidOperationException(
+                "The upgraded database did not persist dated and undated todos.");
+        }
+        await events.RecordAsync("todos-created", ct);
+
+        var reminderRepository = await SqliteReminderRepository.OpenAsync(
+            versionTwoDatabasePath, ct);
+        var scheduled = await reminderRepository.GetScheduledAsync(ct);
+        var due = await reminderRepository.GetDueAsync(
+            versionTwoReminder.DueAt, ct);
+        if (scheduled.Count != 1 ||
+            scheduled[0].Occurrence.Id != versionTwoReminder.OccurrenceId ||
+            due.Count != 1 ||
+            due[0].Occurrence.Id != versionTwoReminder.OccurrenceId)
+        {
+            throw new InvalidOperationException(
+                "Todo records entered reminder scheduler queries.");
+        }
+        await events.RecordAsync("todo-scheduler-exclusion", ct);
+    }
+
+    private static async Task AssertLegacyReminderSurvivesUpgradeAsync(
+        string databasePath,
+        LegacyReminderFixture fixture,
+        string eventName,
+        EventLog events,
+        CancellationToken ct)
+    {
+        _ = await SqliteTodoRepository.OpenAsync(databasePath, ct);
+        var reminders = await SqliteReminderRepository.OpenAsync(databasePath, ct);
+        var retained = await reminders.GetScheduledReminderAsync(
+            fixture.OccurrenceId, ct);
+        if (retained?.Item.Id != fixture.ItemId ||
+            retained.Item.Title != "升级保留提醒" ||
+            retained.Occurrence.DueAt != fixture.DueAt)
+        {
+            throw new InvalidOperationException(
+                "A legacy reminder was not retained during the schema v3 upgrade.");
+        }
+
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(
+            databasePath, ct);
+        await using var marker = connection.CreateCommand();
+        marker.CommandText =
+            "SELECT COUNT(*) FROM schema_info WHERE version = 3;";
+        if (Convert.ToInt32(
+                await marker.ExecuteScalarAsync(ct),
+                CultureInfo.InvariantCulture) != 1)
+        {
+            throw new InvalidOperationException(
+                "The legacy database does not have exactly one schema v3 marker.");
+        }
+
+        await events.RecordAsync(eventName, ct);
+    }
+
+    private static async Task<LegacyReminderFixture> CreateLegacyDatabaseAsync(
+        string databasePath,
+        int version,
+        CancellationToken ct)
+    {
+        if (version is not (1 or 2))
+            throw new ArgumentOutOfRangeException(nameof(version));
+
+        var itemId = Guid.NewGuid();
+        var occurrenceId = Guid.NewGuid();
+        var createdAt = new DateTimeOffset(
+            2026, 1, 5, 8, 0, 0, TimeSpan.Zero);
+        var dueAt = new DateTimeOffset(
+            2026, 1, 6, 9, 0, 0, TimeSpan.Zero);
+        var utcColumn = version == 1
+            ? string.Empty
+            : ", due_at_utc TEXT NOT NULL";
+        var utcInsertColumn = version == 1 ? string.Empty : ", due_at_utc";
+        var utcInsertValue = version == 1 ? string.Empty : ", $dueAtUtc";
+        var uniqueColumn = version == 1 ? "due_at" : "due_at_utc";
+
+        await using var connection = await DatabaseMigrator.OpenConnectionAsync(
+            databasePath, ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            CREATE TABLE schema_info (version INTEGER NOT NULL);
+            CREATE TABLE items (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                kind INTEGER NOT NULL,
+                importance INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE occurrences (
+                id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                due_at TEXT NOT NULL{utcColumn},
+                state INTEGER NOT NULL,
+                handled_at TEXT NULL,
+                snooze_parent_id TEXT NULL,
+                UNIQUE(item_id, {uniqueColumn})
+            );
+            CREATE TABLE recurrence_rules (
+                item_id TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+                kind INTEGER NOT NULL,
+                days_of_week TEXT NOT NULL,
+                time TEXT NOT NULL
+            );
+            CREATE TABLE action_log (
+                id TEXT PRIMARY KEY,
+                occurrence_id TEXT NOT NULL REFERENCES occurrences(id) ON DELETE CASCADE,
+                state INTEGER NOT NULL,
+                handled_at TEXT NOT NULL
+            );
+            CREATE TABLE settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE INDEX ix_occurrences_item_id ON occurrences(item_id);
+            INSERT INTO schema_info(version) VALUES (1);
+            {(version == 2 ? "INSERT INTO schema_info(version) VALUES (2);" : string.Empty)}
+            INSERT INTO items(id, title, kind, importance, created_at)
+                VALUES ($itemId, '升级保留提醒', $kind, $importance, $createdAt);
+            INSERT INTO occurrences(
+                id, item_id, due_at{utcInsertColumn}, state,
+                handled_at, snooze_parent_id)
+                VALUES (
+                    $occurrenceId, $itemId, $dueAt{utcInsertValue},
+                    $state, NULL, NULL);
+            """;
+        command.Parameters.AddWithValue("$itemId", itemId.ToString("D"));
+        command.Parameters.AddWithValue(
+            "$occurrenceId", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$kind", (int)ReminderKind.Plan);
+        command.Parameters.AddWithValue(
+            "$importance", (int)ReminderImportance.Normal);
+        command.Parameters.AddWithValue(
+            "$state", (int)OccurrenceState.Scheduled);
+        command.Parameters.AddWithValue(
+            "$createdAt", createdAt.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue(
+            "$dueAt", dueAt.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue(
+            "$dueAtUtc",
+            dueAt.UtcDateTime.ToString("O", CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(ct);
+        return new LegacyReminderFixture(itemId, occurrenceId, dueAt);
+    }
+
+    private static Task ExerciseReleaseMetadataAsync(
+        EventLog events,
+        CancellationToken ct)
+    {
+        var metadata = ProductMetadata.FromAssembly(Assembly.GetExecutingAssembly());
+        return events.RecordReleaseMetadataAsync(metadata, ct);
     }
 
     private static async Task ExerciseMissedRecoveryAsync(
@@ -516,6 +732,34 @@ internal static class SmokeTestRunner
 
         public async Task RecordAsync(string eventName, CancellationToken ct)
         {
+            var line = JsonSerializer.Serialize(
+                new SmokeEvent(eventName, DateTimeOffset.UtcNow));
+            await WriteAsync(eventName, line, ct);
+        }
+
+        public async Task RecordReleaseMetadataAsync(
+            ProductMetadata metadata,
+            CancellationToken ct)
+        {
+            ArgumentNullException.ThrowIfNull(metadata);
+            const string eventName = "release-metadata";
+            var line = JsonSerializer.Serialize(
+                new ReleaseMetadataSmokeEvent(
+                    eventName,
+                    DateTimeOffset.UtcNow,
+                    metadata.ProductName,
+                    metadata.ExecutableName,
+                    metadata.Version,
+                    metadata.ReleaseDate,
+                    metadata.SettingsFooterText));
+            await WriteAsync(eventName, line, ct);
+        }
+
+        private async Task WriteAsync(
+            string eventName,
+            string line,
+            CancellationToken ct)
+        {
             if (!ExpectedEvents.Contains(eventName, StringComparer.Ordinal))
                 throw new InvalidOperationException($"Unknown self-test event: {eventName}");
 
@@ -526,8 +770,6 @@ internal static class SmokeTestRunner
                     throw new InvalidOperationException(
                         $"Duplicate self-test event: {eventName}");
 
-                var line = JsonSerializer.Serialize(
-                    new SmokeEvent(eventName, DateTimeOffset.UtcNow));
                 await _writer.WriteLineAsync(line.AsMemory(), ct);
                 await _writer.FlushAsync(ct);
             }
@@ -547,4 +789,18 @@ internal static class SmokeTestRunner
     private sealed record SmokeEvent(
         [property: JsonPropertyName("event")] string Event,
         [property: JsonPropertyName("timestampUtc")] DateTimeOffset TimestampUtc);
+
+    private sealed record ReleaseMetadataSmokeEvent(
+        [property: JsonPropertyName("event")] string Event,
+        [property: JsonPropertyName("timestampUtc")] DateTimeOffset TimestampUtc,
+        [property: JsonPropertyName("productName")] string ProductName,
+        [property: JsonPropertyName("executableName")] string ExecutableName,
+        [property: JsonPropertyName("semanticVersion")] string SemanticVersion,
+        [property: JsonPropertyName("releaseDate")] string ReleaseDate,
+        [property: JsonPropertyName("settingsFooter")] string SettingsFooter);
+
+    private sealed record LegacyReminderFixture(
+        Guid ItemId,
+        Guid OccurrenceId,
+        DateTimeOffset DueAt);
 }

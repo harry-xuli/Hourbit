@@ -253,10 +253,13 @@ public partial class SettingsView : Window
             Filter = "Hourbit 日程备份 (*.moment-backup)|*.moment-backup",
             AddExtension = true,
             DefaultExt = ".moment-backup",
-            FileName = $"moment-export-{DateTimeOffset.UtcNow:yyyyMMdd'T'HHmmss'Z'}.moment-backup"
+            FileName = CreateBackupExportFileName(DateTimeOffset.UtcNow)
         };
         return picker.ShowDialog(this) == true ? picker.FileName : null;
     }
+
+    internal static string CreateBackupExportFileName(DateTimeOffset now) =>
+        $"hourbit-export-{now.ToUniversalTime():yyyyMMdd'T'HHmmss'Z'}.moment-backup";
 
     private string? SelectBackupRestorePath()
     {
