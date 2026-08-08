@@ -1,10 +1,12 @@
 using System.Windows.Interop;
+using System.ComponentModel;
 
 namespace Moment.App.QuickAdd;
 
 public partial class QuickAddWindow : System.Windows.Window, IQuickAddWindow
 {
     private QuickAddViewModel? _viewModel;
+    private bool _allowClose;
     public bool IsClosed { get; private set; }
 
     public QuickAddWindow()
@@ -17,6 +19,18 @@ public partial class QuickAddWindow : System.Windows.Window, IQuickAddWindow
             InputBox.SelectAll();
         };
         DataContextChanged += OnDataContextChanged;
+        if (System.Windows.Application.Current is { } application)
+            application.SessionEnding += OnSessionEnding;
+    }
+
+    protected override void OnClosing(CancelEventArgs eventArgs)
+    {
+        if (!_allowClose && _viewModel?.IsRefreshOnly == true &&
+            !Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+        {
+            eventArgs.Cancel = true;
+        }
+        base.OnClosing(eventArgs);
     }
 
     protected override void OnClosed(EventArgs eventArgs)
@@ -24,6 +38,8 @@ public partial class QuickAddWindow : System.Windows.Window, IQuickAddWindow
         IsClosed = true;
         if (_viewModel is not null)
             _viewModel.HideRequested -= OnHideRequested;
+        if (System.Windows.Application.Current is { } application)
+            application.SessionEnding -= OnSessionEnding;
         base.OnClosed(eventArgs);
     }
 
@@ -72,24 +88,29 @@ public partial class QuickAddWindow : System.Windows.Window, IQuickAddWindow
             return;
         }
 
-        if (eventArgs.Key == System.Windows.Input.Key.Enter
-            && await TrySubmitFromEnterAsync())
+        if (eventArgs.Key == System.Windows.Input.Key.Enter && CanSubmitFromEnter())
         {
             eventArgs.Handled = true;
+            await TrySubmitFromEnterAsync();
         }
     }
 
     internal async Task<bool> TrySubmitFromEnterAsync()
     {
-        if (!InputBox.IsKeyboardFocusWithin ||
-            DataContext is not QuickAddViewModel viewModel)
-        {
+        if (!CanSubmitFromEnter() || DataContext is not QuickAddViewModel viewModel)
             return false;
-        }
 
         await viewModel.SubmitCommand.ExecuteAsync(null);
         return true;
     }
+
+    private bool CanSubmitFromEnter() =>
+        DataContext is QuickAddViewModel viewModel &&
+        (viewModel.IsRefreshOnly || InputBox.IsKeyboardFocusWithin);
+
+    private void OnSessionEnding(
+        object? sender,
+        System.Windows.SessionEndingCancelEventArgs eventArgs) => _allowClose = true;
 
     private void PlaceOnCurrentMonitor()
     {

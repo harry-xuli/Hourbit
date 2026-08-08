@@ -185,34 +185,176 @@ public sealed class QuickAddWindowTests
     }
 
     [Fact]
-    public Task Created_item_with_failed_refresh_disables_sentence_input() =>
+    public Task Refresh_only_exposes_focusable_retry_and_window_Enter_retries_without_recreating() =>
         WpfTestHost.RunAsync(async () =>
         {
             var due = DateTimeOffset.Parse("2026-08-05T14:30:00+08:00");
+            var refreshAttempts = 0;
+            var reminders = new ReminderServiceStub();
             var vm = new QuickAddViewModel(
                 new StubParser(new ParseResult.Success(new ReminderDraft(
                     "开会", due, ReminderKind.Plan, ReminderImportance.Normal, null))),
-                new ReminderServiceStub(),
+                reminders,
                 new TodoServiceStub(),
                 new LocalClock(due.AddDays(-1)),
                 TimeZoneInfo.CreateCustomTimeZone(
                     "UTC+08-refresh-only", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
                 CultureInfo.GetCultureInfo("zh-CN"),
-                _ => throw new InvalidOperationException("时间轴刷新失败"));
+                _ => ++refreshAttempts == 1
+                    ? throw new InvalidOperationException("时间轴刷新失败")
+                    : Task.CompletedTask);
             vm.Text = "8月5日14:30开会";
             var window = new QuickAddWindow { DataContext = vm };
             window.Show();
+            window.Activate();
             window.UpdateLayout();
+            try
+            {
+                await vm.SubmitAsync();
+                window.UpdateLayout();
+
+                var input = Assert.IsType<TextBox>(window.FindName("InputBox"));
+                var retry = Assert.IsType<Button>(window.FindName("RefreshRetryButton"));
+                Assert.False(input.IsEnabled);
+                Assert.True(retry.IsVisible);
+                Assert.True(retry.IsEnabled);
+                Assert.True(retry.Focusable);
+                Assert.True(retry.Focus());
+                Assert.True(window.IsVisible);
+                Assert.Contains("重试刷新", vm.ErrorMessage);
+
+                Assert.True(await window.TrySubmitFromEnterAsync());
+
+                Assert.Equal(1, reminders.CreateCalls);
+                Assert.Equal(2, refreshAttempts);
+                Assert.False(window.IsVisible);
+                Assert.False(vm.IsRefreshOnly);
+            }
+            finally
+            {
+                if (!window.IsClosed)
+                {
+                    if (vm.IsRefreshOnly)
+                        await vm.SubmitAsync();
+                    window.Close();
+                }
+            }
+        });
+
+    [Fact]
+    public Task Refresh_only_blocks_user_close_until_refresh_retry_succeeds() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var due = DateTimeOffset.Parse("2026-08-05T14:30:00+08:00");
+            var refreshAttempts = 0;
+            var reminders = new ReminderServiceStub();
+            var vm = new QuickAddViewModel(
+                new StubParser(new ParseResult.Success(new ReminderDraft(
+                    "开会", due, ReminderKind.Plan, ReminderImportance.Normal, null))),
+                reminders,
+                new TodoServiceStub(),
+                new LocalClock(due.AddDays(-1)),
+                TimeZoneInfo.CreateCustomTimeZone(
+                    "UTC+08-close-guard", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+                CultureInfo.GetCultureInfo("zh-CN"),
+                _ => ++refreshAttempts == 1
+                    ? throw new InvalidOperationException("时间轴刷新失败")
+                    : Task.CompletedTask);
+            vm.Text = "8月5日14:30开会";
+            var window = new QuickAddWindow { DataContext = vm };
+            window.Show();
 
             await vm.SubmitAsync();
-            window.UpdateLayout();
-
-            var input = Assert.IsType<TextBox>(window.FindName("InputBox"));
-            Assert.False(input.IsEnabled);
-            Assert.True(window.IsVisible);
-            Assert.Contains("重试刷新", vm.ErrorMessage);
             window.Close();
+
+            Assert.True(window.IsVisible);
+            Assert.False(window.IsClosed);
+            Assert.True(vm.IsRefreshOnly);
+
+            await vm.SubmitCommand.ExecuteAsync(null);
+
+            Assert.Equal(1, reminders.CreateCalls);
+            Assert.False(window.IsVisible);
+            window.Close();
+            Assert.True(window.IsClosed);
         });
+
+    [Fact]
+    public Task Refresh_retry_Enter_is_handled_before_awaiting_async_refresh() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var due = DateTimeOffset.Parse("2026-08-05T14:30:00+08:00");
+            var refreshAttempts = 0;
+            var refreshEntered = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseRefresh = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var hidden = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var reminders = new ReminderServiceStub();
+            var vm = new QuickAddViewModel(
+                new StubParser(new ParseResult.Success(new ReminderDraft(
+                    "开会", due, ReminderKind.Plan, ReminderImportance.Normal, null))),
+                reminders,
+                new TodoServiceStub(),
+                new LocalClock(due.AddDays(-1)),
+                TimeZoneInfo.CreateCustomTimeZone(
+                    "UTC+08-enter-route", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+                CultureInfo.GetCultureInfo("zh-CN"),
+                _ => ++refreshAttempts == 1
+                    ? throw new InvalidOperationException("时间轴刷新失败")
+                    : BlockRefreshAsync(refreshEntered, releaseRefresh));
+            vm.HideRequested += (_, _) => hidden.TrySetResult();
+            vm.Text = "8月5日14:30开会";
+            var window = new QuickAddWindow { DataContext = vm };
+            window.Show();
+            window.Activate();
+            await vm.SubmitAsync();
+            window.UpdateLayout();
+            var retry = Assert.IsType<Button>(window.FindName("RefreshRetryButton"));
+            Assert.True(retry.Focus());
+            var source = Assert.IsAssignableFrom<PresentationSource>(
+                PresentationSource.FromVisual(window));
+            var keyEvent = new KeyEventArgs(
+                Keyboard.PrimaryDevice,
+                source,
+                Environment.TickCount,
+                Key.Enter)
+            {
+                RoutedEvent = Keyboard.PreviewKeyDownEvent
+            };
+
+            try
+            {
+                retry.RaiseEvent(keyEvent);
+
+                Assert.True(keyEvent.Handled);
+                await refreshEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.Equal(1, reminders.CreateCalls);
+
+                releaseRefresh.TrySetResult();
+                await hidden.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                Assert.False(window.IsVisible);
+            }
+            finally
+            {
+                releaseRefresh.TrySetResult();
+                if (vm.IsRefreshOnly)
+                    await hidden.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                if (!window.IsClosed)
+                {
+                    window.Close();
+                }
+            }
+        });
+
+    private static async Task BlockRefreshAsync(
+        TaskCompletionSource entered,
+        TaskCompletionSource release)
+    {
+        entered.TrySetResult();
+        await release.Task;
+    }
 
     private static QuickAddViewModel CreateWithoutTestSupport()
     {
@@ -248,8 +390,16 @@ public sealed class QuickAddWindowTests
 
     private sealed class ReminderServiceStub : IReminderService
     {
+        public int CreateCalls { get; private set; }
+
         public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct) =>
-            Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), draft.DueAt));
+            Task.FromResult(CreateOccurrence(draft));
+
+        private ReminderOccurrence CreateOccurrence(ReminderDraft draft)
+        {
+            CreateCalls++;
+            return ReminderOccurrence.Schedule(Guid.NewGuid(), draft.DueAt);
+        }
         public Task EditAsync(Guid occurrenceId, ReminderDraft draft, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
         public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>

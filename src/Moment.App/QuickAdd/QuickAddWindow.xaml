@@ -118,7 +118,24 @@
                     </Style.Triggers>
                 </Style>
             </Border.Style>
-            <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource MissedBrush}" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding ErrorMessage}"
+                           Foreground="{DynamicResource MissedBrush}"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0" />
+                <Button x:Name="RefreshRetryButton"
+                        Grid.Column="1"
+                        Style="{StaticResource SecondaryButton}"
+                        Content="重试刷新"
+                        Command="{Binding SubmitCommand}"
+                        Visibility="{Binding IsRefreshOnly, Converter={StaticResource BooleanToVisibility}}"
+                        automation:AutomationProperties.Name="重试刷新时间轴" />
+            </Grid>
         </Border>
 
         <Border Grid.Row="3"

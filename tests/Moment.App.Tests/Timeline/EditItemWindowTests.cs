@@ -61,11 +61,15 @@ public sealed class EditItemWindowTests
     public Task Todo_conversion_refresh_failure_disables_fields_and_labels_retry() =>
         WpfTestHost.RunAsync(async () =>
         {
+            var refreshAttempts = 0;
+            var service = new TodoServiceStub();
             var vm = new EditTodoViewModel(
                 CreateTodo(),
                 Zone,
-                new TodoServiceStub(),
-                _ => throw new InvalidOperationException("时间轴刷新失败"));
+                service,
+                _ => ++refreshAttempts == 1
+                    ? throw new InvalidOperationException("时间轴刷新失败")
+                    : Task.CompletedTask);
             vm.TimeText = "14:30";
             var window = new EditTodoWindow { DataContext = vm };
             window.Show();
@@ -79,13 +83,24 @@ public sealed class EditItemWindowTests
             Assert.False(date.IsEnabled);
             Assert.Equal("重试刷新", save.Content);
             Assert.True(window.IsVisible);
+
             window.Close();
+
+            Assert.True(window.IsVisible);
+            Assert.True(vm.IsRefreshOnly);
+
+            await vm.SaveCommand.ExecuteAsync(null);
+
+            Assert.Equal(1, service.TodoToReminderConversions);
+            Assert.False(window.IsVisible);
         });
 
     [Fact]
     public Task Reminder_conversion_refresh_failure_disables_fields_and_labels_retry() =>
         WpfTestHost.RunAsync(async () =>
         {
+            var refreshAttempts = 0;
+            var service = new TodoServiceStub();
             var item = new TimelineItemViewModel(
                 TestData.Row("会议", "2026-08-03T10:30:00+08:00"),
                 DateTimeOffset.Parse("2026-08-03T09:00:00+08:00"));
@@ -93,9 +108,11 @@ public sealed class EditItemWindowTests
                 item,
                 Zone,
                 new ReminderServiceStub(),
-                new TodoServiceStub(),
+                service,
                 SeriesScope.OccurrenceOnly,
-                afterSaved: _ => throw new InvalidOperationException("时间轴刷新失败"));
+                afterSaved: _ => ++refreshAttempts == 1
+                    ? throw new InvalidOperationException("时间轴刷新失败")
+                    : Task.CompletedTask);
             vm.TimeText = "";
             var window = new EditReminderWindow { DataContext = vm };
             window.Show();
@@ -109,7 +126,16 @@ public sealed class EditItemWindowTests
             Assert.False(date.IsEnabled);
             Assert.Equal("重试刷新", save.Content);
             Assert.True(window.IsVisible);
+
             window.Close();
+
+            Assert.True(window.IsVisible);
+            Assert.True(vm.IsRefreshOnly);
+
+            await vm.SaveCommand.ExecuteAsync(null);
+
+            Assert.Equal(1, service.ReminderToTodoConversions);
+            Assert.False(window.IsVisible);
         });
 
     private static TodoItem CreateTodo() => new(
@@ -150,6 +176,9 @@ public sealed class EditItemWindowTests
 
     private sealed class TodoServiceStub : ITodoService
     {
+        public int TodoToReminderConversions { get; private set; }
+        public int ReminderToTodoConversions { get; private set; }
+
         public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
             throw new NotSupportedException();
         public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct) =>
@@ -157,11 +186,18 @@ public sealed class EditItemWindowTests
         public Task CompleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
         public Task DeleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
         public Task ConvertToReminderAsync(
-            Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
+            Guid todoId, ReminderDraft draft, CancellationToken ct)
+        {
+            TodoToReminderConversions++;
+            return Task.CompletedTask;
+        }
         public Task ConvertToTodoAsync(
             Guid occurrenceId, TodoDraft draft, CancellationToken ct) => Task.CompletedTask;
         public Task ConvertToTodoAsync(
-            Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct) =>
-            Task.CompletedTask;
+            Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct)
+        {
+            ReminderToTodoConversions++;
+            return Task.CompletedTask;
+        }
     }
 }
