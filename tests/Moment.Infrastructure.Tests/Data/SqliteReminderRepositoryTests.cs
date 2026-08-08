@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Globalization;
 using Moment.Core.Domain;
 using Moment.Infrastructure.Data;
 using Moment.TestSupport;
@@ -84,6 +85,128 @@ public sealed class SqliteReminderRepositoryTests
         var storedItem = await repository.GetItemAsync(item.Id, CancellationToken.None);
         Assert.Equal(OccurrenceState.Completed, history!.Occurrence.State);
         Assert.Null(storedItem!.Recurrence);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_occurrence_only_soft_deletes_once_and_blocks_operational_actions()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var repository = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var due = new DateTimeOffset(
+            2026, 8, 1, 9, 0, 0, TimeSpan.FromHours(8));
+        var item = ReminderItem.Create(
+            "软删除提醒", ReminderKind.Plan, ReminderImportance.Normal,
+            due.AddHours(-1), due);
+        var occurrence = ReminderOccurrence.Schedule(item.Id, due);
+        await repository.SaveItemWithOccurrenceAsync(
+            item, occurrence, CancellationToken.None);
+        var deletedAt = due.AddMinutes(1);
+
+        await repository.DeleteAsync(
+            occurrence.Id, SeriesScope.OccurrenceOnly,
+            deletedAt, CancellationToken.None);
+        Assert.False(await repository.TryMarkFiredAsync(
+            occurrence.Id, due.AddMinutes(2), CancellationToken.None));
+        Assert.False(await repository.TryTransitionAsync(
+            occurrence.Id, OccurrenceState.Scheduled,
+            OccurrenceState.Missed, due.AddMinutes(2), CancellationToken.None));
+        await repository.SetOccurrenceStateAsync(
+            occurrence.Id, OccurrenceState.Completed,
+            due.AddMinutes(2), CancellationToken.None);
+        await repository.ApplyActionAsync(
+            occurrence.Id, OccurrenceState.Completed,
+            due.AddMinutes(2), null, CancellationToken.None);
+        await repository.DeleteAsync(
+            occurrence.Id, SeriesScope.OccurrenceOnly,
+            due.AddMinutes(3), CancellationToken.None);
+
+        Assert.Empty(await repository.GetScheduledAsync(CancellationToken.None));
+        Assert.Empty(await repository.GetDueAsync(
+            due.AddDays(1), CancellationToken.None));
+        Assert.Empty(await repository.GetRecoverableAsync(
+            due.AddDays(1), CancellationToken.None));
+        Assert.Null(await repository.GetScheduledReminderAsync(
+            occurrence.Id, CancellationToken.None));
+        Assert.Null(await repository.GetItemAsync(
+            item.Id, CancellationToken.None));
+        Assert.Equal(
+            deletedAt.ToString("O", CultureInfo.InvariantCulture),
+            await ScalarStringAsync(path,
+                "SELECT deleted_at FROM occurrences WHERE id = $id;",
+                occurrence.Id));
+        Assert.Equal((int)OccurrenceState.Scheduled, await ScalarIntAsync(
+            path, "SELECT state FROM occurrences WHERE id = $id;",
+            occurrence.Id));
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM action_log WHERE occurrence_id = $id;",
+            occurrence.Id));
+    }
+
+    [Fact]
+    public async Task DeleteAsync_this_and_future_soft_deletes_scheduled_tail_and_retains_handled_history()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var repository = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var selectedDue = new DateTimeOffset(
+            2026, 8, 2, 9, 0, 0, TimeSpan.FromHours(8));
+        var item = new ReminderItem(
+            Guid.NewGuid(), "循环历史", ReminderKind.Plan,
+            ReminderImportance.Normal, selectedDue.AddDays(-2),
+            RecurrenceRule.Daily(TimeOnly.FromDateTime(selectedDue.DateTime)));
+        var past = ReminderOccurrence.Schedule(item.Id, selectedDue.AddDays(-1));
+        var selected = ReminderOccurrence.Schedule(item.Id, selectedDue);
+        var later = ReminderOccurrence.Schedule(item.Id, selectedDue.AddDays(1));
+        var handledLater = new ReminderOccurrence(
+            Guid.NewGuid(), item.Id, selectedDue.AddDays(2),
+            OccurrenceState.Completed, selectedDue.AddDays(2).AddMinutes(1), null);
+        await repository.SaveItemWithOccurrenceAsync(
+            item, past, CancellationToken.None);
+        await repository.ApplyActionAsync(
+            past.Id, OccurrenceState.Completed,
+            past.DueAt.AddMinutes(1), null, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(selected, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(later, CancellationToken.None);
+        await repository.SaveOccurrenceAsync(handledLater, CancellationToken.None);
+        var deletedAt = selectedDue.AddMinutes(5);
+
+        await repository.DeleteAsync(
+            selected.Id, SeriesScope.ThisAndFuture,
+            deletedAt, CancellationToken.None);
+        await repository.DeleteAsync(
+            selected.Id, SeriesScope.ThisAndFuture,
+            deletedAt.AddHours(1), CancellationToken.None);
+
+        Assert.NotNull(await repository.GetScheduledReminderAsync(
+            past.Id, CancellationToken.None));
+        Assert.NotNull(await repository.GetScheduledReminderAsync(
+            handledLater.Id, CancellationToken.None));
+        Assert.Null(await repository.GetScheduledReminderAsync(
+            selected.Id, CancellationToken.None));
+        Assert.Null(await repository.GetScheduledReminderAsync(
+            later.Id, CancellationToken.None));
+        Assert.Empty(await repository.GetScheduledAsync(CancellationToken.None));
+        Assert.Null((await repository.GetItemAsync(
+            item.Id, CancellationToken.None))!.Recurrence);
+        Assert.Equal(
+            deletedAt.ToString("O", CultureInfo.InvariantCulture),
+            await ScalarStringAsync(path,
+                "SELECT deleted_at FROM occurrences WHERE id = $id;",
+                selected.Id));
+        Assert.Equal(
+            deletedAt.ToString("O", CultureInfo.InvariantCulture),
+            await ScalarStringAsync(path,
+                "SELECT deleted_at FROM occurrences WHERE id = $id;",
+                later.Id));
+        Assert.Null(await ScalarStringAsync(path,
+            "SELECT deleted_at FROM occurrences WHERE id = $id;",
+            handledLater.Id));
+        Assert.Equal(1, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM action_log WHERE occurrence_id = $id;",
+            past.Id));
     }
 
     [Fact]
@@ -355,5 +478,35 @@ public sealed class SqliteReminderRepositoryTests
         command.Parameters.AddWithValue("$createdAt", due.AddHours(-1).ToString("O", System.Globalization.CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$dueAt", due.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync(CancellationToken.None);
+    }
+
+    private static async Task<int> ScalarIntAsync(
+        string path,
+        string sql,
+        Guid id)
+    {
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$id", id.ToString("D"));
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(CancellationToken.None),
+            CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<string?> ScalarStringAsync(
+        string path,
+        string sql,
+        Guid id)
+    {
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, CancellationToken.None);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$id", id.ToString("D"));
+        var value = await command.ExecuteScalarAsync(CancellationToken.None);
+        return value is null or DBNull ? null : Convert.ToString(
+            value, CultureInfo.InvariantCulture);
     }
 }

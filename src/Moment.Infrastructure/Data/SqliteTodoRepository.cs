@@ -35,7 +35,7 @@ public sealed class SqliteTodoRepository : ITodoRepository
     {
         await using var connection = await OpenConnectionAsync(ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {SelectColumns} FROM todos WHERE id = $id;";
+        command.CommandText = $"SELECT {SelectColumns} FROM todos WHERE id = $id AND deleted_at IS NULL;";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadTodo(reader) : null;
@@ -48,6 +48,7 @@ public sealed class SqliteTodoRepository : ITodoRepository
         command.CommandText = $"""
             SELECT {SelectColumns}
             FROM todos
+            WHERE deleted_at IS NULL
             ORDER BY due_date IS NULL, due_date, id;
             """;
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -102,7 +103,9 @@ public sealed class SqliteTodoRepository : ITodoRepository
             UPDATE todos
             SET is_completed = $isCompleted,
                 completed_at = $completedAt
-            WHERE id = $id AND is_completed = $expectedState;
+            WHERE id = $id
+              AND is_completed = $expectedState
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         command.Parameters.AddWithValue(
@@ -121,12 +124,23 @@ public sealed class SqliteTodoRepository : ITodoRepository
         await transaction.CommitAsync(ct);
     }
 
-    public async Task DeleteAsync(Guid id, CancellationToken ct)
+    public Task DeleteAsync(Guid id, CancellationToken ct) =>
+        DeleteAsync(id, DateTimeOffset.UtcNow, ct);
+
+    public async Task DeleteAsync(
+        Guid id,
+        DateTimeOffset deletedAt,
+        CancellationToken ct)
     {
         await using var connection = await OpenConnectionAsync(ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM todos WHERE id = $id;";
+        command.CommandText = """
+            UPDATE todos
+            SET deleted_at = $deletedAt
+            WHERE id = $id AND deleted_at IS NULL;
+            """;
         command.Parameters.AddWithValue("$id", id.ToString("D"));
+        command.Parameters.AddWithValue("$deletedAt", Format(deletedAt));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -162,7 +176,7 @@ public sealed class SqliteTodoRepository : ITodoRepository
     {
         await using var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)transaction;
-        command.CommandText = $"SELECT {SelectColumns} FROM todos WHERE id = $id;";
+        command.CommandText = $"SELECT {SelectColumns} FROM todos WHERE id = $id AND deleted_at IS NULL;";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadTodo(reader) : null;
@@ -180,7 +194,7 @@ public sealed class SqliteTodoRepository : ITodoRepository
             SET title = $title,
                 due_date = $dueDate,
                 importance = $importance
-            WHERE id = $id;
+            WHERE id = $id AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$id", item.Id.ToString("D"));
         command.Parameters.AddWithValue("$title", item.Title);

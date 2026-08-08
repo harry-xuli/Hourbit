@@ -97,6 +97,44 @@ public sealed class SqliteTodoRepositoryTests
     }
 
     [Fact]
+    public async Task Delete_soft_deletes_once_and_blocks_operational_todo_actions()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var repository = await SqliteTodoRepository.OpenAsync(path, default);
+        var todo = PendingTodo(Guid.NewGuid(), "待删除", new DateOnly(2026, 8, 8));
+        await repository.SaveAsync(todo, default);
+        var deletedAt = CreatedAt.AddHours(1);
+
+        await repository.DeleteAsync(todo.Id, deletedAt, default);
+        await repository.UpdateAsync(new TodoItem(
+            todo.Id, "不应修改", todo.CreatedAt, todo.DueDate,
+            todo.Importance, todo.IsCompleted, todo.CompletedAt), default);
+        await repository.SetCompletedAsync(
+            todo.Id, true, deletedAt.AddMinutes(1), default);
+        await repository.DeleteAsync(todo.Id, deletedAt.AddHours(1), default);
+
+        Assert.Null(await repository.GetAsync(todo.Id, default));
+        Assert.Empty(await repository.GetAllAsync(default));
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT title, is_completed, deleted_at
+            FROM todos
+            WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", todo.Id.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal("待删除", reader.GetString(0));
+        Assert.Equal(0, reader.GetInt32(1));
+        Assert.Equal(
+            deletedAt.ToString("O", CultureInfo.InvariantCulture),
+            reader.GetString(2));
+    }
+
+    [Fact]
     public async Task GetAll_returns_dated_then_undated_todos_in_due_date_and_id_order()
     {
         using var temp = new TempDirectory();
@@ -263,7 +301,56 @@ public sealed class SqliteTodoRepositoryTests
     }
 
     [Fact]
-    public async Task Migration_to_version_three_is_idempotent()
+    public async Task Migration_upgrades_version_three_to_four_without_losing_history()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var fixture = await CreateVersionThreeDatabaseAsync(path);
+
+        _ = await SqliteTodoRepository.OpenAsync(path, default);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 4;"));
+        Assert.True(await ColumnExistsAsync(
+            connection, "occurrences", "deleted_at"));
+        Assert.True(await ColumnExistsAsync(
+            connection, "todos", "deleted_at"));
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM occurrences WHERE id = $id;",
+            fixture.OccurrenceId));
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM action_log WHERE id = $id;",
+            fixture.ActionId));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ix_occurrences_active_state_due_at_utc';
+            """));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ix_todos_active_due_date';
+            """));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ix_occurrences_deleted_handled_at';
+            """));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ix_todos_deleted_completed_at';
+            """));
+    }
+
+    [Fact]
+    public async Task Migration_to_version_four_is_idempotent()
     {
         using var temp = new TempDirectory();
         var path = Path.Combine(temp.Path, "moment.db");
@@ -276,7 +363,19 @@ public sealed class SqliteTodoRepositoryTests
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
         Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 4;"));
+        Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'todos';"));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM pragma_table_info('occurrences')
+            WHERE name = 'deleted_at';
+            """));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM pragma_table_info('todos')
+            WHERE name = 'deleted_at';
+            """));
     }
 
     [Fact]
@@ -524,9 +623,7 @@ public sealed class SqliteTodoRepositoryTests
 
     private static async Task InitializeVersionThreeAsync(string path)
     {
-        await using var connection =
-            await DatabaseMigrator.OpenConnectionAsync(path, default);
-        await DatabaseMigrator.MigrateAsync(connection, default);
+        _ = await CreateVersionThreeDatabaseAsync(path);
     }
 
     private static async Task ExecuteAsync(string path, string sql)
@@ -588,6 +685,37 @@ public sealed class SqliteTodoRepositoryTests
             due.AddMinutes(1).ToString("O", CultureInfo.InvariantCulture));
         await command.ExecuteNonQueryAsync();
         return (itemId, occurrenceId, actionId);
+    }
+
+    private static async Task<(Guid ItemId, Guid OccurrenceId, Guid ActionId)>
+        CreateVersionThreeDatabaseAsync(string path)
+    {
+        var fixture = await CreateLegacyDatabaseAsync(path, 2);
+        await ExecuteAsync(path, $"""
+            {CanonicalTodosSql}
+            INSERT INTO schema_info(version) VALUES (3);
+            """);
+        return fixture;
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string table,
+        string column)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info({table});";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            if (string.Equals(
+                    reader.GetString(1), column,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static async Task<int> ScalarIntAsync(

@@ -66,7 +66,7 @@ public sealed class ReminderService(
             return;
         }
 
-        await repository.DeleteAsync(occurrenceId, scope, ct);
+        await repository.DeleteAsync(occurrenceId, scope, clock.Now, ct);
         schedulerSignal.Refresh();
     }
 

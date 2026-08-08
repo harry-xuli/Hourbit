@@ -37,6 +37,12 @@ internal static class DatabaseSchemaValidator
         new("completed_at", "TEXT", false, false)
     ];
 
+    private static readonly ColumnShape[] TodoColumnsVersionFour =
+    [
+        .. TodoColumns,
+        new("deleted_at", "TEXT", false, false)
+    ];
+
     internal static async Task<int> CountVersionMarkersAsync(
         SqliteConnection connection,
         SqliteTransaction? transaction,
@@ -105,6 +111,91 @@ internal static class DatabaseSchemaValidator
         }
 
         await ValidateTodoPrimaryKeyIndexAsync(connection, transaction, ct);
+    }
+
+    internal static async Task ValidateVersionFourTodosTableAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        var createSql = await ReadCreateTableSqlAsync(
+            connection, transaction, ct);
+        var columns = await ReadTodoColumnsAsync(
+            connection, transaction, ct);
+        if (!columns.SequenceEqual(TodoColumnsVersionFour))
+            throw new InvalidDataException("The schema version 4 todos table has an invalid column shape.");
+
+        var expectedSql = CreateTodosTableSql.Replace(
+            "    completed_at TEXT NULL,\n    CHECK(",
+            "    completed_at TEXT NULL, deleted_at TEXT NULL,\n    CHECK(",
+            StringComparison.Ordinal);
+        if (!HasCanonicalCreateBody(createSql, expectedSql))
+        {
+            throw new InvalidDataException(
+                "The schema version 4 todos table is missing required constraints.");
+        }
+
+        await ValidateTodoPrimaryKeyIndexAsync(connection, transaction, ct);
+    }
+
+    internal static async Task ValidateVersionFourAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        var markerCount = await CountVersionMarkersAsync(
+            connection, transaction, 4, ct);
+        if (markerCount != 1)
+        {
+            throw new InvalidDataException(
+                $"Schema version 4 must have exactly one marker; found {markerCount}.");
+        }
+
+        await ValidateVersionFourTodosTableAsync(
+            connection, transaction, ct);
+        await ValidateNullableTextColumnAsync(
+            connection, transaction, "occurrences", "deleted_at", ct);
+    }
+
+    private static async Task ValidateNullableTextColumnAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string table,
+        string column,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"PRAGMA table_info({table});";
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        var matches = 0;
+        while (await reader.ReadAsync(ct))
+        {
+            if (!string.Equals(
+                    reader.GetString(1), column,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            matches++;
+            if (!string.Equals(
+                    reader.GetString(2), "TEXT",
+                    StringComparison.OrdinalIgnoreCase) ||
+                reader.GetInt32(3) != 0 ||
+                !reader.IsDBNull(4) ||
+                reader.GetInt32(5) != 0)
+            {
+                throw new InvalidDataException(
+                    $"Schema version 4 requires nullable TEXT {table}.{column} without a default.");
+            }
+        }
+
+        if (matches != 1)
+        {
+            throw new InvalidDataException(
+                $"Schema version 4 requires exactly one {table}.{column} column; found {matches}.");
+        }
     }
 
     private static async Task<string> ReadCreateTableSqlAsync(
@@ -192,8 +283,13 @@ internal static class DatabaseSchemaValidator
     }
 
     private static bool HasCanonicalCreateBody(string actualSql) =>
+        HasCanonicalCreateBody(actualSql, CreateTodosTableSql);
+
+    private static bool HasCanonicalCreateBody(
+        string actualSql,
+        string expectedSql) =>
         TryGetCreateBody(TokenizeSql(actualSql), out var actualBody) &&
-        TryGetCreateBody(TokenizeSql(CreateTodosTableSql), out var canonicalBody) &&
+        TryGetCreateBody(TokenizeSql(expectedSql), out var canonicalBody) &&
         actualBody.SequenceEqual(canonicalBody);
 
     private static IReadOnlyList<SqlToken> TokenizeSql(string sql)

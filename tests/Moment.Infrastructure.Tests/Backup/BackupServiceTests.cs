@@ -25,11 +25,31 @@ public sealed class BackupServiceTests
         var todos = await SqliteTodoRepository.OpenAsync(
             TestBackupFactory.DatabasePath(temp.Path), default);
         await todos.SaveAsync(todo, default);
+        var deletedTodo = new TodoItem(
+            Guid.NewGuid(),
+            "备份中的已删除待办",
+            todo.CreatedAt,
+            null,
+            ReminderImportance.Normal,
+            IsCompleted: false,
+            CompletedAt: null);
+        var deletedAt = DateTimeOffset.Parse("2026-07-29T02:00:00Z");
+        await todos.SaveAsync(deletedTodo, default);
+        await todos.DeleteAsync(deletedTodo.Id, deletedAt, default);
         var service = TestBackupFactory.Create(temp.Path);
         var path = Path.Combine(temp.Path, "data.moment-backup");
         await service.ExportAsync(path, default);
         await TestBackupFactory.ChangeDatabaseAsync(temp.Path);
         await todos.DeleteAsync(todo.Id, default);
+        await using (var connection = await DatabaseMigrator.OpenConnectionAsync(
+                         TestBackupFactory.DatabasePath(temp.Path), default))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM todos WHERE id = $id;";
+            command.Parameters.AddWithValue(
+                "$id", deletedTodo.Id.ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
 
         await service.RestoreAsync(path, default);
 
@@ -38,6 +58,18 @@ public sealed class BackupServiceTests
                 TestBackupFactory.DatabasePath(temp.Path), default))
             .GetAllAsync(default);
         Assert.Equal(todo, Assert.Single(restoredTodos));
+        await using (var connection = await DatabaseMigrator.OpenConnectionAsync(
+                         TestBackupFactory.DatabasePath(temp.Path), default))
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT deleted_at FROM todos WHERE id = $id;";
+            command.Parameters.AddWithValue(
+                "$id", deletedTodo.Id.ToString("D"));
+            Assert.Equal(
+                deletedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                await command.ExecuteScalarAsync());
+        }
 
         await TestBackupFactory.TamperWithDatabaseEntryAsync(path);
         await Assert.ThrowsAsync<InvalidDataException>(
@@ -62,7 +94,7 @@ public sealed class BackupServiceTests
         await using var stream = manifestEntry.Open();
         using var document = await JsonDocument.ParseAsync(stream);
         Assert.Equal(1, document.RootElement.GetProperty("formatVersion").GetInt32());
-        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(
             DateTimeOffset.Parse("2026-07-29T01:02:03Z"),
             document.RootElement.GetProperty("createdAt").GetDateTimeOffset());

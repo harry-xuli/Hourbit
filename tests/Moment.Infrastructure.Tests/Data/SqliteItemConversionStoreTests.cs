@@ -84,6 +84,30 @@ public sealed class SqliteItemConversionStoreTests
         Assert.Equal(completedAt, stored.Occurrence.HandledAt);
     }
 
+    [Fact]
+    public async Task ItemConversion_rejects_a_soft_deleted_todo_source()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var todos = await SqliteTodoRepository.OpenAsync(path, default);
+        var source = PendingTodo("已删除待办源");
+        await todos.SaveAsync(source, default);
+        await todos.DeleteAsync(source.Id, CreatedAt.AddMinutes(1), default);
+        var (item, occurrence) = ScheduledDestination("不应创建", null);
+        var store = await SqliteItemConversionStore.OpenAsync(path, default);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.ConvertTodoToReminderAsync(
+                new TodoToReminderConversion(source, item, occurrence), default));
+
+        Assert.Equal(1, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM todos WHERE id = $id AND deleted_at IS NOT NULL;",
+            ("$id", source.Id.ToString("D"))));
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM occurrences WHERE id = $id;",
+            ("$id", occurrence.Id.ToString("D"))));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -123,6 +147,37 @@ public sealed class SqliteItemConversionStoreTests
         Assert.Null(await reminders.GetScheduledReminderAsync(
             source.Occurrence.Id, default));
         Assert.Null(await reminders.GetItemAsync(source.Item.Id, default));
+    }
+
+    [Fact]
+    public async Task ItemConversion_rejects_a_soft_deleted_reminder_source()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(path, default);
+        var source = Reminder(OccurrenceState.Scheduled, null, null);
+        await reminders.SaveItemWithOccurrenceAsync(
+            source.Item, source.Occurrence, default);
+        await reminders.DeleteAsync(
+            source.Occurrence.Id, SeriesScope.OccurrenceOnly,
+            CreatedAt.AddMinutes(1), default);
+        var destination = new TodoItem(
+            Guid.NewGuid(), source.Item.Title, source.Item.CreatedAt,
+            null, source.Item.Importance, false, null);
+        var store = await SqliteItemConversionStore.OpenAsync(path, default);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.ConvertReminderToTodoAsync(
+                new ReminderToTodoConversion(
+                    source, destination, SeriesScope.OccurrenceOnly, null),
+                default));
+
+        Assert.Equal(1, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM occurrences WHERE id = $id AND deleted_at IS NOT NULL;",
+            ("$id", source.Occurrence.Id.ToString("D"))));
+        Assert.Equal(0, await ScalarIntAsync(path,
+            "SELECT COUNT(*) FROM todos WHERE id = $id;",
+            ("$id", destination.Id.ToString("D"))));
     }
 
     [Fact]

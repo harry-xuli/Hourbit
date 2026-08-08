@@ -75,7 +75,12 @@ public sealed class SqliteReminderRepository : IReminderRepository
                    r.kind, r.days_of_week, r.time
             FROM items i
             LEFT JOIN recurrence_rules r ON r.item_id = i.id
-            WHERE i.id = $id;
+            WHERE i.id = $id
+              AND EXISTS (
+                  SELECT 1
+                  FROM occurrences o
+                  WHERE o.item_id = i.id AND o.deleted_at IS NULL
+              );
             """;
         command.Parameters.AddWithValue("$id", itemId.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -101,7 +106,9 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.CommandText = """
             UPDATE occurrences
             SET state = $fired, handled_at = $firedAt
-            WHERE id = $id AND state = $scheduled;
+            WHERE id = $id
+              AND state = $scheduled
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$fired", (int)OccurrenceState.Fired);
         command.Parameters.AddWithValue("$firedAt", Format(firedAt));
@@ -118,7 +125,9 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.CommandText = """
             UPDATE occurrences
             SET state = $next, handled_at = $handledAt
-            WHERE id = $id AND state = $expected;
+            WHERE id = $id
+              AND state = $expected
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$next", (int)next);
         command.Parameters.AddWithValue("$handledAt", Format(handledAt));
@@ -183,13 +192,24 @@ public sealed class SqliteReminderRepository : IReminderRepository
         await transaction.CommitAsync(ct);
     }
 
-    public async Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct)
+    public Task DeleteAsync(
+        Guid occurrenceId,
+        SeriesScope scope,
+        CancellationToken ct) =>
+        DeleteAsync(occurrenceId, scope, DateTimeOffset.UtcNow, ct);
+
+    public async Task DeleteAsync(
+        Guid occurrenceId,
+        SeriesScope scope,
+        DateTimeOffset deletedAt,
+        CancellationToken ct)
     {
         await using var connection = await OpenConnectionAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
         if (scope == SeriesScope.OccurrenceOnly)
         {
-            await DeleteOccurrenceAsync(connection, transaction, occurrenceId, ct);
+            await SoftDeleteOccurrenceAsync(
+                connection, transaction, occurrenceId, deletedAt, ct);
         }
         else
         {
@@ -197,8 +217,9 @@ public sealed class SqliteReminderRepository : IReminderRepository
             if (occurrence is not null)
             {
                 await DeleteRecurrenceAsync(connection, transaction, occurrence.Value.ItemId, ct);
-                await DeleteScheduledOccurrencesAtOrAfterAsync(connection, transaction,
-                    occurrence.Value.ItemId, occurrence.Value.DueAt, ct);
+                await SoftDeleteScheduledOccurrencesAtOrAfterAsync(
+                    connection, transaction, occurrence.Value.ItemId,
+                    occurrence.Value.DueAt, deletedAt, ct);
             }
         }
 
@@ -234,7 +255,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
             FROM occurrences o
             INNER JOIN items i ON i.id = o.item_id
             LEFT JOIN recurrence_rules r ON r.item_id = i.id
-            WHERE {predicate}
+            WHERE o.deleted_at IS NULL AND ({predicate})
             ORDER BY o.due_at_utc, o.id;
             """;
         return command;
@@ -327,7 +348,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction as SqliteTransaction;
-        command.CommandText = "UPDATE occurrences SET state = $state, handled_at = $handledAt WHERE id = $id;";
+        command.CommandText = "UPDATE occurrences SET state = $state, handled_at = $handledAt WHERE id = $id AND deleted_at IS NULL;";
         command.Parameters.AddWithValue("$state", (int)state);
         command.Parameters.AddWithValue("$handledAt", Format(handledAt));
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
@@ -342,7 +363,9 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.CommandText = """
             UPDATE occurrences
             SET state = $state, handled_at = $handledAt
-            WHERE id = $id AND state IN ($scheduled, $fired);
+            WHERE id = $id
+              AND state IN ($scheduled, $fired)
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$state", (int)state);
         command.Parameters.AddWithValue("$handledAt", Format(handledAt));
@@ -402,7 +425,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
             UPDATE occurrences
             SET id = $newId, item_id = $itemId, due_at = $dueAt, state = $state,
                 due_at_utc = $dueAtUtc, handled_at = $handledAt, snooze_parent_id = $snoozeParentId
-            WHERE id = $id;
+            WHERE id = $id AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$newId", occurrence.Id.ToString("D"));
         command.Parameters.AddWithValue("$itemId", occurrence.ItemId.ToString("D"));
@@ -415,13 +438,22 @@ public sealed class SqliteReminderRepository : IReminderRepository
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task DeleteOccurrenceAsync(SqliteConnection connection, System.Data.Common.DbTransaction transaction,
-        Guid occurrenceId, CancellationToken ct)
+    private static async Task SoftDeleteOccurrenceAsync(
+        SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        Guid occurrenceId,
+        DateTimeOffset deletedAt,
+        CancellationToken ct)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)transaction;
-        command.CommandText = "DELETE FROM occurrences WHERE id = $id;";
+        command.CommandText = """
+            UPDATE occurrences
+            SET deleted_at = $deletedAt
+            WHERE id = $id AND deleted_at IS NULL;
+            """;
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$deletedAt", Format(deletedAt));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -430,7 +462,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
     {
         await using var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)transaction;
-        command.CommandText = "SELECT item_id, due_at FROM occurrences WHERE id = $id;";
+        command.CommandText = "SELECT item_id, due_at FROM occurrences WHERE id = $id AND deleted_at IS NULL;";
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct)
@@ -457,11 +489,38 @@ public sealed class SqliteReminderRepository : IReminderRepository
             DELETE FROM occurrences
             WHERE item_id = $itemId
               AND state = $scheduled
-              AND due_at_utc >= $cutoffUtc;
+              AND due_at_utc >= $cutoffUtc
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$itemId", itemId.ToString("D"));
         command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
         command.Parameters.AddWithValue("$cutoffUtc", FormatUtcKey(cutoff));
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task SoftDeleteScheduledOccurrencesAtOrAfterAsync(
+        SqliteConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        Guid itemId,
+        DateTimeOffset cutoff,
+        DateTimeOffset deletedAt,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            UPDATE occurrences
+            SET deleted_at = $deletedAt
+            WHERE item_id = $itemId
+              AND state = $scheduled
+              AND due_at_utc >= $cutoffUtc
+              AND deleted_at IS NULL;
+            """;
+        command.Parameters.AddWithValue("$itemId", itemId.ToString("D"));
+        command.Parameters.AddWithValue(
+            "$scheduled", (int)OccurrenceState.Scheduled);
+        command.Parameters.AddWithValue("$cutoffUtc", FormatUtcKey(cutoff));
+        command.Parameters.AddWithValue("$deletedAt", Format(deletedAt));
         await command.ExecuteNonQueryAsync(ct);
     }
 

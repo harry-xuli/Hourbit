@@ -117,6 +117,44 @@ public sealed class SqliteTimelineQueryTests
     }
 
     [Fact]
+    public async Task Query_excludes_soft_deleted_rows_and_their_completion_counts()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var todos = await SqliteTodoRepository.OpenAsync(
+            path, CancellationToken.None);
+        var completedAt = DateTimeOffset.Parse("2026-07-30T10:05:00+08:00");
+        var todo = Todo(
+            Guid.NewGuid(), "已删除待办", completedAt.AddDays(-1),
+            new DateOnly(2026, 7, 30), true, completedAt);
+        await todos.SaveAsync(todo, CancellationToken.None);
+        var item = ReminderItem.Create(
+            "已删除提醒", ReminderKind.Plan, ReminderImportance.Normal,
+            completedAt.AddDays(-1), completedAt.AddMinutes(-5));
+        var occurrence = new ReminderOccurrence(
+            Guid.NewGuid(), item.Id, completedAt.AddMinutes(-5),
+            OccurrenceState.Completed, completedAt, null);
+        await reminders.SaveItemWithOccurrenceAsync(
+            item, occurrence, CancellationToken.None);
+
+        await todos.DeleteAsync(
+            todo.Id, completedAt.AddMinutes(1), CancellationToken.None);
+        await reminders.DeleteAsync(
+            occurrence.Id, SeriesScope.OccurrenceOnly,
+            completedAt.AddMinutes(1), CancellationToken.None);
+
+        var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
+            new DateOnly(2026, 7, 30), FixedZone(), CancellationToken.None);
+
+        Assert.Empty(snapshot.Todos);
+        Assert.Empty(snapshot.Reminders);
+        Assert.Equal(0, snapshot.TodosCompletedToday);
+        Assert.Equal(0, snapshot.RemindersCompletedToday);
+    }
+
+    [Fact]
     public async Task Query_keeps_todo_row_and_count_on_one_snapshot_during_concurrent_completion()
     {
         using var temp = new TempDirectory();

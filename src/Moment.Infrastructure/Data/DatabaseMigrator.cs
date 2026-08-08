@@ -141,8 +141,57 @@ public static class DatabaseMigrator
             await command.ExecuteNonQueryAsync(ct);
         }
 
-        await DatabaseSchemaValidator.ValidateVersionThreeAsync(
+        var versionFourMarkers =
+            await DatabaseSchemaValidator.CountVersionMarkersAsync(
+                connection, (SqliteTransaction)transaction, 4, ct);
+        if (versionFourMarkers > 1)
+        {
+            throw new InvalidDataException(
+                $"Schema version 4 must have exactly one marker; found {versionFourMarkers}.");
+        }
+        if (versionFourMarkers == 0)
+        {
+            await DatabaseSchemaValidator.ValidateVersionThreeAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            if (await HasColumnAsync(
+                    connection, (SqliteTransaction)transaction,
+                    "occurrences", "deleted_at", ct) ||
+                await HasColumnAsync(
+                    connection, (SqliteTransaction)transaction,
+                    "todos", "deleted_at", ct))
+            {
+                throw new InvalidDataException(
+                    "Schema version 4 columns exist without a version marker.");
+            }
+
+            command.CommandText = """
+                ALTER TABLE occurrences ADD COLUMN deleted_at TEXT NULL;
+                ALTER TABLE todos ADD COLUMN deleted_at TEXT NULL;
+                INSERT INTO schema_info(version) VALUES (4);
+                """;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+
+        await DatabaseSchemaValidator.ValidateVersionFourAsync(
             connection, (SqliteTransaction)transaction, ct);
+
+        command.CommandText = """
+            CREATE INDEX IF NOT EXISTS ix_occurrences_active_state_due_at_utc
+                ON occurrences(state, due_at_utc)
+                WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS ix_occurrences_deleted_due_at_utc
+                ON occurrences(deleted_at, due_at_utc);
+            CREATE INDEX IF NOT EXISTS ix_occurrences_deleted_handled_at
+                ON occurrences(deleted_at, handled_at);
+            CREATE INDEX IF NOT EXISTS ix_todos_active_due_date
+                ON todos(due_date, id)
+                WHERE deleted_at IS NULL;
+            CREATE INDEX IF NOT EXISTS ix_todos_deleted_due_date
+                ON todos(deleted_at, due_date);
+            CREATE INDEX IF NOT EXISTS ix_todos_deleted_completed_at
+                ON todos(deleted_at, completed_at);
+            """;
+        await command.ExecuteNonQueryAsync(ct);
 
         await transaction.CommitAsync(ct);
     }

@@ -25,4 +25,10 @@ public interface IReminderRepository
     Task EditAsync(Guid occurrenceId, ReminderItem item,
         ReminderOccurrence occurrence, SeriesScope scope, CancellationToken ct);
     Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct);
+    Task DeleteAsync(
+        Guid occurrenceId,
+        SeriesScope scope,
+        DateTimeOffset deletedAt,
+        CancellationToken ct) =>
+        DeleteAsync(occurrenceId, scope, ct);
 }

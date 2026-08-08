@@ -14,4 +14,9 @@ public interface ITodoRepository
         DateTimeOffset? completedAt,
         CancellationToken ct);
     Task DeleteAsync(Guid id, CancellationToken ct);
+    Task DeleteAsync(
+        Guid id,
+        DateTimeOffset deletedAt,
+        CancellationToken ct) =>
+        DeleteAsync(id, ct);
 }

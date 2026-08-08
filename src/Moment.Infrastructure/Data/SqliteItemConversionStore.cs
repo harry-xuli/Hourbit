@@ -47,7 +47,8 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = (SqliteTransaction)transaction;
-            delete.CommandText = "DELETE FROM todos WHERE id = $id;";
+            delete.CommandText =
+                "DELETE FROM todos WHERE id = $id AND deleted_at IS NULL;";
             delete.Parameters.AddWithValue(
                 "$id", request.Source.Id.ToString("D"));
             if (await delete.ExecuteNonQueryAsync(ct) != 1)
@@ -123,7 +124,7 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
             SELECT id, title, created_at, due_date, importance,
                    is_completed, completed_at
             FROM todos
-            WHERE id = $id;
+            WHERE id = $id AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$id", source.Id.ToString("D"));
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -172,7 +173,7 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
             FROM occurrences o
             INNER JOIN items i ON i.id = o.item_id
             LEFT JOIN recurrence_rules r ON r.item_id = i.id
-            WHERE o.id = $id;
+            WHERE o.id = $id AND o.deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue(
             "$id", source.Occurrence.Id.ToString("D"));
@@ -296,7 +297,9 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
         command.Transaction = transaction;
         command.CommandText = """
             DELETE FROM occurrences
-            WHERE id = $id AND item_id = $itemId;
+            WHERE id = $id
+              AND item_id = $itemId
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue(
             "$id", source.Occurrence.Id.ToString("D"));
@@ -337,6 +340,7 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
             occurrences.CommandText = """
                 DELETE FROM occurrences
                 WHERE item_id = $itemId
+                  AND deleted_at IS NULL
                   AND (
                       id = $sourceId OR
                       (state = $scheduled AND due_at_utc >= $cutoffUtc)
@@ -373,7 +377,8 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
             FROM occurrences
             WHERE item_id = $itemId
               AND state = $scheduled
-              AND due_at_utc >= $cutoffUtc;
+              AND due_at_utc >= $cutoffUtc
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue(
             "$itemId", source.Item.Id.ToString("D"));
@@ -397,7 +402,8 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
         command.CommandText = """
             UPDATE occurrences
             SET snooze_parent_id = NULL
-            WHERE snooze_parent_id = $sourceId;
+            WHERE snooze_parent_id = $sourceId
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue(
             "$sourceId", sourceOccurrenceId.ToString("D"));
@@ -419,11 +425,13 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
                 SELECT id
                 FROM occurrences
                 WHERE item_id = $itemId
+                  AND deleted_at IS NULL
                   AND (
                       id = $sourceId OR
                       (state = $scheduled AND due_at_utc >= $cutoffUtc)
                   )
-            );
+            )
+              AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue(
             "$itemId", source.Item.Id.ToString("D"));

@@ -77,7 +77,7 @@ public sealed class TodoService(
     }
 
     public Task DeleteAsync(Guid todoId, CancellationToken ct) =>
-        todoRepository.DeleteAsync(todoId, ct);
+        todoRepository.DeleteAsync(todoId, clock.Now, ct);
 
     public async Task ConvertToReminderAsync(
         Guid todoId,

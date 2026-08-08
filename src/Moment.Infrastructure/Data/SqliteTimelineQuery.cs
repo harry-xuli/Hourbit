@@ -76,6 +76,7 @@ public sealed class SqliteTimelineQuery : ITimelineQuery
             SELECT id, title, created_at, due_date, importance,
                    is_completed, completed_at
             FROM todos
+            WHERE deleted_at IS NULL
             ORDER BY is_completed,
                      CASE
                          WHEN due_date IS NULL THEN 3
@@ -126,7 +127,9 @@ public sealed class SqliteTimelineQuery : ITimelineQuery
             FROM occurrences o
             INNER JOIN items i ON i.id = o.item_id
             LEFT JOIN recurrence_rules r ON r.item_id = i.id
-            WHERE o.due_at_utc >= $startUtc AND o.due_at_utc < $endUtc
+            WHERE o.deleted_at IS NULL
+              AND o.due_at_utc >= $startUtc
+              AND o.due_at_utc < $endUtc
             ORDER BY o.due_at_utc, o.id;
             """;
         command.Parameters.AddWithValue("$startUtc", FormatUtc(start));
@@ -166,6 +169,7 @@ public sealed class SqliteTimelineQuery : ITimelineQuery
             SELECT COUNT(*)
             FROM {table}
             WHERE {stateColumn} = $completedState
+              AND deleted_at IS NULL
               AND {timestampColumn} IS NOT NULL
               AND julianday({timestampColumn}) >= julianday($startUtc)
               AND julianday({timestampColumn}) < julianday($endUtc);
