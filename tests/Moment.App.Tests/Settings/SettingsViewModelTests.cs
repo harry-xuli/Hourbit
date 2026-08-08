@@ -13,15 +13,14 @@ public sealed class SettingsViewModelTests
     [Fact]
     public void Settings_footer_comes_from_the_application_release_metadata()
     {
+        var expected = Diagnostics.BuildReleaseMetadata.Current;
         var vm = new SettingsViewModel(
             new StubHotkeys(HotkeyRegistrationResult.Registered),
             new RecordingSettingsStore(),
             releasePage: ReleasePageService.FromAssembly(
                 typeof(SettingsViewModel).Assembly));
 
-        Assert.Equal(
-            "版本 0.2.0 · 发布于 2026-08-01",
-            vm.VersionText);
+        Assert.Equal(expected.SettingsFooterText, vm.VersionText);
     }
 
     [Fact]

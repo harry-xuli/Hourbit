@@ -1,3 +1,4 @@
+using System.IO;
 using System.Reflection;
 using System.Windows.Automation;
 using Moment.App.QuickAdd;
@@ -12,30 +13,70 @@ public sealed class ProductMetadataTests
     {
         var assembly = typeof(MainWindow).Assembly;
         var metadata = ProductMetadata.FromAssembly(assembly);
+        var expected = BuildReleaseMetadata.Current;
 
-        Assert.Equal("Hourbit 日程", metadata.ProductName);
-        Assert.Equal("Hourbit", metadata.ExecutableName);
-        Assert.Equal("0.2.0", metadata.Version);
-        Assert.Equal("2026-08-01", metadata.ReleaseDate);
-        Assert.Equal("Hourbit", assembly.GetName().Name);
+        Assert.Equal(expected.ProductName, metadata.ProductName);
+        Assert.Equal(expected.ExecutableName, metadata.ExecutableName);
+        Assert.Equal(expected.SemanticVersion, metadata.Version);
+        Assert.Equal(expected.ReleaseDate, metadata.ReleaseDate);
+        Assert.Equal(expected.ExecutableName, assembly.GetName().Name);
         Assert.Equal(
-            "Hourbit 日程",
+            expected.ProductName,
             assembly.GetCustomAttribute<AssemblyProductAttribute>()?.Product);
+    }
+
+    [Theory]
+    [InlineData("9.8.7", "2031-12-24", "版本 9.8.7 · 发布于 2031-12-24")]
+    [InlineData("10.20.30-rc.1+build.5", "2040-02-29",
+        "版本 10.20.30-rc.1+build.5 · 发布于 2040-02-29")]
+    public void Settings_footer_composes_any_valid_release_metadata(
+        string semanticVersion,
+        string releaseDate,
+        string expectedFooter)
+    {
+        BuildReleaseMetadata.ValidateVersionAndDate(
+            semanticVersion, releaseDate);
+        var metadata = new ProductMetadata(
+            "Example", "Example", semanticVersion, releaseDate);
+
+        Assert.Equal(expectedFooter, metadata.SettingsFooterText);
+    }
+
+    [Theory]
+    [InlineData("0.2")]
+    [InlineData("01.2.3")]
+    [InlineData("1.2.3-alpha.01")]
+    [InlineData("1.2.3+")]
+    public void Build_metadata_rejects_invalid_semantic_versions(string value)
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            BuildReleaseMetadata.ValidateVersionAndDate(value, "2031-12-24"));
+    }
+
+    [Theory]
+    [InlineData("2031-02-29")]
+    [InlineData("2031/12/24")]
+    [InlineData("24-12-2031")]
+    public void Build_metadata_rejects_invalid_iso_release_dates(string value)
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            BuildReleaseMetadata.ValidateVersionAndDate("9.8.7", value));
     }
 
     [Fact]
     public Task Public_windows_use_hourbit_without_the_legacy_product_label() =>
         WpfTestHost.RunAsync(() =>
         {
+            var expected = BuildReleaseMetadata.Current;
             var main = new MainWindow();
             var quickAdd = new QuickAddWindow();
             var settings = new SettingsView();
             try
             {
-                Assert.Equal("Hourbit 日程", main.Title);
-                Assert.Equal("Hourbit 日程", quickAdd.Title);
+                Assert.Equal(expected.ProductName, main.Title);
+                Assert.Equal(expected.ProductName, quickAdd.Title);
                 Assert.Equal(
-                    "Hourbit 日程设置",
+                    expected.ProductName + "设置",
                     AutomationProperties.GetName(settings));
 
                 Assert.DoesNotContain("时刻", main.Title);

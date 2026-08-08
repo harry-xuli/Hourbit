@@ -18,4 +18,10 @@
     <ProjectReference Include="..\..\src\Moment.Infrastructure\Moment.Infrastructure.csproj" />
     <ProjectReference Include="..\Moment.TestSupport\Moment.TestSupport.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="ExpectedProductName" Value="$(ProductName)" />
+    <AssemblyMetadata Include="ExpectedExecutableName" Value="$(ExecutableName)" />
+    <AssemblyMetadata Include="ExpectedSemanticVersion" Value="$(SemanticVersion)" />
+    <AssemblyMetadata Include="ExpectedReleaseDate" Value="$(ReleaseDate)" />
+  </ItemGroup>
 </Project>

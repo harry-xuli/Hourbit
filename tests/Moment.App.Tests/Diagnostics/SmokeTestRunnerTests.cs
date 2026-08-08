@@ -54,15 +54,16 @@ public sealed class SmokeTestRunnerTests
             .Select(line => JsonDocument.Parse(line))
             .Single(document => document.RootElement
                 .GetProperty("event").GetString() == "release-metadata");
-        Assert.Equal("Hourbit 日程",
+        var expected = BuildReleaseMetadata.Current;
+        Assert.Equal(expected.ProductName,
             metadata.RootElement.GetProperty("productName").GetString());
-        Assert.Equal("Hourbit",
+        Assert.Equal(expected.ExecutableName,
             metadata.RootElement.GetProperty("executableName").GetString());
-        Assert.Equal("0.2.0",
+        Assert.Equal(expected.SemanticVersion,
             metadata.RootElement.GetProperty("semanticVersion").GetString());
-        Assert.Equal("2026-08-01",
+        Assert.Equal(expected.ReleaseDate,
             metadata.RootElement.GetProperty("releaseDate").GetString());
-        Assert.Equal("版本 0.2.0 · 发布于 2026-08-01",
+        Assert.Equal(expected.SettingsFooterText,
             metadata.RootElement.GetProperty("settingsFooter").GetString());
     }
 
