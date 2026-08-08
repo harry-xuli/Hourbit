@@ -103,10 +103,10 @@ internal static class SmokeTestRunner
         var first = await recovery.RecoverAsync(clock.Now, ct);
         var second = await recovery.RecoverAsync(clock.Now, ct);
         var persisted = await repository.GetScheduledReminderAsync(occurrence.Id, ct);
-        var rows = await new SqliteTimelineQuery(databasePath).GetTimelineAsync(
+        var snapshot = await new SqliteTimelineQuery(databasePath).GetTimelineAsync(
             DateOnly.FromDateTime(clock.Now.UtcDateTime), zone, ct);
         var visible = new TimelineItemViewModel(
-            rows.Single(row => row.OccurrenceId == occurrence.Id),
+            snapshot.Reminders.Single(row => row.OccurrenceId == occurrence.Id),
             clock.Now);
 
         if (occurrence.DueAt !=

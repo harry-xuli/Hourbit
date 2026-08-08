@@ -200,7 +200,8 @@ public sealed class CompositionRoot : IAsyncDisposable
             });
         var timelineQuery = new SqliteTimelineQuery(databasePath);
         var timeline = new TimelineViewModel(
-            timelineQuery, clock, reminders, actions, dialogs, zone);
+            timelineQuery, clock, reminders, actions, todos,
+            dialogs, dialogs, zone);
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);

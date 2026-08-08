@@ -23,10 +23,10 @@ public sealed class SqliteTimelineQueryTests
         await repository.SaveItemWithOccurrenceAsync(item, atStart, CancellationToken.None);
         await repository.SaveOccurrenceAsync(atEnd, CancellationToken.None);
 
-        var rows = await new SqliteTimelineQuery(path).GetTimelineAsync(
+        var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
             new DateOnly(2026, 7, 30), zone, CancellationToken.None);
 
-        var row = Assert.Single(rows);
+        var row = Assert.Single(snapshot.Reminders);
         Assert.Equal(atStart.Id, row.OccurrenceId);
         Assert.Equal(TimeSpan.FromHours(8), row.DueAt.Offset);
     }
@@ -48,10 +48,98 @@ public sealed class SqliteTimelineQueryTests
         await repository.SaveOccurrenceAsync(beforeEnd, CancellationToken.None);
         await repository.SaveOccurrenceAsync(atEnd, CancellationToken.None);
 
-        var rows = await new SqliteTimelineQuery(path).GetTimelineAsync(
+        var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
             new DateOnly(2026, 3, 8), zone, CancellationToken.None);
 
-        Assert.Equal([atStart.Id, beforeEnd.Id], rows.Select(row => row.OccurrenceId));
+        Assert.Equal(
+            [atStart.Id, beforeEnd.Id],
+            snapshot.Reminders.Select(row => row.OccurrenceId));
+    }
+
+    [Fact]
+    public async Task Query_returns_all_todos_in_action_order_and_counts_completions_by_local_day()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var reminders = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var todos = await SqliteTodoRepository.OpenAsync(
+            path, CancellationToken.None);
+        var zone = TimeZoneInfo.CreateCustomTimeZone(
+            "UTC+08-todo-query", TimeSpan.FromHours(8), "UTC+08", "UTC+08");
+        var createdAt = DateTimeOffset.Parse("2026-07-20T09:00:00+08:00");
+        var overdueFirst = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var overdueSecond = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var today = Guid.Parse("00000000-0000-0000-0000-000000000003");
+        var future = Guid.Parse("00000000-0000-0000-0000-000000000004");
+        var undated = Guid.Parse("00000000-0000-0000-0000-000000000005");
+        var completedToday = Guid.Parse("00000000-0000-0000-0000-000000000006");
+        var completedYesterday = Guid.Parse("00000000-0000-0000-0000-000000000007");
+        foreach (var todo in new[]
+                 {
+                     Todo(overdueSecond, "逾期二", createdAt, new DateOnly(2026, 7, 29)),
+                     Todo(undated, "无日期", createdAt, null),
+                     Todo(future, "未来", createdAt, new DateOnly(2026, 7, 31)),
+                     Todo(today, "今天", createdAt, new DateOnly(2026, 7, 30)),
+                     Todo(overdueFirst, "逾期一", createdAt, new DateOnly(2026, 7, 29)),
+                     Todo(completedToday, "今日完成", createdAt, null, true,
+                         DateTimeOffset.Parse("2026-07-30T00:05:00+08:00")),
+                     Todo(completedYesterday, "昨日完成", createdAt, null, true,
+                         DateTimeOffset.Parse("2026-07-29T23:59:59+08:00"))
+                 })
+        {
+            await todos.SaveAsync(todo, CancellationToken.None);
+        }
+
+        await SaveReminderAsync(
+            reminders,
+            "跨日后完成",
+            DateTimeOffset.Parse("2026-07-29T22:00:00+08:00"),
+            OccurrenceState.Completed,
+            DateTimeOffset.Parse("2026-07-30T00:10:00+08:00"));
+        await SaveReminderAsync(
+            reminders,
+            "昨日完成",
+            DateTimeOffset.Parse("2026-07-29T21:00:00+08:00"),
+            OccurrenceState.Completed,
+            DateTimeOffset.Parse("2026-07-29T23:59:59+08:00"));
+
+        var snapshot = await new SqliteTimelineQuery(path).GetTimelineAsync(
+            new DateOnly(2026, 7, 30), zone, CancellationToken.None);
+
+        Assert.Equal(
+            [overdueFirst, overdueSecond, today, future, undated],
+            snapshot.Todos.Where(todo => !todo.IsCompleted).Select(todo => todo.TodoId));
+        Assert.Equal(7, snapshot.Todos.Count);
+        Assert.Empty(snapshot.Reminders);
+        Assert.Equal(1, snapshot.TodosCompletedToday);
+        Assert.Equal(1, snapshot.RemindersCompletedToday);
+    }
+
+    private static TodoItem Todo(
+        Guid id,
+        string title,
+        DateTimeOffset createdAt,
+        DateOnly? dueDate,
+        bool isCompleted = false,
+        DateTimeOffset? completedAt = null) =>
+        new(id, title, createdAt, dueDate, ReminderImportance.Normal,
+            isCompleted, completedAt);
+
+    private static async Task SaveReminderAsync(
+        SqliteReminderRepository repository,
+        string title,
+        DateTimeOffset dueAt,
+        OccurrenceState state,
+        DateTimeOffset handledAt)
+    {
+        var item = ReminderItem.Create(
+            title, ReminderKind.Plan, ReminderImportance.Normal,
+            dueAt.AddDays(-1), dueAt);
+        var occurrence = new ReminderOccurrence(
+            Guid.NewGuid(), item.Id, dueAt, state, handledAt, null);
+        await repository.SaveItemWithOccurrenceAsync(
+            item, occurrence, CancellationToken.None);
     }
 
     private static TimeZoneInfo CreateEasternTestZone()

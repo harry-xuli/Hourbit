@@ -26,6 +26,111 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task Timeline_separates_and_orders_todos_without_changing_the_next_reminder()
+    {
+        var sameDateSecond = Guid.Parse("00000000-0000-0000-0000-000000000002");
+        var sameDateFirst = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var snapshot = new TimelineSnapshot(
+            [
+                TodoRow("无日期", null),
+                TodoRow("未来", new DateOnly(2026, 7, 31)),
+                TodoRow("今天", new DateOnly(2026, 7, 29)),
+                TodoRow("逾期二", new DateOnly(2026, 7, 28), id: sameDateSecond),
+                TodoRow("已完成待办", null, isCompleted: true,
+                    completedAt: DateTimeOffset.Parse("2026-07-29T08:00:00+08:00")),
+                TodoRow("逾期一", new DateOnly(2026, 7, 28), id: sameDateFirst)
+            ],
+            [TestData.Row("定时会议", "2026-07-29T10:30:00+08:00")],
+            TodosCompletedToday: 2,
+            RemindersCompletedToday: 3);
+        var vm = Create(new FakeTimelineQuery(snapshot));
+
+        await vm.LoadAsync();
+
+        Assert.Equal(
+            ["逾期一", "逾期二", "今天", "未来", "无日期"],
+            vm.PendingTodos.Select(todo => todo.Title));
+        Assert.Equal("已逾期", vm.PendingTodos[0].StatusText);
+        Assert.Equal("无日期", vm.PendingTodos[^1].DueDateText);
+        Assert.Equal("已完成待办", Assert.Single(vm.CompletedTodos).Title);
+        Assert.Equal("10:30 定时会议", vm.NextReminderText);
+        Assert.Equal(5, vm.CompletedCount);
+        Assert.Equal("待办：2，提醒：3", vm.CompletedTooltipText);
+    }
+
+    [Fact]
+    public async Task Todo_complete_targets_the_selected_todo_and_refreshes_collections()
+    {
+        var todo = TodoRow("提交报表", new DateOnly(2026, 7, 29));
+        var query = new MutableTimelineQuery(new TimelineSnapshot(
+            [todo], [], 0, 0));
+        var todos = new RecordingTodoService
+        {
+            AfterComplete = () => query.Snapshot = new TimelineSnapshot(
+                [todo with
+                {
+                    IsCompleted = true,
+                    CompletedAt = DateTimeOffset.Parse("2026-07-29T09:05:00+08:00")
+                }], [], 1, 0)
+        };
+        var vm = Create(query, todos: todos);
+        await vm.LoadAsync();
+
+        await vm.CompleteCommand.ExecuteAsync(null);
+
+        Assert.Equal([todo.TodoId], todos.Completed);
+        Assert.Empty(vm.PendingTodos);
+        Assert.Equal("提交报表", Assert.Single(vm.CompletedTodos).Title);
+    }
+
+    [Fact]
+    public async Task Todo_delete_targets_the_selected_todo_and_refreshes_collections()
+    {
+        var todo = TodoRow("清理记录", null);
+        var query = new MutableTimelineQuery(new TimelineSnapshot(
+            [todo], [], 0, 0));
+        var todos = new RecordingTodoService
+        {
+            AfterDelete = () => query.Snapshot = new TimelineSnapshot([], [], 0, 0)
+        };
+        var vm = Create(query, todos: todos);
+        await vm.LoadAsync();
+
+        await vm.DeleteCommand.ExecuteAsync(null);
+
+        Assert.Equal([todo.TodoId], todos.Deleted);
+        Assert.Empty(vm.PendingTodos);
+    }
+
+    [Fact]
+    public async Task Todo_edit_uses_the_todo_dialog_and_refreshes_a_conversion_result()
+    {
+        var todo = TodoRow("项目复盘", new DateOnly(2026, 7, 29));
+        var converted = TestData.Row(
+            "项目复盘", "2026-07-29T14:30:00+08:00");
+        var query = new MutableTimelineQuery(new TimelineSnapshot(
+            [todo], [], 0, 0));
+        var dialogs = new Dialogs
+        {
+            AfterTodoEdit = () => query.Snapshot = new TimelineSnapshot(
+                [], [converted], 0, 0)
+        };
+        var vm = Create(query, dialogs: dialogs);
+        await vm.LoadAsync();
+
+        await vm.EditCommand.ExecuteAsync(null);
+
+        var editedTodo = Assert.Single(dialogs.EditedTodos);
+        Assert.Equal(todo.TodoId, editedTodo.Id);
+        Assert.Equal("项目复盘", editedTodo.Title);
+        Assert.Equal(new DateOnly(2026, 7, 29), editedTodo.DueDate);
+        Assert.Equal(ReminderImportance.Normal, editedTodo.Importance);
+        Assert.False(editedTodo.IsCompleted);
+        Assert.Empty(vm.PendingTodos);
+        Assert.Equal("项目复盘", Assert.Single(vm.Items).Title);
+    }
+
+    [Fact]
     public async Task Second_load_cancels_stale_query_and_publishes_only_latest_rows()
     {
         var query = new CancelThenReturnQuery(TestData.Row(
@@ -174,25 +279,51 @@ public sealed class TimelineViewModelTests
         ITimelineQuery query,
         IReminderService? service = null,
         ITimelineDialogService? dialogs = null,
-        IReminderActionService? actions = null) =>
-        new(query, new FakeClock("2026-07-29T09:00:00+08:00"),
+        IReminderActionService? actions = null,
+        ITodoService? todos = null)
+    {
+        var reminderDialogs = dialogs ?? new Dialogs();
+        var todoDialogs = reminderDialogs as ITodoDialogService ?? new Dialogs();
+        return new TimelineViewModel(
+            query, new FakeClock("2026-07-29T09:00:00+08:00"),
             service ?? new RecordingReminderService(),
             actions ?? new BlockingActionService(completesImmediately: true),
-            dialogs ?? new Dialogs(),
+            todos ?? new RecordingTodoService(),
+            reminderDialogs,
+            todoDialogs,
             TimeZoneInfo.CreateCustomTimeZone("UTC+08-vm", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
+    }
 
-    private sealed class FakeTimelineQuery(params TimelineRow[] rows) : ITimelineQuery
+    private sealed class FakeTimelineQuery : ITimelineQuery
     {
-        public Task<IReadOnlyList<TimelineRow>> GetTimelineAsync(
+        private readonly TimelineSnapshot _snapshot;
+
+        public FakeTimelineQuery(params TimelineRow[] reminders)
+            : this(new TimelineSnapshot([], reminders, 0, 0))
+        {
+        }
+
+        public FakeTimelineQuery(TimelineSnapshot snapshot) => _snapshot = snapshot;
+
+        public Task<TimelineSnapshot> GetTimelineAsync(
             DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TimelineRow>>(rows);
+            Task.FromResult(_snapshot);
+    }
+
+    private sealed class MutableTimelineQuery(TimelineSnapshot snapshot) : ITimelineQuery
+    {
+        public TimelineSnapshot Snapshot { get; set; } = snapshot;
+
+        public Task<TimelineSnapshot> GetTimelineAsync(
+            DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
+            Task.FromResult(Snapshot);
     }
 
     private sealed class ThrowingTimelineQuery(Exception exception) : ITimelineQuery
     {
-        public Task<IReadOnlyList<TimelineRow>> GetTimelineAsync(
+        public Task<TimelineSnapshot> GetTimelineAsync(
             DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
-            Task.FromException<IReadOnlyList<TimelineRow>>(exception);
+            Task.FromException<TimelineSnapshot>(exception);
     }
 
     private sealed class CancelThenReturnQuery(TimelineRow row) : ITimelineQuery
@@ -202,7 +333,7 @@ public sealed class TimelineViewModelTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool FirstCancellationObserved { get; private set; }
 
-        public async Task<IReadOnlyList<TimelineRow>> GetTimelineAsync(
+        public async Task<TimelineSnapshot> GetTimelineAsync(
             DateOnly localDate, TimeZoneInfo zone, CancellationToken ct)
         {
             if (Interlocked.Increment(ref _calls) == 1)
@@ -218,7 +349,7 @@ public sealed class TimelineViewModelTests
                     throw;
                 }
             }
-            return [row];
+            return new TimelineSnapshot([], [row], 0, 0);
         }
     }
 
@@ -262,7 +393,42 @@ public sealed class TimelineViewModelTests
         }
     }
 
-    private sealed class Dialogs : ITimelineDialogService
+    private sealed class RecordingTodoService : ITodoService
+    {
+        public List<Guid> Completed { get; } = [];
+        public List<Guid> Deleted { get; } = [];
+        public Action? AfterComplete { get; init; }
+        public Action? AfterDelete { get; init; }
+
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
+            Task.FromResult(new TodoItem(
+                Guid.NewGuid(), draft.Title,
+                DateTimeOffset.Parse("2026-07-29T09:00:00+08:00"),
+                draft.DueDate, draft.Importance, false, null));
+        public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task CompleteAsync(Guid todoId, CancellationToken ct)
+        {
+            Completed.Add(todoId);
+            AfterComplete?.Invoke();
+            return Task.CompletedTask;
+        }
+        public Task DeleteAsync(Guid todoId, CancellationToken ct)
+        {
+            Deleted.Add(todoId);
+            AfterDelete?.Invoke();
+            return Task.CompletedTask;
+        }
+        public Task ConvertToReminderAsync(
+            Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class Dialogs : ITimelineDialogService, ITodoDialogService
     {
         public SeriesScope? EditScope { get; set; } = SeriesScope.OccurrenceOnly;
         public SeriesScope? DeleteScope { get; set; } = SeriesScope.OccurrenceOnly;
@@ -271,6 +437,8 @@ public sealed class TimelineViewModelTests
         public int DeleteConfirmationCalls { get; private set; }
         public int EditFormCalls { get; private set; }
         public Exception? QuickAddFailure { get; set; }
+        public Action? AfterTodoEdit { get; init; }
+        public List<TodoItem> EditedTodos { get; } = [];
         public Task<SeriesScope?> SelectEditScopeAsync(TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult(EditScope);
         public Task<SeriesScope?> SelectDeleteScopeAsync(TimelineItemViewModel item, CancellationToken ct) =>
@@ -286,10 +454,31 @@ public sealed class TimelineViewModelTests
             return Task.FromResult<ReminderDraft?>(EditedDraft ?? new(
                 item.Title, item.DueAt, item.Kind, item.Importance, null));
         }
+        public Task EditTodoAsync(TodoItem item, CancellationToken ct)
+        {
+            EditedTodos.Add(item);
+            AfterTodoEdit?.Invoke();
+            return Task.CompletedTask;
+        }
         public void OpenQuickAdd()
         {
             if (QuickAddFailure is not null)
                 throw QuickAddFailure;
         }
     }
+
+    private static TodoTimelineRow TodoRow(
+        string title,
+        DateOnly? dueDate,
+        bool isCompleted = false,
+        DateTimeOffset? completedAt = null,
+        Guid? id = null) =>
+        new(
+            id ?? Guid.NewGuid(),
+            title,
+            DateTimeOffset.Parse("2026-07-20T09:00:00+08:00"),
+            dueDate,
+            ReminderImportance.Normal,
+            isCompleted,
+            completedAt);
 }

@@ -28,17 +28,34 @@ public partial class TimelineView : UserControl
             return;
 
         if (eventArgs.AddedItems.Count > 0
-            && eventArgs.AddedItems[0] is TimelineItemViewModel item
             && _viewModel is { } viewModel)
         {
-            viewModel.SelectedItem = item;
+            switch (eventArgs.AddedItems[0])
+            {
+                case TimelineItemViewModel reminder:
+                    viewModel.SelectedItem = reminder;
+                    break;
+                case TodoTimelineItemViewModel todo:
+                    viewModel.SelectedTodo = todo;
+                    break;
+                default:
+                    return;
+            }
             SynchronizeSelection();
         }
         else if (eventArgs.RemovedItems.Count > 0
-            && _viewModel is { SelectedItem: { } selectedItem } currentViewModel
-            && eventArgs.RemovedItems.Contains(selectedItem))
+            && _viewModel is { } currentViewModel)
         {
-            currentViewModel.SelectedItem = null;
+            if (currentViewModel.SelectedItem is { } selectedItem
+                && eventArgs.RemovedItems.Contains(selectedItem))
+            {
+                currentViewModel.SelectedItem = null;
+            }
+            if (currentViewModel.SelectedTodo is { } selectedTodo
+                && eventArgs.RemovedItems.Contains(selectedTodo))
+            {
+                currentViewModel.SelectedTodo = null;
+            }
         }
     }
 
@@ -76,7 +93,8 @@ public partial class TimelineView : UserControl
         object? sender,
         PropertyChangedEventArgs eventArgs)
     {
-        if (eventArgs.PropertyName == nameof(TimelineViewModel.SelectedItem))
+        if (eventArgs.PropertyName is nameof(TimelineViewModel.SelectedItem)
+            or nameof(TimelineViewModel.SelectedTodo))
             SynchronizeSelection();
     }
 
@@ -88,8 +106,9 @@ public partial class TimelineView : UserControl
         _isSynchronizingSelection = true;
         try
         {
-            var selectedItem = _viewModel?.SelectedItem;
-            foreach (var list in DescendantLists(GroupList))
+            object? selectedItem = (object?)_viewModel?.SelectedTodo
+                ?? _viewModel?.SelectedItem;
+            foreach (var list in DescendantLists(this))
             {
                 var listSelection = selectedItem is not null && list.Items.Contains(selectedItem)
                     ? selectedItem

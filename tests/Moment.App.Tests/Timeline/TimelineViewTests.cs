@@ -101,6 +101,84 @@ public sealed class TimelineViewTests
         });
 
     [Fact]
+    public Task Split_timeline_renders_accessible_todos_above_reminders_and_collapses_completed_todos() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var query = new QueryStub(new TimelineSnapshot(
+                [
+                    TodoRow("逾期任务", new DateOnly(2026, 7, 28),
+                        importance: ReminderImportance.Important),
+                    TodoRow("无日期任务", null),
+                    TodoRow("完成任务", null, true,
+                        DateTimeOffset.Parse("2026-07-29T08:00:00+08:00"))
+                ],
+                [TestData.Row("定时提醒", "2026-07-29T10:00:00+08:00")],
+                1,
+                0));
+            var viewModel = Create(query);
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var todoHeader = Assert.IsType<TextBlock>(
+                view.FindName("TodoSectionHeader"));
+            var reminderHeader = Assert.IsType<TextBlock>(
+                view.FindName("ReminderSectionHeader"));
+            var completed = Assert.IsType<Expander>(
+                view.FindName("CompletedTodosExpander"));
+            var completedSummary = Assert.IsType<StackPanel>(
+                view.FindName("CompletedSummary"));
+
+            Assert.Equal("待办事项", todoHeader.Text);
+            Assert.Equal("待办事项", System.Windows.Automation.AutomationProperties.GetName(todoHeader));
+            Assert.Equal("定时提醒", reminderHeader.Text);
+            Assert.Equal("定时提醒", System.Windows.Automation.AutomationProperties.GetName(reminderHeader));
+            Assert.True(todoHeader.TranslatePoint(new Point(), view).Y <
+                        reminderHeader.TranslatePoint(new Point(), view).Y);
+            Assert.False(completed.IsExpanded);
+            Assert.Equal("待办：1，提醒：0", completedSummary.ToolTip);
+            Assert.Contains("已逾期", VisibleText(view));
+            Assert.Contains("重要", VisibleText(view));
+            Assert.Contains("无日期", VisibleText(view));
+            Assert.DoesNotContain("完成任务", VisibleText(view));
+        });
+
+    [Fact]
+    public Task Todo_row_receives_keyboard_focus_and_commands_target_the_todo_type() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var todo = TodoRow("键盘待办", new DateOnly(2026, 7, 29));
+            var query = new QueryStub(new TimelineSnapshot(
+                [todo],
+                [TestData.Row("定时提醒", "2026-07-29T10:00:00+08:00")],
+                0,
+                0));
+            var todos = new TodoServiceStub();
+            var viewModel = Create(query, todos: todos);
+            viewModel.LoadAsync().GetAwaiter().GetResult();
+            var view = Show(viewModel);
+            var create = Assert.IsType<Button>(view.FindName("NewReminderButton"));
+            Assert.True(create.Focus());
+
+            Assert.True(create.MoveFocus(
+                new TraversalRequest(FocusNavigationDirection.Next)));
+            var focused = Assert.IsAssignableFrom<DependencyObject>(
+                Keyboard.FocusedElement);
+            var list = focused as ListBox ?? Ancestor<ListBox>(focused);
+            Assert.NotNull(list);
+            var selected = Assert.IsType<TodoTimelineItemViewModel>(list.SelectedItem);
+            Assert.Same(selected, viewModel.SelectedTodo);
+            Assert.Null(viewModel.SelectedItem);
+
+            var complete = Assert.Single(
+                view.InputBindings.OfType<KeyBinding>(),
+                binding => binding.Key == Key.Space &&
+                           binding.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift));
+            Assert.Same(viewModel.CompleteCommand, complete.Command);
+            Assert.True(complete.Command.CanExecute(complete.CommandParameter));
+            viewModel.CompleteCommand.ExecuteAsync(null).GetAwaiter().GetResult();
+            Assert.Equal([todo.TodoId], todos.CompletedTodoIds);
+        });
+
+    [Fact]
     public Task Timeline_focus_moves_from_new_action_to_a_row_and_Enter_is_edit_command() =>
         WpfTestHost.RunAsync(() =>
         {
@@ -139,7 +217,10 @@ public sealed class TimelineViewTests
 
             Assert.Equal(ExpectedGroups, VisibleGroupHeaders(view));
             Assert.Contains("已完成复盘", VisibleText(view));
-            var rowLists = Descendants<ListBox>(view).ToArray();
+            var rowLists = Descendants<ListBox>(view)
+                .Where(list => System.Windows.Automation.AutomationProperties
+                    .GetName(list).EndsWith("提醒", StringComparison.Ordinal))
+                .ToArray();
             Assert.Equal(3, rowLists.Length);
             Assert.All(rowLists, list =>
             {
@@ -294,9 +375,11 @@ public sealed class TimelineViewTests
 
     private static TimelineViewModel Create(
         ITimelineQuery query,
-        ActionServiceStub? actions = null) =>
+        ActionServiceStub? actions = null,
+        TodoServiceStub? todos = null) =>
         new(query, new FakeClock("2026-07-29T09:00:00+08:00"),
-            new ReminderServiceStub(), actions ?? new ActionServiceStub(), new DialogStub(),
+            new ReminderServiceStub(), actions ?? new ActionServiceStub(),
+            todos ?? new TodoServiceStub(), new DialogStub(), new DialogStub(),
             TimeZoneInfo.CreateCustomTimeZone(
                 "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"));
 
@@ -315,7 +398,8 @@ public sealed class TimelineViewTests
                 OccurrenceState.Scheduled, null));
         return new TimelineViewModel(
             query, new LocalClock(now), new ReminderServiceStub(),
-            new ActionServiceStub(), new DialogStub(),
+            new ActionServiceStub(), new TodoServiceStub(),
+            new DialogStub(), new DialogStub(),
             TimeZoneInfo.CreateCustomTimeZone(
                 "UTC+08-traversal", TimeSpan.FromHours(8),
                 "UTC+08", "UTC+08"));
@@ -342,11 +426,20 @@ public sealed class TimelineViewTests
     private static void AssertBrush(Color expected, Brush actual) =>
         Assert.Equal(expected, Assert.IsType<SolidColorBrush>(actual).Color);
 
-    private sealed class QueryStub(params TimelineRow[] rows) : ITimelineQuery
+    private sealed class QueryStub : ITimelineQuery
     {
-        public Task<IReadOnlyList<TimelineRow>> GetTimelineAsync(
+        private readonly TimelineSnapshot _snapshot;
+
+        public QueryStub(params TimelineRow[] reminders)
+            : this(new TimelineSnapshot([], reminders, 0, 0))
+        {
+        }
+
+        public QueryStub(TimelineSnapshot snapshot) => _snapshot = snapshot;
+
+        public Task<TimelineSnapshot> GetTimelineAsync(
             DateOnly localDate, TimeZoneInfo zone, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<TimelineRow>>(rows);
+            Task.FromResult(_snapshot);
     }
 
     private sealed class LocalClock(DateTimeOffset now) : IClock
@@ -383,7 +476,32 @@ public sealed class TimelineViewTests
             Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), DateTimeOffset.UtcNow));
     }
 
-    private sealed class DialogStub : ITimelineDialogService
+    private sealed class TodoServiceStub : ITodoService
+    {
+        public List<Guid> CompletedTodoIds { get; } = [];
+
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
+            Task.FromResult(new TodoItem(
+                Guid.NewGuid(), draft.Title, DateTimeOffset.UtcNow,
+                draft.DueDate, draft.Importance, false, null));
+        public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct) =>
+            Task.CompletedTask;
+        public Task CompleteAsync(Guid todoId, CancellationToken ct)
+        {
+            CompletedTodoIds.Add(todoId);
+            return Task.CompletedTask;
+        }
+        public Task DeleteAsync(Guid todoId, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToReminderAsync(
+            Guid todoId, ReminderDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, CancellationToken ct) => Task.CompletedTask;
+        public Task ConvertToTodoAsync(
+            Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class DialogStub : ITimelineDialogService, ITodoDialogService
     {
         public Task<SeriesScope?> SelectEditScopeAsync(
             TimelineItemViewModel item, CancellationToken ct) =>
@@ -395,6 +513,18 @@ public sealed class TimelineViewTests
             Task.FromResult(false);
         public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult<ReminderDraft?>(null);
+        public Task EditTodoAsync(TodoItem item, CancellationToken ct) => Task.CompletedTask;
         public void OpenQuickAdd() { }
     }
+
+    private static TodoTimelineRow TodoRow(
+        string title,
+        DateOnly? dueDate,
+        bool isCompleted = false,
+        DateTimeOffset? completedAt = null,
+        ReminderImportance importance = ReminderImportance.Normal) =>
+        new(
+            Guid.NewGuid(), title,
+            DateTimeOffset.Parse("2026-07-20T09:00:00+08:00"),
+            dueDate, importance, isCompleted, completedAt);
 }

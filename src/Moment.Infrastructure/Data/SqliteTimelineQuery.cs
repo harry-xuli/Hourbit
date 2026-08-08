@@ -11,7 +11,7 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
         ? throw new ArgumentException("A database path is required.", nameof(databasePath))
         : databasePath;
 
-    public async Task<IReadOnlyList<TimelineRow>> GetTimelineAsync(
+    public async Task<TimelineSnapshot> GetTimelineAsync(
         DateOnly localDate, TimeZoneInfo zone, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(zone);
@@ -19,6 +19,71 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
         var end = ResolveLocal(localDate.AddDays(1).ToDateTime(TimeOnly.MinValue), zone);
 
         await using var connection = await DatabaseMigrator.OpenConnectionAsync(_databasePath, ct);
+        var todos = await ReadTodosAsync(connection, localDate, ct);
+        var reminders = await ReadRemindersAsync(connection, start, end, ct);
+        var todosCompletedToday = await CountCompletedAsync(
+            connection, "todos", "is_completed", 1, start, end, ct);
+        var remindersCompletedToday = await CountCompletedAsync(
+            connection, "occurrences", "state", (int)OccurrenceState.Completed,
+            start, end, ct);
+        return new TimelineSnapshot(
+            todos,
+            reminders,
+            todosCompletedToday,
+            remindersCompletedToday);
+    }
+
+    private static async Task<IReadOnlyList<TodoTimelineRow>> ReadTodosAsync(
+        SqliteConnection connection,
+        DateOnly localDate,
+        CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, title, created_at, due_date, importance,
+                   is_completed, completed_at
+            FROM todos
+            ORDER BY is_completed,
+                     CASE
+                         WHEN due_date IS NULL THEN 3
+                         WHEN due_date < $localDate THEN 0
+                         WHEN due_date = $localDate THEN 1
+                         ELSE 2
+                     END,
+                     CASE WHEN is_completed = 1 THEN completed_at END DESC,
+                     due_date,
+                     id COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue(
+            "$localDate", localDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+
+        var rows = new List<TodoTimelineRow>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add(new TodoTimelineRow(
+                Guid.Parse(reader.GetString(0)),
+                reader.GetString(1),
+                ParseDateTimeOffset(reader.GetString(2)),
+                reader.IsDBNull(3)
+                    ? null
+                    : DateOnly.ParseExact(
+                        reader.GetString(3), "yyyy-MM-dd", CultureInfo.InvariantCulture),
+                (ReminderImportance)reader.GetInt32(4),
+                reader.GetInt32(5) == 1,
+                reader.IsDBNull(6)
+                    ? null
+                    : ParseDateTimeOffset(reader.GetString(6))));
+        }
+        return rows;
+    }
+
+    private static async Task<IReadOnlyList<TimelineRow>> ReadRemindersAsync(
+        SqliteConnection connection,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        CancellationToken ct)
+    {
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT o.id, i.title, o.due_at, i.kind, i.importance, o.state,
@@ -47,6 +112,32 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
                 ReadRecurrenceText(reader)));
         }
         return rows;
+    }
+
+    private static async Task<int> CountCompletedAsync(
+        SqliteConnection connection,
+        string table,
+        string stateColumn,
+        int completedState,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        CancellationToken ct)
+    {
+        var timestampColumn = table == "todos" ? "completed_at" : "handled_at";
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT COUNT(*)
+            FROM {table}
+            WHERE {stateColumn} = $completedState
+              AND {timestampColumn} IS NOT NULL
+              AND julianday({timestampColumn}) >= julianday($startUtc)
+              AND julianday({timestampColumn}) < julianday($endUtc);
+            """;
+        command.Parameters.AddWithValue("$completedState", completedState);
+        command.Parameters.AddWithValue("$startUtc", FormatUtc(start));
+        command.Parameters.AddWithValue("$endUtc", FormatUtc(end));
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
     }
 
     private static string? ReadRecurrenceText(SqliteDataReader reader)
@@ -97,4 +188,10 @@ public sealed class SqliteTimelineQuery(string databasePath) : ITimelineQuery
 
     private static string FormatUtc(DateTimeOffset value) =>
         value.UtcDateTime.ToString("O", CultureInfo.InvariantCulture);
+
+    private static DateTimeOffset ParseDateTimeOffset(string value) =>
+        DateTimeOffset.Parse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.RoundtripKind);
 }

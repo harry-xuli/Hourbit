@@ -94,7 +94,8 @@ public sealed class QuickAddTimelineCompositionTests
     private static TimelineViewModel CreateTimeline(
         ITimelineQuery query, IReminderService reminders) =>
         new(query, new FakeClock("2026-07-29T09:00:00+08:00"), reminders,
-            new ActionServiceStub(), new DialogStub(), Zone);
+            new ActionServiceStub(), new TodoServiceStub(),
+            new DialogStub(), new DialogStub(), Zone);
 
     private sealed class RefreshQuery(TimelineRow refreshedRow) : ITimelineQuery
     {
@@ -105,16 +106,16 @@ public sealed class QuickAddTimelineCompositionTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Exception? RefreshFailure { get; set; }
 
-        public async Task<IReadOnlyList<TimelineRow>> GetTimelineAsync(
+        public async Task<TimelineSnapshot> GetTimelineAsync(
             DateOnly localDate, TimeZoneInfo zone, CancellationToken ct)
         {
             if (Interlocked.Increment(ref _calls) == 1)
-                return [];
+                return new TimelineSnapshot([], [], 0, 0);
             RefreshEntered.TrySetResult();
             await ReleaseRefresh.Task.WaitAsync(ct);
             if (RefreshFailure is not null)
                 throw RefreshFailure;
-            return [refreshedRow];
+            return new TimelineSnapshot([], [refreshedRow], 0, 0);
         }
     }
 
@@ -169,7 +170,7 @@ public sealed class QuickAddTimelineCompositionTests
             Task.CompletedTask;
     }
 
-    private sealed class DialogStub : ITimelineDialogService
+    private sealed class DialogStub : ITimelineDialogService, ITodoDialogService
     {
         public Task<SeriesScope?> SelectEditScopeAsync(
             TimelineItemViewModel item, CancellationToken ct) =>
@@ -181,6 +182,7 @@ public sealed class QuickAddTimelineCompositionTests
             Task.FromResult(false);
         public Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult<ReminderDraft?>(null);
+        public Task EditTodoAsync(TodoItem item, CancellationToken ct) => Task.CompletedTask;
         public void OpenQuickAdd() { }
     }
 }

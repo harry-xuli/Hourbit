@@ -22,32 +22,45 @@ public sealed class TimelineViewModel : ObservableObject
     private readonly IClock _clock;
     private readonly IReminderService _reminders;
     private readonly IReminderActionService _actions;
+    private readonly ITodoService _todos;
     private readonly ITimelineDialogService _dialogs;
+    private readonly ITodoDialogService _todoDialogs;
     private readonly TimeZoneInfo _zone;
     private CancellationTokenSource? _loadCancellation;
     private TimelineItemViewModel? _selectedItem;
+    private TodoTimelineItemViewModel? _selectedTodo;
     private string? _errorMessage;
+    private int _todosCompletedToday;
+    private int _remindersCompletedToday;
 
     public TimelineViewModel(
         ITimelineQuery query,
         IClock clock,
         IReminderService reminders,
         IReminderActionService actions,
+        ITodoService todos,
         ITimelineDialogService dialogs,
+        ITodoDialogService todoDialogs,
         TimeZoneInfo zone)
     {
         _query = query;
         _clock = clock;
         _reminders = reminders;
         _actions = actions;
+        _todos = todos;
         _dialogs = dialogs;
+        _todoDialogs = todoDialogs;
         _zone = zone;
         Groups = new[] { "已错过", "接下来", "已完成" }
             .Select(static name => new TimelineGroupViewModel(name)).ToArray();
         LoadCommand = new AsyncCommand((_, _) => LoadAsync());
-        EditCommand = new AsyncCommand((_, ct) => ObserveAsync(() => EditAsync(ct)), _ => SelectedItem is not null);
-        DeleteCommand = new AsyncCommand((_, ct) => ObserveAsync(() => DeleteAsync(ct)), _ => SelectedItem is not null);
-        CompleteCommand = new AsyncCommand((_, ct) => ObserveAsync(() => CompleteAsync(ct)), _ => SelectedItem is not null);
+        EditCommand = new AsyncCommand(
+            (_, ct) => ObserveAsync(() => EditAsync(ct)), _ => HasSelection);
+        DeleteCommand = new AsyncCommand(
+            (_, ct) => ObserveAsync(() => DeleteAsync(ct)), _ => HasSelection);
+        CompleteCommand = new AsyncCommand(
+            (_, ct) => ObserveAsync(() => CompleteAsync(ct)),
+            _ => SelectedItem is not null || SelectedTodo is { IsCompleted: false });
         OpenQuickAddCommand = new AsyncCommand((_, _) => ObserveAsync(() =>
         {
             _dialogs.OpenQuickAdd();
@@ -56,6 +69,8 @@ public sealed class TimelineViewModel : ObservableObject
     }
 
     public ObservableCollection<TimelineItemViewModel> Items { get; } = [];
+    public ObservableCollection<TodoTimelineItemViewModel> PendingTodos { get; } = [];
+    public ObservableCollection<TodoTimelineItemViewModel> CompletedTodos { get; } = [];
     public IReadOnlyList<TimelineGroupViewModel> Groups { get; }
     public IAsyncCommand LoadCommand { get; }
     public IAsyncCommand EditCommand { get; }
@@ -74,7 +89,11 @@ public sealed class TimelineViewModel : ObservableObject
     public string NextReminderText => Items.FirstOrDefault(item => item.GroupName == "接下来") is { } next
         ? $"{next.TimeText} {next.Title}"
         : "无";
-    public int CompletedCount => Items.Count(item => item.GroupName == "已完成");
+    public int CompletedCount => _todosCompletedToday + _remindersCompletedToday;
+    public string CompletedTooltipText =>
+        $"待办：{_todosCompletedToday}，提醒：{_remindersCompletedToday}";
+
+    private bool HasSelection => SelectedItem is not null || SelectedTodo is not null;
 
     public TimelineItemViewModel? SelectedItem
     {
@@ -83,10 +102,36 @@ public sealed class TimelineViewModel : ObservableObject
         {
             if (!SetProperty(ref _selectedItem, value))
                 return;
-            EditCommand.RaiseCanExecuteChanged();
-            DeleteCommand.RaiseCanExecuteChanged();
-            CompleteCommand.RaiseCanExecuteChanged();
+            if (value is not null && _selectedTodo is not null)
+            {
+                _selectedTodo = null;
+                OnPropertyChanged(nameof(SelectedTodo));
+            }
+            RaiseSelectionCommandsChanged();
         }
+    }
+
+    public TodoTimelineItemViewModel? SelectedTodo
+    {
+        get => _selectedTodo;
+        set
+        {
+            if (!SetProperty(ref _selectedTodo, value))
+                return;
+            if (value is not null && _selectedItem is not null)
+            {
+                _selectedItem = null;
+                OnPropertyChanged(nameof(SelectedItem));
+            }
+            RaiseSelectionCommandsChanged();
+        }
+    }
+
+    private void RaiseSelectionCommandsChanged()
+    {
+        EditCommand.RaiseCanExecuteChanged();
+        DeleteCommand.RaiseCanExecuteChanged();
+        CompleteCommand.RaiseCanExecuteChanged();
     }
 
     public string? ErrorMessage
@@ -104,13 +149,37 @@ public sealed class TimelineViewModel : ObservableObject
         try
         {
             var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(_clock.Now, _zone).DateTime);
-            var rows = await _query.GetTimelineAsync(localDate, _zone, cancellation.Token);
+            var snapshot = await _query.GetTimelineAsync(
+                localDate, _zone, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
             ErrorMessage = null;
+            SelectedTodo = null;
+            SelectedItem = null;
+            PendingTodos.Clear();
+            CompletedTodos.Clear();
             Items.Clear();
             foreach (var group in Groups)
                 group.Items.Clear();
-            foreach (var item in rows.Select(row => new TimelineItemViewModel(row, _clock.Now))
+            var todoItems = snapshot.Todos
+                .Select(row => new TodoTimelineItemViewModel(row, localDate))
+                .ToArray();
+            foreach (var todo in todoItems
+                         .Where(static todo => !todo.IsCompleted)
+                         .OrderBy(static todo => todo.DueOrder)
+                         .ThenBy(static todo => todo.DueDate)
+                         .ThenBy(static todo => todo.TodoId))
+            {
+                PendingTodos.Add(todo);
+            }
+            foreach (var todo in todoItems
+                         .Where(static todo => todo.IsCompleted)
+                         .OrderByDescending(static todo => todo.CompletedAt)
+                         .ThenBy(static todo => todo.TodoId))
+            {
+                CompletedTodos.Add(todo);
+            }
+            foreach (var item in snapshot.Reminders
+                         .Select(row => new TimelineItemViewModel(row, _clock.Now))
                          .OrderBy(item => item.GroupOrder)
                          .ThenBy(item => item.DueAt)
                          .ThenBy(item => item.OccurrenceId))
@@ -118,9 +187,15 @@ public sealed class TimelineViewModel : ObservableObject
                 Items.Add(item);
                 Groups.Single(group => group.Name == item.GroupName).Items.Add(item);
             }
-            SelectedItem = Items.FirstOrDefault();
+            _todosCompletedToday = snapshot.TodosCompletedToday;
+            _remindersCompletedToday = snapshot.RemindersCompletedToday;
+            if (PendingTodos.FirstOrDefault() is { } firstTodo)
+                SelectedTodo = firstTodo;
+            else
+                SelectedItem = Items.FirstOrDefault();
             OnPropertyChanged(nameof(NextReminderText));
             OnPropertyChanged(nameof(CompletedCount));
+            OnPropertyChanged(nameof(CompletedTooltipText));
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -138,6 +213,12 @@ public sealed class TimelineViewModel : ObservableObject
 
     private async Task EditAsync(CancellationToken ct)
     {
+        if (SelectedTodo is { } todo)
+        {
+            await _todoDialogs.EditTodoAsync(todo.Item, ct);
+            await LoadAsync();
+            return;
+        }
         var item = SelectedItem;
         if (item is null)
             return;
@@ -155,6 +236,12 @@ public sealed class TimelineViewModel : ObservableObject
 
     private async Task DeleteAsync(CancellationToken ct)
     {
+        if (SelectedTodo is { } todo)
+        {
+            await _todos.DeleteAsync(todo.TodoId, ct);
+            await LoadAsync();
+            return;
+        }
         var item = SelectedItem;
         if (item is null)
             return;
@@ -177,6 +264,12 @@ public sealed class TimelineViewModel : ObservableObject
 
     private async Task CompleteAsync(CancellationToken ct)
     {
+        if (SelectedTodo is { IsCompleted: false } todo)
+        {
+            await _todos.CompleteAsync(todo.TodoId, ct);
+            await LoadAsync();
+            return;
+        }
         var item = SelectedItem;
         if (item is null)
             return;

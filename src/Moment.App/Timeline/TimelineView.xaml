@@ -5,6 +5,98 @@
              Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
              Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
              FontFamily="Segoe UI, Microsoft YaHei UI">
+    <UserControl.Resources>
+        <DataTemplate x:Key="TodoTimelineItemTemplate">
+            <Border BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="0,0,0,1"
+                    MinHeight="58"
+                    Padding="16,0,8,0"
+                    automation:AutomationProperties.Name="{Binding AccessibleName}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="112" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="TodoDueDate"
+                               Grid.Column="0"
+                               Text="{Binding DueDateText}"
+                               VerticalAlignment="Center" />
+                    <TextBlock x:Name="TodoTitle"
+                               Grid.Column="1"
+                               Text="{Binding Title}"
+                               FontSize="17"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock x:Name="TodoImportanceSymbol"
+                                   Text="{Binding ImportanceSymbol}"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontWeight="Bold"
+                                   Margin="0,0,8,0" />
+                        <TextBlock x:Name="TodoImportance"
+                                   Text="{Binding ImportanceText}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="3"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock x:Name="TodoStatusSymbol"
+                                   Text="{Binding StatusSymbol}"
+                                   FontFamily="Segoe UI Symbol"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   FontSize="17"
+                                   Margin="0,0,8,0" />
+                        <TextBlock x:Name="TodoStatus"
+                                   Text="{Binding StatusText}"
+                                   Foreground="{DynamicResource AccentBrush}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding ImportanceText}" Value="重要">
+                    <Setter TargetName="TodoImportanceSymbol" Property="Foreground"
+                            Value="{DynamicResource ImportantBrush}" />
+                    <Setter TargetName="TodoImportance" Property="Foreground"
+                            Value="{DynamicResource ImportantBrush}" />
+                    <Setter TargetName="TodoImportance" Property="FontWeight"
+                            Value="SemiBold" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsOverdue}" Value="True">
+                    <Setter TargetName="TodoDueDate" Property="Foreground"
+                            Value="{DynamicResource MissedBrush}" />
+                    <Setter TargetName="TodoStatusSymbol" Property="Foreground"
+                            Value="{DynamicResource MissedBrush}" />
+                    <Setter TargetName="TodoStatus" Property="Foreground"
+                            Value="{DynamicResource MissedBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                    <Setter TargetName="TodoStatusSymbol" Property="Foreground"
+                            Value="{DynamicResource CompletedBrush}" />
+                    <Setter TargetName="TodoStatus" Property="Foreground"
+                            Value="{DynamicResource CompletedBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
+                             Value="True">
+                    <Setter TargetName="TodoDueDate" Property="Foreground"
+                            Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter TargetName="TodoTitle" Property="Foreground"
+                            Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter TargetName="TodoImportanceSymbol" Property="Foreground"
+                            Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter TargetName="TodoImportance" Property="Foreground"
+                            Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter TargetName="TodoStatusSymbol" Property="Foreground"
+                            Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter TargetName="TodoStatus" Property="Foreground"
+                            Value="{DynamicResource SelectionTextBrush}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </UserControl.Resources>
     <UserControl.InputBindings>
         <KeyBinding Key="Enter" Command="{Binding EditCommand}" />
         <KeyBinding Key="Delete" Command="{Binding DeleteCommand}" />
@@ -48,7 +140,11 @@
                                FontWeight="SemiBold" VerticalAlignment="Center" />
                 </StackPanel>
                 <Border Grid.Column="5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
-                <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel x:Name="CompletedSummary"
+                            Grid.Column="6"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            ToolTip="{Binding CompletedTooltipText}">
                     <TextBlock Text="✓" FontFamily="Segoe UI Symbol" FontSize="22" Margin="0,0,10,0" />
                     <TextBlock Text="今日完成" VerticalAlignment="Center" Margin="0,0,10,0" />
                     <TextBlock Text="{Binding CompletedCount}" Foreground="{DynamicResource AccentBrush}"
@@ -96,11 +192,92 @@
 
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="42" />
                     <RowDefinition Height="56" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
+
+                <StackPanel x:Name="TodoSection"
+                            Grid.Row="0"
+                            Margin="26,8,26,0">
+                    <TextBlock x:Name="TodoSectionHeader"
+                               Text="待办事项"
+                               automation:AutomationProperties.Name="待办事项"
+                               FontSize="20"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AccentBrush}"
+                               Margin="0,0,0,6" />
+                    <ListBox x:Name="PendingTodoList"
+                             ItemsSource="{Binding PendingTodos}"
+                             ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
+                             SelectionChanged="OnTimelineSelectionChanged"
+                             ItemContainerStyle="{StaticResource TimelineListItem}"
+                             BorderThickness="0"
+                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                             MaxHeight="150"
+                             ScrollViewer.CanContentScroll="True"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             automation:AutomationProperties.Name="待办事项列表">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                    </ListBox>
+                    <Expander x:Name="CompletedTodosExpander"
+                              Header="已完成"
+                              IsExpanded="False"
+                              Margin="0,4,0,0"
+                              automation:AutomationProperties.Name="已完成待办">
+                        <Expander.Style>
+                            <Style TargetType="Expander">
+                                <Setter Property="Visibility" Value="Visible" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CompletedTodos.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Expander.Style>
+                        <ListBox x:Name="CompletedTodoList"
+                                 ItemsSource="{Binding CompletedTodos}"
+                                 ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
+                                 SelectionChanged="OnTimelineSelectionChanged"
+                                 ItemContainerStyle="{StaticResource TimelineListItem}"
+                                 BorderThickness="0"
+                                 Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                                 MaxHeight="120"
+                                 ScrollViewer.CanContentScroll="True"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                 automation:AutomationProperties.Name="已完成待办列表">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VirtualizingStackPanel />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                        </ListBox>
+                    </Expander>
+                </StackPanel>
+
+                <TextBlock x:Name="ReminderSectionHeader"
+                           Grid.Row="1"
+                           Text="定时提醒"
+                           automation:AutomationProperties.Name="定时提醒"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource AccentBrush}"
+                           VerticalAlignment="Center"
+                           Margin="26,0" />
+
                 <Border x:Name="TimelineHeader"
-                        Grid.Row="0" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                        Grid.Row="2" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                         BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,0,0,1">
                     <Grid Margin="54,0,26,0">
                         <Grid.ColumnDefinitions>
@@ -118,7 +295,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="1">
+                <Grid Grid.Row="3">
                     <Border Margin="12,8,12,0"
                             Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                             BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
