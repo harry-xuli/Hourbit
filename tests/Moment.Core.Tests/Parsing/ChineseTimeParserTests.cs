@@ -80,6 +80,28 @@ public sealed class ChineseTimeParserTests
     }
 
     [Theory]
+    [InlineData("123月5日早上6点开会")]
+    [InlineData("10月333日早上6点开会")]
+    [InlineData("-10月3日早上6点开会")]
+    [InlineData("10月+3日早上6点开会")]
+    public void Rejects_malformed_Chinese_date_markers_instead_of_scheduling_only_the_clock(
+        string text)
+    {
+        Assert.IsType<ParseResult.Invalid>(Parse(text));
+    }
+
+    [Fact]
+    public void Returns_invalid_instead_of_overflowing_past_the_maximum_local_date()
+    {
+        var result = Parse(
+            "12月31日 9点检查",
+            now: DateTimeOffset.Parse("9999-12-31T10:00:00Z"),
+            zone: TimeZoneInfo.Utc);
+
+        Assert.IsType<ParseResult.Invalid>(result);
+    }
+
+    [Theory]
     [InlineData("en-US", "08/09/2026 14:30 复盘", "2026-08-09T14:30:00+08:00")]
     [InlineData("en-GB", "08/09/2026 14:30 复盘", "2026-09-08T14:30:00+08:00")]
     [InlineData("zh-CN", "08/09/2026 14:30 复盘", "2026-08-09T14:30:00+08:00")]

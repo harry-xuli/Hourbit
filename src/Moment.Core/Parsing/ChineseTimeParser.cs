@@ -30,6 +30,10 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         "(?<![A-Za-z\\d+-])(?:[+-]?\\d{4,}[/.-]+[+-]?\\d+[/.-]+[+-]?\\d+|[+-]?\\d+[/.-]+[+-]?\\d+[/.-]+[+-]?\\d{4,})",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private static readonly Regex ChineseDateMarkerPattern = new(
+        "(?<![A-Za-z\\d])(?:(?:[+-]?\\d+)年)?[+-]?\\d+月[+-]?\\d+日(?![A-Za-z])",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly Regex ChineseClockPattern = new(
         "(?<![\\d+-])(?<period>早上|上午|中午|下午|晚上)?\\s*(?<hour>\\d{1,2})点(?:(?<half>半)|(?<minute>\\d{1,2})分?)?(?![\\d点分+-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -235,7 +239,13 @@ public sealed class ChineseTimeParser : IChineseTimeParser
 
         if (due <= now && IsYearlessChineseDate(dateMatch))
         {
-            var nextLocalDate = DateOnly.FromDateTime(localNow.DateTime).AddDays(1);
+            var localDate = DateOnly.FromDateTime(localNow.DateTime);
+            if (localDate == DateOnly.MaxValue)
+            {
+                return Invalid(originalText, "提醒时间超出可用范围。");
+            }
+
+            var nextLocalDate = localDate.AddDays(1);
             if (!TryCreateNextAnnualDate(
                     dateMatch.Groups["month"].Value,
                     dateMatch.Groups["day"].Value,
@@ -299,7 +309,9 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             .ToArray();
 
     private static bool HasDateToken(string text) =>
-        FindDateMatches(text).Count != 0 || NumericDateMarkerPattern.IsMatch(text);
+        FindDateMatches(text).Count != 0 ||
+        NumericDateMarkerPattern.IsMatch(text) ||
+        ChineseDateMarkerPattern.IsMatch(text);
 
     private static bool HasClockToken(string text) =>
         FindClockMatches(text).Count != 0 ||
@@ -309,9 +321,11 @@ public sealed class ChineseTimeParser : IChineseTimeParser
     private static bool HasMalformedDateToken(
         string text,
         IReadOnlyList<Match> validDateMatches) =>
-        NumericDateMarkerPattern.Matches(text).Cast<Match>().Any(candidate =>
+        NumericDateMarkerPattern.Matches(text).Cast<Match>()
+            .Concat(ChineseDateMarkerPattern.Matches(text).Cast<Match>())
+            .Any(candidate =>
             !validDateMatches.Any(valid =>
-                valid.Groups["first"].Success && Covers(valid, candidate)));
+                Covers(valid, candidate)));
 
     private static bool HasMalformedClockToken(
         string text,
