@@ -278,6 +278,7 @@ try {
     & dotnet build $windowsProject `
         -c Release `
         -r win-x64 `
+        --artifacts-path $releaseBuildDirectory `
         -p:EnableMsixTooling=true `
         -p:WindowsAppSDKSingleFileVerifyConfiguration=false
     if ($LASTEXITCODE -ne 0) {
@@ -292,6 +293,7 @@ try {
     }
 
     & dotnet publish $applicationProject `
+        -m:1 `
         -c Release `
         -r win-x64 `
         --self-contained true `
