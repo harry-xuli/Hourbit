@@ -279,6 +279,13 @@ try {
         throw "Windows runtime resource build failed with exit code $LASTEXITCODE."
     }
 
+    # The Windows PRI build can leave an MSBuild node holding Moment.Core.dll
+    # briefly, which races the immediately following RID publish on Windows.
+    & dotnet build-server shutdown
+    if ($LASTEXITCODE -ne 0) {
+        throw "Build-server shutdown failed with exit code $LASTEXITCODE."
+    }
+
     & dotnet publish $applicationProject `
         -c Release `
         -r win-x64 `
