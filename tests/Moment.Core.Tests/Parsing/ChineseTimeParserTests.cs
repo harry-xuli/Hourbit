@@ -29,6 +29,32 @@ public sealed class ChineseTimeParserTests
         Assert.Null(draft.Recurrence);
     }
 
+    [Fact]
+    public void Bare_five_oclock_after_1500_means_tomorrow_morning()
+    {
+        var draft = Reminder(
+            "5点提醒我按时吃饭",
+            now: DateTimeOffset.Parse("2026-08-09T15:00:00+08:00"));
+
+        Assert.Equal("按时吃饭", draft.Title);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-08-10T05:00:00+08:00"),
+            draft.DueAt);
+    }
+
+    [Fact]
+    public void Explicit_afternoon_five_after_1500_means_today_at_1700()
+    {
+        var draft = Reminder(
+            "下午5点提醒我按时吃饭",
+            now: DateTimeOffset.Parse("2026-08-09T15:00:00+08:00"));
+
+        Assert.Equal("按时吃饭", draft.Title);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-08-09T17:00:00+08:00"),
+            draft.DueAt);
+    }
+
     [Theory]
     [InlineData("zh-CN", "2026-08-05 14:30 发布版本", "2026-08-05T14:30:00+08:00")]
     [InlineData("en-US", "2026/08/05 14:30 发布版本", "2026-08-05T14:30:00+08:00")]
