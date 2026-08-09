@@ -6,6 +6,84 @@
              Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
              FontFamily="Segoe UI, Microsoft YaHei UI">
     <UserControl.Resources>
+        <Style x:Key="PeriodSegmentRadioButtonStyle"
+               TargetType="RadioButton">
+            <Setter Property="Width" Value="78" />
+            <Setter Property="Height" Value="42" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="SegmentBorder"
+                                Background="{DynamicResource SubtleBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6">
+                            <Grid HorizontalAlignment="Center"
+                                  VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Viewbox Width="17" Height="17"
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center">
+                                    <Path x:Name="PeriodIcon"
+                                          Data="{TemplateBinding Tag}"
+                                          Fill="Transparent"
+                                          Stroke="{TemplateBinding BorderBrush}"
+                                          StrokeThickness="1.8"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round" />
+                                </Viewbox>
+                                <TextBlock x:Name="PeriodText"
+                                           Grid.Column="2"
+                                           Text="{TemplateBinding Content}"
+                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                           FontSize="16"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SegmentBorder"
+                                        Property="BorderBrush"
+                                        Value="{Binding BorderBrush, RelativeSource={RelativeSource TemplatedParent}}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="SegmentBorder"
+                                        Property="Background"
+                                        Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <Setter TargetName="SegmentBorder"
+                                        Property="BorderBrush"
+                                        Value="{Binding BorderBrush, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <Setter TargetName="PeriodIcon"
+                                        Property="Stroke"
+                                        Value="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <Setter TargetName="PeriodText"
+                                        Property="Foreground"
+                                        Value="{DynamicResource SelectionTextBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="SegmentBorder"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource FocusBrush}" />
+                                <Setter TargetName="SegmentBorder"
+                                        Property="BorderThickness"
+                                        Value="2" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="SegmentBorder" Property="Opacity" Value="0.55" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <DataTemplate x:Key="TodoTimelineItemTemplate">
             <Border BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,0,1"
@@ -208,36 +286,50 @@
                             FontSize="22"
                             MinWidth="42"
                             Margin="0,0,10,0" />
-                    <StackPanel Grid.Column="1"
-                                Orientation="Horizontal"
+                    <Border Grid.Column="1"
+                            Background="{DynamicResource SubtleBackgroundBrush}"
+                            CornerRadius="8"
+                            Padding="3"
+                            VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal"
                                 VerticalAlignment="Center">
                         <RadioButton x:Name="DayPeriodButton"
                                      GroupName="TimelinePeriod"
                                      Content="日"
+                                     Tag="M3,4 L17,4 17,18 3,18 Z M3,8 L17,8 M7,2 L7,6 M13,2 L13,6 M7,12 L10,12 10,15 7,15 Z"
                                      Command="{Binding SelectDayPeriodCommand}"
                                      IsChecked="{Binding IsDayPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按日查看"
-                                     VerticalAlignment="Center"
-                                     Padding="8,4"
-                                     Margin="0,0,4,0" />
+                                     Style="{StaticResource PeriodSegmentRadioButtonStyle}"
+                                     Background="{DynamicResource PeriodDaySelectedBrush}"
+                                     BorderBrush="{DynamicResource PeriodDayBrush}"
+                                     Foreground="{DynamicResource PeriodDaySelectedForegroundBrush}"
+                                     Margin="0,0,3,0" />
                         <RadioButton x:Name="WeekPeriodButton"
                                      GroupName="TimelinePeriod"
                                      Content="周"
+                                     Tag="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,12 L8,12 M10,12 L12,12 M14,12 L16,12"
                                      Command="{Binding SelectWeekPeriodCommand}"
                                      IsChecked="{Binding IsWeekPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按周查看"
-                                     VerticalAlignment="Center"
-                                     Padding="8,4"
-                                     Margin="0,0,4,0" />
+                                     Style="{StaticResource PeriodSegmentRadioButtonStyle}"
+                                     Background="{DynamicResource PeriodWeekSelectedBrush}"
+                                     BorderBrush="{DynamicResource PeriodWeekBrush}"
+                                     Foreground="{DynamicResource PeriodWeekSelectedForegroundBrush}"
+                                     Margin="0,0,3,0" />
                         <RadioButton x:Name="MonthPeriodButton"
                                      GroupName="TimelinePeriod"
                                      Content="月"
+                                     Tag="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,11 L8,11 M10,11 L12,11 M14,11 L16,11 M6,15 L8,15 M10,15 L12,15 M14,15 L16,15"
                                      Command="{Binding SelectMonthPeriodCommand}"
                                      IsChecked="{Binding IsMonthPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按月查看"
-                                     VerticalAlignment="Center"
-                                     Padding="8,4" />
+                                     Style="{StaticResource PeriodSegmentRadioButtonStyle}"
+                                     Background="{DynamicResource PeriodMonthSelectedBrush}"
+                                     BorderBrush="{DynamicResource PeriodMonthBrush}"
+                                     Foreground="{DynamicResource PeriodMonthSelectedForegroundBrush}" />
                     </StackPanel>
+                    </Border>
                     <TextBlock x:Name="PeriodLabel"
                                Grid.Column="2"
                                Text="{Binding PeriodLabel}"

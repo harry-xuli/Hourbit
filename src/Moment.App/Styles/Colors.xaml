@@ -20,6 +20,12 @@
     <Color x:Key="ChartNormalColor">#64748B</Color>
     <Color x:Key="ChartImportantColor">#C83B19</Color>
     <Color x:Key="ChartOtherColor">#A16207</Color>
+    <Color x:Key="PeriodDayColor">#0F5CC0</Color>
+    <Color x:Key="PeriodWeekColor">#7C3AED</Color>
+    <Color x:Key="PeriodMonthColor">#C45F00</Color>
+    <Color x:Key="PeriodDaySelectedColor">#1A0F5CC0</Color>
+    <Color x:Key="PeriodWeekSelectedColor">#1A7C3AED</Color>
+    <Color x:Key="PeriodMonthSelectedColor">#1AC45F00</Color>
     <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
     <SolidColorBrush x:Key="SubtleBackgroundBrush" Color="{StaticResource SubtleBackgroundColor}" />
     <SolidColorBrush x:Key="PrimaryTextBrush" Color="{StaticResource PrimaryTextColor}" />
@@ -40,4 +46,13 @@
     <SolidColorBrush x:Key="ChartNormalBrush" Color="{StaticResource ChartNormalColor}" />
     <SolidColorBrush x:Key="ChartImportantBrush" Color="{StaticResource ChartImportantColor}" />
     <SolidColorBrush x:Key="ChartOtherBrush" Color="{StaticResource ChartOtherColor}" />
+    <SolidColorBrush x:Key="PeriodDayBrush" Color="{StaticResource PeriodDayColor}" />
+    <SolidColorBrush x:Key="PeriodWeekBrush" Color="{StaticResource PeriodWeekColor}" />
+    <SolidColorBrush x:Key="PeriodMonthBrush" Color="{StaticResource PeriodMonthColor}" />
+    <SolidColorBrush x:Key="PeriodDaySelectedBrush" Color="{StaticResource PeriodDaySelectedColor}" />
+    <SolidColorBrush x:Key="PeriodWeekSelectedBrush" Color="{StaticResource PeriodWeekSelectedColor}" />
+    <SolidColorBrush x:Key="PeriodMonthSelectedBrush" Color="{StaticResource PeriodMonthSelectedColor}" />
+    <SolidColorBrush x:Key="PeriodDaySelectedForegroundBrush" Color="{StaticResource PeriodDayColor}" />
+    <SolidColorBrush x:Key="PeriodWeekSelectedForegroundBrush" Color="{StaticResource PeriodWeekColor}" />
+    <SolidColorBrush x:Key="PeriodMonthSelectedForegroundBrush" Color="{StaticResource PeriodMonthColor}" />
 </ResourceDictionary>

@@ -16,7 +16,11 @@ internal static class HighContrastPalette
         "CompletedBrush", "SelectionBackgroundBrush", "SelectionTextBrush",
         "ChartCompletedBrush", "ChartIncompleteBrush", "ChartOverdueBrush",
         "ChartTodoBrush", "ChartReminderBrush", "ChartNormalBrush",
-        "ChartImportantBrush", "ChartOtherBrush"
+        "ChartImportantBrush", "ChartOtherBrush",
+        "PeriodDayBrush", "PeriodWeekBrush", "PeriodMonthBrush",
+        "PeriodDaySelectedBrush", "PeriodWeekSelectedBrush",
+        "PeriodMonthSelectedBrush", "PeriodDaySelectedForegroundBrush",
+        "PeriodWeekSelectedForegroundBrush", "PeriodMonthSelectedForegroundBrush"
     ];
 
     internal static void Apply(
@@ -75,6 +79,15 @@ internal static class HighContrastPalette
         resources["ChartNormalBrush"] = grayText;
         resources["ChartImportantBrush"] = highlight;
         resources["ChartOtherBrush"] = windowText;
+        resources["PeriodDayBrush"] = windowText;
+        resources["PeriodWeekBrush"] = windowText;
+        resources["PeriodMonthBrush"] = windowText;
+        resources["PeriodDaySelectedBrush"] = highlight;
+        resources["PeriodWeekSelectedBrush"] = highlight;
+        resources["PeriodMonthSelectedBrush"] = highlight;
+        resources["PeriodDaySelectedForegroundBrush"] = highlightText;
+        resources["PeriodWeekSelectedForegroundBrush"] = highlightText;
+        resources["PeriodMonthSelectedForegroundBrush"] = highlightText;
         PaletteChanged?.Invoke(null, EventArgs.Empty);
     }
 }
