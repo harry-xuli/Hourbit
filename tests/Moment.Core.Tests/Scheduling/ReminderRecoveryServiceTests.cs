@@ -210,10 +210,10 @@ public sealed class ReminderRecoveryServiceTests
 
         var result = await service.RecoverAsync(Now, CancellationToken.None);
 
-        Assert.Equal(new ReminderRecoveryResult(Fired: 2, Missed: 0, Failed: 1), result);
+        Assert.Equal(new ReminderRecoveryResult(Fired: 1, Missed: 0, Failed: 1), result);
         Assert.Equal([second], sink.Deliveries);
         Assert.Equal([expected], reported);
-        Assert.Equal(OccurrenceState.Fired,
+        Assert.Equal(OccurrenceState.DeliveryFailed,
             (await repository.GetScheduledReminderAsync(first.Occurrence.Id, CancellationToken.None))!
             .Occurrence.State);
     }
@@ -242,7 +242,7 @@ public sealed class ReminderRecoveryServiceTests
     }
 
     [Fact]
-    public async Task Cancellation_during_delivery_is_not_reported_and_preserves_fired_state()
+    public async Task Cancellation_during_delivery_is_not_reported_and_leaves_recoverable_delivery_claim()
     {
         var repository = new FakeReminderRepository();
         var summarySink = new RecordingReminderSink();
@@ -258,7 +258,7 @@ public sealed class ReminderRecoveryServiceTests
             () => service.RecoverAsync(Now, cancellation.Token));
 
         Assert.Empty(reported);
-        Assert.Equal(OccurrenceState.Fired,
+        Assert.Equal(OccurrenceState.Delivering,
             (await repository.GetScheduledReminderAsync(reminder.Occurrence.Id, CancellationToken.None))!
             .Occurrence.State);
     }

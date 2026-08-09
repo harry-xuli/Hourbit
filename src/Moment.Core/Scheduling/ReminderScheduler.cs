@@ -1,5 +1,6 @@
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
+using Moment.Core.Recurrence;
 
 namespace Moment.Core.Scheduling;
 
@@ -12,6 +13,9 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
     private readonly IReminderRepository _repository;
     private readonly IReminderSink _sink;
     private readonly IClock _clock;
+    private readonly IRecurrenceCalculator _recurrence;
+    private readonly TimeZoneInfo _zone;
+    private readonly ReminderDeliveryPolicy _deliveryPolicy = new();
     private readonly SemaphoreSlim _refreshSignal = new(0, 1);
     private readonly SemaphoreSlim _transitionGate = new(1, 1);
     private readonly CancellationTokenSource _disposeCancellation = new();
@@ -34,11 +38,18 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
         }
     }
 
-    public ReminderScheduler(IReminderRepository repository, IReminderSink sink, IClock clock)
+    public ReminderScheduler(
+        IReminderRepository repository,
+        IReminderSink sink,
+        IClock clock,
+        IRecurrenceCalculator? recurrence = null,
+        TimeZoneInfo? zone = null)
     {
         _repository = repository;
         _sink = sink;
         _clock = clock;
+        _recurrence = recurrence ?? new RecurrenceCalculator();
+        _zone = zone ?? TimeZoneInfo.Local;
     }
 
     public async Task StartAsync(CancellationToken ct)
@@ -207,13 +218,32 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
                 ct.ThrowIfCancellationRequested();
                 var scheduled = await _repository.GetScheduledAsync(ct).ConfigureAwait(false);
                 var now = _clock.Now;
-                var fired = (await _repository
+                var recoverable = await _repository
                         .GetRecoverableAsync(now, ct)
-                        .ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                var fired = recoverable
                     .Where(static reminder =>
                         reminder.Occurrence.State == OccurrenceState.Fired
                         && reminder.Item.Importance == ReminderImportance.Normal)
                     .ToArray();
+                var failedDeliveries = recoverable
+                    .Where(static reminder =>
+                        reminder.Occurrence.State == OccurrenceState.DeliveryFailed)
+                    .ToArray();
+                var retryable = failedDeliveries
+                    .Where(reminder =>
+                        reminder.Occurrence.State == OccurrenceState.DeliveryFailed &&
+                        reminder.Occurrence.NextDeliveryAttemptAt <= now)
+                    .ToArray();
+
+                foreach (var reminder in retryable)
+                {
+                    if (await _repository.RetryDeliveryAsync(
+                            reminder.Occurrence.Id, now, ct).ConfigureAwait(false))
+                        ReportStateChanged();
+                }
+                if (retryable.Length > 0)
+                    continue;
 
                 var due = scheduled.Any(reminder => reminder.Occurrence.DueAt <= now);
                 var expired = fired
@@ -251,7 +281,10 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
                 var nextFiredAt = fired
                     .Select(reminder => (DateTimeOffset?)GetNextFiredWakeAt(reminder, now))
                     .Min();
-                var nextAt = Min(nextScheduledAt, nextFiredAt);
+                var nextRetryAt = failedDeliveries
+                    .Select(static reminder => reminder.Occurrence.NextDeliveryAttemptAt)
+                    .Min();
+                var nextAt = Min(Min(nextScheduledAt, nextFiredAt), nextRetryAt);
                 if (nextAt is null)
                 {
                     await _refreshSignal.WaitAsync(ct).ConfigureAwait(false);
@@ -278,16 +311,26 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
                      .OrderBy(static reminder => reminder.Occurrence.DueAt)
                      .ThenBy(static reminder => reminder.Occurrence.Id))
         {
-            if (!await _repository.TryMarkFiredAsync(
+            if (!await _repository.TryBeginDeliveryAsync(
                     reminder.Occurrence.Id, now, ct).ConfigureAwait(false))
             {
                 continue;
             }
 
-            ReportStateChanged();
             try
             {
                 await _sink.DeliverAsync(reminder, ct).ConfigureAwait(false);
+                ReminderOccurrence? next = null;
+                if (reminder.Item.Recurrence is { } rule)
+                {
+                    next = ReminderOccurrence.Schedule(
+                        reminder.Item.Id,
+                        _recurrence.NextAfter(
+                            rule, reminder.Occurrence.DueAt, _zone));
+                }
+                await _repository.CompleteDeliveryAsync(
+                    reminder.Occurrence.Id, now, next, ct).ConfigureAwait(false);
+                ReportStateChanged();
             }
             catch (OperationCanceledException)
             {
@@ -295,6 +338,17 @@ public sealed class ReminderScheduler : ISchedulerSignal, IDisposable
             }
             catch (Exception exception)
             {
+                var current = await _repository.GetScheduledReminderAsync(
+                    reminder.Occurrence.Id, ct).ConfigureAwait(false);
+                var attempts = current?.Occurrence.DeliveryAttempts ?? 1;
+                var retryAt = _deliveryPolicy.GetNextRetryAt(attempts, now);
+                await _repository.RecordDeliveryFailureAsync(
+                    reminder.Occurrence.Id,
+                    now,
+                    exception.GetType().Name,
+                    retryAt,
+                    ct).ConfigureAwait(false);
+                ReportStateChanged();
                 ReportDeliveryFailure(new SchedulerDeliveryFailure(reminder, exception));
             }
         }

@@ -240,8 +240,9 @@ public sealed class NotificationLifecycleTests
         if (testNotification)
             await Assert.ThrowsAsync<InvalidOperationException>(() => sink.SendTestNotificationAsync(default));
         else
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                sink.DeliverAsync(Moment.TestSupport.TestData.Scheduled("Normal", "2026-08-01T09:30:00+08:00"), default));
+            await sink.DeliverAsync(
+                Moment.TestSupport.TestData.Scheduled(
+                    "Normal", "2026-08-01T09:30:00+08:00"), default);
 
         Assert.Equal(NotificationHealth.RegistrationFailed, platform.Health);
         Assert.Equal([NotificationHealth.RegistrationFailed], observed);

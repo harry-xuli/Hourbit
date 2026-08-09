@@ -171,7 +171,8 @@ public sealed class CompositionRoot : IAsyncDisposable
             importantAlertPresenter, actions);
         var notificationPlatform = new WindowsAppNotificationPlatform();
         var notificationSink = new AppNotificationSink(notificationPlatform, importantAlerts, actions);
-        var scheduler = new ReminderScheduler(repository, notificationSink, clock);
+        var scheduler = new ReminderScheduler(
+            repository, notificationSink, clock, recurrence, zone);
         schedulerSignal.Target = scheduler;
         var reminders = new ReminderService(repository, scheduler, clock);
         var todos = new TodoService(
@@ -223,7 +224,9 @@ public sealed class CompositionRoot : IAsyncDisposable
         var reminderRecoveryService = new ReminderRecoveryService(
             repository,
             notificationSink,
-            new ReminderRecoverySummarySink(notificationSink));
+            new ReminderRecoverySummarySink(notificationSink),
+            recurrence,
+            zone);
         var reminderRecovery = new ReminderRecoveryCoordinator(
             scheduler,
             reminderRecoveryService,

@@ -1,5 +1,6 @@
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
+using Moment.Core.Recurrence;
 
 namespace Moment.Core.Scheduling;
 
@@ -12,6 +13,9 @@ public sealed class ReminderRecoveryService
     private readonly IReminderRepository _repository;
     private readonly IReminderSink _reminderSink;
     private readonly IReminderRecoverySummarySink _summarySink;
+    private readonly IRecurrenceCalculator _recurrence;
+    private readonly TimeZoneInfo _zone;
+    private readonly ReminderDeliveryPolicy _deliveryPolicy = new();
     private readonly SemaphoreSlim _recoveryGate = new(1, 1);
 
     public event Action<Exception>? RecoveryFailed;
@@ -19,11 +23,15 @@ public sealed class ReminderRecoveryService
     public ReminderRecoveryService(
         IReminderRepository repository,
         IReminderSink reminderSink,
-        IReminderRecoverySummarySink summarySink)
+        IReminderRecoverySummarySink summarySink,
+        IRecurrenceCalculator? recurrence = null,
+        TimeZoneInfo? zone = null)
     {
         _repository = repository;
         _reminderSink = reminderSink;
         _summarySink = summarySink;
+        _recurrence = recurrence ?? new RecurrenceCalculator();
+        _zone = zone ?? TimeZoneInfo.Local;
     }
 
     public async Task<ReminderRecoveryResult> RecoverAsync(
@@ -45,19 +53,29 @@ public sealed class ReminderRecoveryService
                          .ThenBy(static reminder => reminder.Occurrence.Id))
             {
                 ct.ThrowIfCancellationRequested();
+                if (reminder.Occurrence.State == OccurrenceState.Delivering)
+                {
+                    await _repository.RecordDeliveryFailureAsync(
+                        reminder.Occurrence.Id, now, "InterruptedDelivery", now, ct)
+                        .ConfigureAwait(false);
+                    failed++;
+                    continue;
+                }
                 var next = GetRecoveryState(reminder, now);
                 if (next is null)
                 {
                     continue;
                 }
 
-                var claimed = await _repository.TryTransitionAsync(
+                var claimed = next == OccurrenceState.Fired
+                    ? await _repository.TryBeginDeliveryAsync(
+                        reminder.Occurrence.Id, now, ct).ConfigureAwait(false)
+                    : await _repository.TryTransitionAsync(
                         reminder.Occurrence.Id,
                         reminder.Occurrence.State,
                         next.Value,
                         now,
-                        ct)
-                    .ConfigureAwait(false);
+                        ct).ConfigureAwait(false);
                 if (!claimed)
                 {
                     continue;
@@ -70,10 +88,19 @@ public sealed class ReminderRecoveryService
                     continue;
                 }
 
-                fired++;
                 try
                 {
                     await _reminderSink.DeliverAsync(reminder, ct).ConfigureAwait(false);
+                    ReminderOccurrence? successor = null;
+                    if (reminder.Item.Recurrence is { } rule)
+                        successor = ReminderOccurrence.Schedule(
+                            reminder.Item.Id,
+                            _recurrence.NextAfter(
+                                rule, reminder.Occurrence.DueAt, _zone));
+                    await _repository.CompleteDeliveryAsync(
+                        reminder.Occurrence.Id, now, successor, ct)
+                        .ConfigureAwait(false);
+                    fired++;
                 }
                 catch (OperationCanceledException)
                 {
@@ -81,6 +108,14 @@ public sealed class ReminderRecoveryService
                 }
                 catch (Exception exception)
                 {
+                    var current = await _repository.GetScheduledReminderAsync(
+                        reminder.Occurrence.Id, ct).ConfigureAwait(false);
+                    var retryAt = _deliveryPolicy.GetNextRetryAt(
+                        current?.Occurrence.DeliveryAttempts ?? 1, now);
+                    await _repository.RecordDeliveryFailureAsync(
+                        reminder.Occurrence.Id, now,
+                        exception.GetType().Name, retryAt, ct)
+                        .ConfigureAwait(false);
                     failed++;
                     ReportFailure(exception);
                 }

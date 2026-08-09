@@ -215,14 +215,49 @@ public sealed class ReminderSchedulerTests
             Assert.False(scheduler.Completion.IsFaulted);
 
             clock.AdvanceBy(TimeSpan.FromMinutes(1));
-            await sink.WaitForCountAsync(1);
+            await sink.WaitForCountAsync(2);
 
-            Assert.Equal("later", sink.Deliveries.Single().Item.Title);
+            Assert.Equal(
+                ["fails", "later"],
+                sink.Deliveries.Select(static delivery => delivery.Item.Title));
         }
         finally
         {
             scheduler.Dispose();
         }
+    }
+
+    [Fact]
+    public async Task Failed_delivery_is_retried_after_fifteen_seconds_before_becoming_fired()
+    {
+        var clock = new FakeClock("2026-08-09T15:00:00+08:00");
+        var repository = new FakeReminderRepository();
+        var sink = new ThrowOnceThenRecordingSink();
+        var reminder = TestData.Scheduled(
+            "按时吃饭", clock.Now.AddMinutes(1).ToString("O"));
+        await repository.AddAsync(reminder);
+        using var scheduler = new ReminderScheduler(repository, sink, clock);
+        var failureCommitted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        scheduler.StateChanged += (_, _) => failureCommitted.TrySetResult();
+        await scheduler.StartAsync(CancellationToken.None);
+
+        clock.AdvanceBy(TimeSpan.FromMinutes(1));
+        await sink.WaitForFirstAttemptAsync();
+        await failureCommitted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var failed = await repository.GetScheduledReminderAsync(
+            reminder.Occurrence.Id, CancellationToken.None);
+        Assert.Equal(OccurrenceState.DeliveryFailed, failed!.Occurrence.State);
+        Assert.Equal(1, failed.Occurrence.DeliveryAttempts);
+        Assert.Equal(clock.Now.AddSeconds(15), failed.Occurrence.NextDeliveryAttemptAt);
+
+        clock.AdvanceBy(TimeSpan.FromSeconds(15));
+        await sink.WaitForCountAsync(1);
+
+        var delivered = await repository.GetScheduledReminderAsync(
+            reminder.Occurrence.Id, CancellationToken.None);
+        Assert.Equal(OccurrenceState.Fired, delivered!.Occurrence.State);
+        Assert.Equal(2, delivered.Occurrence.DeliveryAttempts);
     }
 
     [Fact]

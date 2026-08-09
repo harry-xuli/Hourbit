@@ -76,6 +76,21 @@ public sealed class NotificationArgumentsTests
     }
 
     [Fact]
+    public async Task Normal_reminder_always_uses_the_in_app_alert_channel()
+    {
+        var alerts = new RecordingImportantAlerts();
+        var platform = new RecordingNotificationPlatform();
+        var sink = new AppNotificationSink(platform, alerts, new RecordingActions());
+        var reminder = TestData.Scheduled(
+            "按时吃饭", "2026-08-09T17:00:00+08:00");
+
+        await sink.DeliverAsync(reminder, CancellationToken.None);
+
+        Assert.Equal(ReminderAlert.From(reminder), Assert.Single(alerts.Admitted));
+        Assert.Single(platform.Payloads);
+    }
+
+    [Fact]
     public async Task Missed_summary_contains_count_and_at_most_three_titles()
     {
         var platform = new RecordingNotificationPlatform();

@@ -49,12 +49,16 @@ public sealed class SqliteReminderRepository : IReminderRepository
         await GetScheduledRemindersAsync("""
             (o.state = $scheduled AND o.due_at_utc <= $throughUtc)
             OR (o.state = $fired AND i.importance = $normal)
+            OR (o.state = $deliveryFailed AND o.next_delivery_attempt_at IS NOT NULL)
+            OR (o.state = $delivering)
             """, command =>
         {
             command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
             command.Parameters.AddWithValue("$throughUtc", FormatUtcKey(through));
             command.Parameters.AddWithValue("$fired", (int)OccurrenceState.Fired);
             command.Parameters.AddWithValue("$normal", (int)ReminderImportance.Normal);
+            command.Parameters.AddWithValue("$deliveryFailed", (int)OccurrenceState.DeliveryFailed);
+            command.Parameters.AddWithValue("$delivering", (int)OccurrenceState.Delivering);
         }, ct);
 
     public async Task<ScheduledReminder?> GetScheduledReminderAsync(Guid occurrenceId, CancellationToken ct)

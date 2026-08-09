@@ -153,25 +153,42 @@ public sealed class AppNotificationSink(INotificationPlatform platform, IImporta
     public Task SendTestNotificationAsync(CancellationToken ct) => platform.ShowAsync(new NotificationPayload(
         "Hourbit 日程", "这是一条测试通知。", "moment-test", "moment-reminders", "section=timeline", []), ct);
 
-    public Task DeliverAsync(ScheduledReminder reminder, CancellationToken ct)
+    public async Task DeliverAsync(ScheduledReminder reminder, CancellationToken ct)
     {
-        if (reminder.Item.Importance == ReminderImportance.Important)
+        var id = reminder.Occurrence.Id;
+        Exception? alertFailure = null;
+        Exception? toastFailure = null;
+        try
         {
-            return importantAlerts.AdmitAsync(ReminderAlert.From(reminder), ct);
+            await importantAlerts.AdmitAsync(ReminderAlert.From(reminder), ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            alertFailure = exception;
         }
 
-        var id = reminder.Occurrence.Id;
-        return platform.ShowAsync(new NotificationPayload(
-            reminder.Item.Title,
-            $"计划时间：{reminder.Occurrence.DueAt:HH:mm}",
-            id.ToString("D"),
-            "moment-reminders",
-            "section=timeline&occurrenceId=" + id.ToString("D"),
-            [
-                new NotificationButton("完成", NotificationArguments.Format(id, NotificationAction.Complete)),
-                new NotificationButton("10 分钟后提醒", NotificationArguments.Format(id, NotificationAction.Snooze10)),
-                new NotificationButton("忽略", NotificationArguments.Format(id, NotificationAction.Ignore))
-            ]), ct);
+        try
+        {
+            await platform.ShowAsync(new NotificationPayload(
+                reminder.Item.Title,
+                $"计划时间：{reminder.Occurrence.DueAt:HH:mm}",
+                id.ToString("D"),
+                "moment-reminders",
+                "section=timeline&occurrenceId=" + id.ToString("D"),
+                [
+                    new NotificationButton("完成", NotificationArguments.Format(id, NotificationAction.Complete)),
+                    new NotificationButton("10 分钟后提醒", NotificationArguments.Format(id, NotificationAction.Snooze10)),
+                    new NotificationButton("忽略", NotificationArguments.Format(id, NotificationAction.Ignore))
+                ]), ct).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            toastFailure = exception;
+        }
+
+        if (alertFailure is not null && toastFailure is not null)
+            throw new AggregateException(alertFailure, toastFailure);
     }
 
     public Task DeliverMissedSummaryAsync(IReadOnlyList<ScheduledReminder> reminders, CancellationToken ct)

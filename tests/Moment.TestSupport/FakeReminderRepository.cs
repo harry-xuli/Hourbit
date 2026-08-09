@@ -55,7 +55,10 @@ public class FakeReminderRepository : IReminderRepository
             return Task.FromResult<IReadOnlyList<ScheduledReminder>>(GetMatching(occurrence =>
                 (occurrence.State == OccurrenceState.Scheduled && occurrence.DueAt <= through)
                 || (occurrence.State == OccurrenceState.Fired
-                    && _items[occurrence.ItemId].Importance == ReminderImportance.Normal)));
+                    && _items[occurrence.ItemId].Importance == ReminderImportance.Normal)
+                || (occurrence.State == OccurrenceState.DeliveryFailed
+                    && occurrence.NextDeliveryAttemptAt is not null)
+                || occurrence.State == OccurrenceState.Delivering));
         }
     }
 
