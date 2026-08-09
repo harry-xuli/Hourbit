@@ -405,6 +405,8 @@ public sealed class SqliteTodoRepositoryTests
         var occurrenceId = Guid.NewGuid();
         var actionId = Guid.NewGuid();
         var due = CreatedAt.AddHours(1);
+        var handledAt = due.AddMinutes(1);
+        var deletedAt = due.AddMinutes(2);
         await ExecuteAsync(path, $"""
             DROP TABLE action_log;
             DROP TABLE occurrences;
@@ -444,11 +446,12 @@ public sealed class SqliteTodoRepositoryTests
                 handled_at, snooze_parent_id, deleted_at)
                 VALUES (
                     '{occurrenceId:D}', '{itemId:D}', '{due:O}',
-                    '{due.UtcDateTime:O}', 2, '{due.AddMinutes(1):O}', NULL, NULL);
+                    '{due.UtcDateTime:O}', 2, '{handledAt:O}', NULL,
+                    '{deletedAt:O}');
             INSERT INTO action_log(id, occurrence_id, state, handled_at)
                 VALUES (
                     '{actionId:D}', '{occurrenceId:D}', 2,
-                    '{due.AddMinutes(1):O}');
+                    '{handledAt:O}');
             """);
 
         await using var connection =
@@ -456,10 +459,26 @@ public sealed class SqliteTodoRepositoryTests
         await DatabaseMigrator.MigrateAsync(connection, default);
         await DatabaseMigrator.MigrateAsync(connection, default);
 
-        Assert.Equal(1, await ScalarIntAsync(connection,
-            "SELECT COUNT(*) FROM occurrences WHERE id = $id;", occurrenceId));
-        Assert.Equal(1, await ScalarIntAsync(connection,
-            "SELECT COUNT(*) FROM action_log WHERE id = $id;", actionId));
+        Assert.Equal(1, await ScalarIntAsync(connection, $"""
+            SELECT COUNT(*)
+            FROM occurrences
+            WHERE id = '{occurrenceId:D}'
+              AND item_id = '{itemId:D}'
+              AND due_at = '{due:O}'
+              AND due_at_utc = '{due.UtcDateTime:O}'
+              AND state = 2
+              AND handled_at = '{handledAt:O}'
+              AND snooze_parent_id IS NULL
+              AND deleted_at = '{deletedAt:O}';
+            """));
+        Assert.Equal(1, await ScalarIntAsync(connection, $"""
+            SELECT COUNT(*)
+            FROM action_log
+            WHERE id = '{actionId:D}'
+              AND occurrence_id = '{occurrenceId:D}'
+              AND state = 2
+              AND handled_at = '{handledAt:O}';
+            """));
         Assert.Equal(0, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM pragma_foreign_key_check;"));
         Assert.Equal(1, await ScalarIntAsync(connection, """
