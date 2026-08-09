@@ -4,7 +4,17 @@ public enum ReminderKind { Countdown, Alarm, Plan }
 
 public enum ReminderImportance { Normal, Important }
 
-public enum OccurrenceState { Scheduled, Fired, Completed, Ignored, Missed, Snoozed }
+public enum OccurrenceState
+{
+    Scheduled,
+    Fired,
+    Completed,
+    Ignored,
+    Missed,
+    Snoozed,
+    Delivering,
+    DeliveryFailed
+}
 
 public enum RecurrenceKind { Daily, Weekdays, Weekly }
 

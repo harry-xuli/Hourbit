@@ -257,10 +257,12 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
         command.CommandText = """
             INSERT INTO occurrences(
                 id, item_id, due_at, due_at_utc, state,
-                handled_at, snooze_parent_id)
+                handled_at, snooze_parent_id, delivery_attempts,
+                last_delivery_error, next_delivery_attempt_at)
             SELECT
                 $id, $itemId, $dueAt, $dueAtUtc, $state,
-                $handledAt, $snoozeParentId
+                $handledAt, $snoozeParentId, $deliveryAttempts,
+                $lastDeliveryError, $nextDeliveryAttemptAt
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM occurrences
@@ -284,6 +286,18 @@ public sealed class SqliteItemConversionStore : IItemConversionStore
             occurrence.SnoozeParentId is null
                 ? DBNull.Value
                 : occurrence.SnoozeParentId.Value.ToString("D"));
+        command.Parameters.AddWithValue(
+            "$deliveryAttempts", occurrence.DeliveryAttempts);
+        command.Parameters.AddWithValue(
+            "$lastDeliveryError",
+            occurrence.LastDeliveryError is null
+                ? DBNull.Value
+                : occurrence.LastDeliveryError);
+        command.Parameters.AddWithValue(
+            "$nextDeliveryAttemptAt",
+            occurrence.NextDeliveryAttemptAt is null
+                ? DBNull.Value
+                : Format(occurrence.NextDeliveryAttemptAt.Value));
         return await command.ExecuteNonQueryAsync(ct) == 1;
     }
 

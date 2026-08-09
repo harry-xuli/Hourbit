@@ -313,10 +313,18 @@ public sealed class SqliteTodoRepositoryTests
             await DatabaseMigrator.OpenConnectionAsync(path, default);
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM schema_info WHERE version = 4;"));
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 5;"));
         Assert.True(await ColumnExistsAsync(
             connection, "occurrences", "deleted_at"));
         Assert.True(await ColumnExistsAsync(
             connection, "todos", "deleted_at"));
+        Assert.True(await ColumnExistsAsync(
+            connection, "occurrences", "delivery_attempts"));
+        Assert.True(await ColumnExistsAsync(
+            connection, "occurrences", "last_delivery_error"));
+        Assert.True(await ColumnExistsAsync(
+            connection, "occurrences", "next_delivery_attempt_at"));
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM occurrences WHERE id = $id;",
             fixture.OccurrenceId));
@@ -363,6 +371,12 @@ public sealed class SqliteTodoRepositoryTests
             WHERE type = 'index'
               AND name = 'ix_todos_deleted_completed_at';
             """));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ix_occurrences_active_delivery_retry';
+            """));
     }
 
     [Fact]
@@ -380,6 +394,8 @@ public sealed class SqliteTodoRepositoryTests
             "SELECT COUNT(*) FROM schema_info WHERE version = 3;"));
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM schema_info WHERE version = 4;"));
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 5;"));
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'todos';"));
         Assert.Equal(1, await ScalarIntAsync(connection, """
@@ -948,6 +964,46 @@ public sealed class SqliteTodoRepositoryTests
         await using var connection =
             await DatabaseMigrator.OpenConnectionAsync(path, default);
         await DatabaseMigrator.MigrateAsync(connection, default);
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        var occurrencesSql = DatabaseSchemaValidator.CreateOccurrencesVersionFourSql
+            .Replace("CREATE TABLE occurrences", "CREATE TABLE occurrences_v4_fixture",
+                StringComparison.Ordinal);
+        var actionLogSql = DatabaseSchemaValidator.CreateActionLogVersionFourSql
+            .Replace("CREATE TABLE action_log", "CREATE TABLE action_log_v4_fixture",
+                StringComparison.Ordinal)
+            .Replace("REFERENCES occurrences(id)",
+                "REFERENCES occurrences_v4_fixture(id)", StringComparison.Ordinal);
+        command.CommandText = $"""
+            {occurrencesSql}
+            INSERT INTO occurrences_v4_fixture(
+                id, item_id, due_at, due_at_utc, state,
+                handled_at, snooze_parent_id, deleted_at)
+            SELECT id, item_id, due_at, due_at_utc, state,
+                   handled_at, snooze_parent_id, deleted_at
+            FROM occurrences;
+            {actionLogSql}
+            INSERT INTO action_log_v4_fixture(id, occurrence_id, state, handled_at)
+            SELECT id, occurrence_id, state, handled_at FROM action_log;
+            DROP TABLE action_log;
+            DROP TABLE occurrences;
+            ALTER TABLE occurrences_v4_fixture RENAME TO occurrences;
+            ALTER TABLE action_log_v4_fixture RENAME TO action_log;
+            DELETE FROM schema_info WHERE version = 5;
+            DROP INDEX IF EXISTS ix_occurrences_active_delivery_retry;
+            """;
+        await command.ExecuteNonQueryAsync();
+        foreach (var indexSql in DatabaseSchemaValidator.CreateVersionFourIndexesSql)
+        {
+            command.CommandText = indexSql
+                .Replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ",
+                    StringComparison.Ordinal)
+                .Replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ",
+                    StringComparison.Ordinal);
+            await command.ExecuteNonQueryAsync();
+        }
+        await transaction.CommitAsync();
     }
 
     private static async Task ExecuteAsync(string path, string sql)

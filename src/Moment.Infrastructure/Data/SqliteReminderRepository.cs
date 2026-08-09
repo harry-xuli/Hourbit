@@ -117,6 +117,120 @@ public sealed class SqliteReminderRepository : IReminderRepository
         return await command.ExecuteNonQueryAsync(ct) == 1;
     }
 
+    public async Task<bool> TryBeginDeliveryAsync(
+        Guid occurrenceId,
+        DateTimeOffset attemptedAt,
+        CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE occurrences
+            SET state = $delivering,
+                handled_at = $attemptedAt,
+                delivery_attempts = delivery_attempts + 1,
+                last_delivery_error = NULL,
+                next_delivery_attempt_at = NULL
+            WHERE id = $id
+              AND state = $scheduled
+              AND deleted_at IS NULL;
+            """;
+        command.Parameters.AddWithValue("$delivering", (int)OccurrenceState.Delivering);
+        command.Parameters.AddWithValue("$attemptedAt", Format(attemptedAt));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
+    public async Task CompleteDeliveryAsync(
+        Guid occurrenceId,
+        DateTimeOffset firedAt,
+        ReminderOccurrence? nextOccurrence,
+        CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.Transaction = (SqliteTransaction)transaction;
+        command.CommandText = """
+            UPDATE occurrences
+            SET state = $fired,
+                handled_at = $firedAt,
+                last_delivery_error = NULL,
+                next_delivery_attempt_at = NULL
+            WHERE id = $id
+              AND state = $delivering
+              AND deleted_at IS NULL;
+            """;
+        command.Parameters.AddWithValue("$fired", (int)OccurrenceState.Fired);
+        command.Parameters.AddWithValue("$firedAt", Format(firedAt));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$delivering", (int)OccurrenceState.Delivering);
+        if (await command.ExecuteNonQueryAsync(ct) != 1)
+        {
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
+        if (nextOccurrence is not null)
+            await InsertOccurrenceAsync(connection, transaction, nextOccurrence, ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    public async Task RecordDeliveryFailureAsync(
+        Guid occurrenceId,
+        DateTimeOffset attemptedAt,
+        string errorCode,
+        DateTimeOffset? retryAt,
+        CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(errorCode);
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE occurrences
+            SET state = $failed,
+                handled_at = $attemptedAt,
+                last_delivery_error = $errorCode,
+                next_delivery_attempt_at = $retryAt
+            WHERE id = $id
+              AND state = $delivering
+              AND deleted_at IS NULL;
+            """;
+        command.Parameters.AddWithValue("$failed", (int)OccurrenceState.DeliveryFailed);
+        command.Parameters.AddWithValue("$attemptedAt", Format(attemptedAt));
+        command.Parameters.AddWithValue("$errorCode", errorCode);
+        command.Parameters.AddWithValue("$retryAt", retryAt is null ? DBNull.Value : Format(retryAt.Value));
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$delivering", (int)OccurrenceState.Delivering);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<bool> RetryDeliveryAsync(
+        Guid occurrenceId,
+        DateTimeOffset retryAt,
+        CancellationToken ct)
+    {
+        await using var connection = await OpenConnectionAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE occurrences
+            SET state = $scheduled,
+                handled_at = NULL,
+                next_delivery_attempt_at = NULL
+            WHERE id = $id
+              AND state = $failed
+              AND next_delivery_attempt_at IS NOT NULL
+              AND next_delivery_attempt_at <= $retryAt
+              AND deleted_at IS NULL;
+            """;
+        command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
+        command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
+        command.Parameters.AddWithValue("$failed", (int)OccurrenceState.DeliveryFailed);
+        command.Parameters.AddWithValue("$retryAt", Format(retryAt));
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+
     public async Task<bool> TryTransitionAsync(Guid occurrenceId, OccurrenceState expected,
         OccurrenceState next, DateTimeOffset handledAt, CancellationToken ct)
     {
@@ -251,7 +365,8 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.CommandText = $"""
             SELECT i.id, i.title, i.kind, i.importance, i.created_at,
                    r.kind, r.days_of_week, r.time,
-                   o.id, o.item_id, o.due_at, o.state, o.handled_at, o.snooze_parent_id
+                   o.id, o.item_id, o.due_at, o.state, o.handled_at, o.snooze_parent_id,
+                   o.delivery_attempts, o.last_delivery_error, o.next_delivery_attempt_at
             FROM occurrences o
             INNER JOIN items i ON i.id = o.item_id
             LEFT JOIN recurrence_rules r ON r.item_id = i.id
@@ -268,7 +383,10 @@ public sealed class SqliteReminderRepository : IReminderRepository
             ParseDateTimeOffset(reader.GetString(10)),
             (OccurrenceState)reader.GetInt32(11),
             reader.IsDBNull(12) ? null : ParseDateTimeOffset(reader.GetString(12)),
-            reader.IsDBNull(13) ? null : ParseGuid(reader.GetString(13))));
+            reader.IsDBNull(13) ? null : ParseGuid(reader.GetString(13)),
+            reader.GetInt32(14),
+            reader.IsDBNull(15) ? null : reader.GetString(15),
+            reader.IsDBNull(16) ? null : ParseDateTimeOffset(reader.GetString(16))));
 
     private static ReminderItem ReadItem(SqliteDataReader reader)
     {
@@ -330,8 +448,14 @@ public sealed class SqliteReminderRepository : IReminderRepository
         await using var command = connection.CreateCommand();
         command.Transaction = transaction as SqliteTransaction;
         command.CommandText = """
-            INSERT INTO occurrences(id, item_id, due_at, due_at_utc, state, handled_at, snooze_parent_id)
-            VALUES ($id, $itemId, $dueAt, $dueAtUtc, $state, $handledAt, $snoozeParentId);
+            INSERT INTO occurrences(
+                id, item_id, due_at, due_at_utc, state, handled_at,
+                snooze_parent_id, delivery_attempts, last_delivery_error,
+                next_delivery_attempt_at)
+            VALUES (
+                $id, $itemId, $dueAt, $dueAtUtc, $state, $handledAt,
+                $snoozeParentId, $deliveryAttempts, $lastDeliveryError,
+                $nextDeliveryAttemptAt);
             """;
         command.Parameters.AddWithValue("$id", occurrence.Id.ToString("D"));
         command.Parameters.AddWithValue("$itemId", occurrence.ItemId.ToString("D"));
@@ -340,6 +464,9 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.Parameters.AddWithValue("$state", (int)occurrence.State);
         command.Parameters.AddWithValue("$handledAt", occurrence.HandledAt is null ? DBNull.Value : Format(occurrence.HandledAt.Value));
         command.Parameters.AddWithValue("$snoozeParentId", occurrence.SnoozeParentId is null ? DBNull.Value : occurrence.SnoozeParentId.Value.ToString("D"));
+        command.Parameters.AddWithValue("$deliveryAttempts", occurrence.DeliveryAttempts);
+        command.Parameters.AddWithValue("$lastDeliveryError", occurrence.LastDeliveryError is null ? DBNull.Value : occurrence.LastDeliveryError);
+        command.Parameters.AddWithValue("$nextDeliveryAttemptAt", occurrence.NextDeliveryAttemptAt is null ? DBNull.Value : Format(occurrence.NextDeliveryAttemptAt.Value));
         await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -424,7 +551,11 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.CommandText = """
             UPDATE occurrences
             SET id = $newId, item_id = $itemId, due_at = $dueAt, state = $state,
-                due_at_utc = $dueAtUtc, handled_at = $handledAt, snooze_parent_id = $snoozeParentId
+                due_at_utc = $dueAtUtc, handled_at = $handledAt,
+                snooze_parent_id = $snoozeParentId,
+                delivery_attempts = $deliveryAttempts,
+                last_delivery_error = $lastDeliveryError,
+                next_delivery_attempt_at = $nextDeliveryAttemptAt
             WHERE id = $id AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$newId", occurrence.Id.ToString("D"));
@@ -434,6 +565,9 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.Parameters.AddWithValue("$state", (int)occurrence.State);
         command.Parameters.AddWithValue("$handledAt", occurrence.HandledAt is null ? DBNull.Value : Format(occurrence.HandledAt.Value));
         command.Parameters.AddWithValue("$snoozeParentId", occurrence.SnoozeParentId is null ? DBNull.Value : occurrence.SnoozeParentId.Value.ToString("D"));
+        command.Parameters.AddWithValue("$deliveryAttempts", occurrence.DeliveryAttempts);
+        command.Parameters.AddWithValue("$lastDeliveryError", occurrence.LastDeliveryError is null ? DBNull.Value : occurrence.LastDeliveryError);
+        command.Parameters.AddWithValue("$nextDeliveryAttemptAt", occurrence.NextDeliveryAttemptAt is null ? DBNull.Value : Format(occurrence.NextDeliveryAttemptAt.Value));
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
         await command.ExecuteNonQueryAsync(ct);
     }

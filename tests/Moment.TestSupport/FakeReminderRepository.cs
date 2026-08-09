@@ -113,6 +113,89 @@ public class FakeReminderRepository : IReminderRepository
         }
     }
 
+    public virtual Task<bool> TryBeginDeliveryAsync(
+        Guid occurrenceId, DateTimeOffset attemptedAt, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (!_occurrences.TryGetValue(occurrenceId, out var occurrence) ||
+                occurrence.State != OccurrenceState.Scheduled)
+                return Task.FromResult(false);
+            _occurrences[occurrenceId] = occurrence with
+            {
+                State = OccurrenceState.Delivering,
+                HandledAt = attemptedAt,
+                DeliveryAttempts = occurrence.DeliveryAttempts + 1,
+                LastDeliveryError = null,
+                NextDeliveryAttemptAt = null
+            };
+            return Task.FromResult(true);
+        }
+    }
+
+    public virtual Task CompleteDeliveryAsync(
+        Guid occurrenceId, DateTimeOffset firedAt,
+        ReminderOccurrence? nextOccurrence, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (!_occurrences.TryGetValue(occurrenceId, out var occurrence) ||
+                occurrence.State != OccurrenceState.Delivering)
+                return Task.CompletedTask;
+            if (nextOccurrence is not null)
+                EnsureOccurrenceCanBeInserted(nextOccurrence);
+            _occurrences[occurrenceId] = occurrence with
+            {
+                State = OccurrenceState.Fired,
+                HandledAt = firedAt,
+                LastDeliveryError = null,
+                NextDeliveryAttemptAt = null
+            };
+            if (nextOccurrence is not null)
+                _occurrences.Add(nextOccurrence.Id, nextOccurrence);
+        }
+        return Task.CompletedTask;
+    }
+
+    public virtual Task RecordDeliveryFailureAsync(
+        Guid occurrenceId, DateTimeOffset attemptedAt, string errorCode,
+        DateTimeOffset? retryAt, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (_occurrences.TryGetValue(occurrenceId, out var occurrence) &&
+                occurrence.State == OccurrenceState.Delivering)
+                _occurrences[occurrenceId] = occurrence with
+                {
+                    State = OccurrenceState.DeliveryFailed,
+                    HandledAt = attemptedAt,
+                    LastDeliveryError = errorCode,
+                    NextDeliveryAttemptAt = retryAt
+                };
+        }
+        return Task.CompletedTask;
+    }
+
+    public virtual Task<bool> RetryDeliveryAsync(
+        Guid occurrenceId, DateTimeOffset retryAt, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (!_occurrences.TryGetValue(occurrenceId, out var occurrence) ||
+                occurrence.State != OccurrenceState.DeliveryFailed ||
+                occurrence.NextDeliveryAttemptAt is null ||
+                occurrence.NextDeliveryAttemptAt > retryAt)
+                return Task.FromResult(false);
+            _occurrences[occurrenceId] = occurrence with
+            {
+                State = OccurrenceState.Scheduled,
+                HandledAt = null,
+                NextDeliveryAttemptAt = null
+            };
+            return Task.FromResult(true);
+        }
+    }
+
     public virtual Task<bool> TryTransitionAsync(Guid occurrenceId, OccurrenceState expected,
         OccurrenceState next, DateTimeOffset handledAt, CancellationToken ct)
     {

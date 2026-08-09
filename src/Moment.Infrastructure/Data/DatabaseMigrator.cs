@@ -49,6 +49,17 @@ public static class DatabaseMigrator
             """;
         await command.ExecuteNonQueryAsync(ct);
 
+        var versionFiveMarkers =
+            await DatabaseSchemaValidator.CountVersionMarkersAsync(
+                connection, (SqliteTransaction)transaction, 5, ct);
+        if (versionFiveMarkers > 0)
+        {
+            await DatabaseSchemaValidator.ValidateVersionFiveAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
         var versionFourMarkers =
             await DatabaseSchemaValidator.CountVersionMarkersAsync(
                 connection, (SqliteTransaction)transaction, 4, ct);
@@ -70,6 +81,11 @@ public static class DatabaseMigrator
                     command, analyticsOnly: true, ct);
             }
             await DatabaseSchemaValidator.ValidateVersionFourAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            await UpgradeToVersionFiveAsync(command, ct);
+            command.CommandText = "INSERT INTO schema_info(version) VALUES (5);";
+            await command.ExecuteNonQueryAsync(ct);
+            await DatabaseSchemaValidator.ValidateVersionFiveAsync(
                 connection, (SqliteTransaction)transaction, ct);
             await transaction.CommitAsync(ct);
             return;
@@ -193,6 +209,12 @@ public static class DatabaseMigrator
         await DatabaseSchemaValidator.ValidateVersionFourAsync(
             connection, (SqliteTransaction)transaction, ct);
 
+        await UpgradeToVersionFiveAsync(command, ct);
+        command.CommandText = "INSERT INTO schema_info(version) VALUES (5);";
+        await command.ExecuteNonQueryAsync(ct);
+        await DatabaseSchemaValidator.ValidateVersionFiveAsync(
+            connection, (SqliteTransaction)transaction, ct);
+
         await transaction.CommitAsync(ct);
     }
 
@@ -266,6 +288,63 @@ public static class DatabaseMigrator
             ALTER TABLE action_log_v4 RENAME TO action_log;
             """;
         await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task UpgradeToVersionFiveAsync(
+        SqliteCommand command,
+        CancellationToken ct)
+    {
+        var occurrencesSql = DatabaseSchemaValidator.CreateOccurrencesVersionFiveSql.Replace(
+            "CREATE TABLE occurrences",
+            "CREATE TABLE occurrences_v5",
+            StringComparison.Ordinal);
+        var actionLogSql = DatabaseSchemaValidator.CreateActionLogVersionFourSql
+            .Replace(
+                "CREATE TABLE action_log",
+                "CREATE TABLE action_log_v5",
+                StringComparison.Ordinal)
+            .Replace(
+                "REFERENCES occurrences(id)",
+                "REFERENCES occurrences_v5(id)",
+                StringComparison.Ordinal);
+
+        command.CommandText = $"""
+            {occurrencesSql}
+            INSERT INTO occurrences_v5 (
+                id, item_id, due_at, due_at_utc, state,
+                handled_at, snooze_parent_id, deleted_at,
+                delivery_attempts, last_delivery_error, next_delivery_attempt_at)
+            SELECT
+                id, item_id, due_at, due_at_utc, state,
+                handled_at, snooze_parent_id, deleted_at,
+                0, NULL, NULL
+            FROM occurrences;
+
+            {actionLogSql}
+            INSERT INTO action_log_v5 (id, occurrence_id, state, handled_at)
+            SELECT id, occurrence_id, state, handled_at
+            FROM action_log;
+
+            DROP TABLE action_log;
+            DROP TABLE occurrences;
+            ALTER TABLE occurrences_v5 RENAME TO occurrences;
+            ALTER TABLE action_log_v5 RENAME TO action_log;
+            """;
+        await command.ExecuteNonQueryAsync(ct);
+
+        foreach (var indexSql in DatabaseSchemaValidator.CreateVersionFiveIndexesSql)
+        {
+            command.CommandText = indexSql
+                .Replace(
+                    "CREATE UNIQUE INDEX ",
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ",
+                    StringComparison.Ordinal)
+                .Replace(
+                    "CREATE INDEX ",
+                    "CREATE INDEX IF NOT EXISTS ",
+                    StringComparison.Ordinal);
+            await command.ExecuteNonQueryAsync(ct);
+        }
     }
 
     private static async Task<bool> HasColumnAsync(SqliteConnection connection, SqliteTransaction transaction,

@@ -6,7 +6,10 @@ public sealed record ReminderOccurrence(
     DateTimeOffset DueAt,
     OccurrenceState State,
     DateTimeOffset? HandledAt,
-    Guid? SnoozeParentId)
+    Guid? SnoozeParentId,
+    int DeliveryAttempts = 0,
+    string? LastDeliveryError = null,
+    DateTimeOffset? NextDeliveryAttemptAt = null)
 {
     public static ReminderOccurrence Schedule(
         Guid itemId,

@@ -14,6 +14,21 @@ public interface IReminderRepository
     Task SetOccurrenceStateAsync(Guid occurrenceId, OccurrenceState state, DateTimeOffset handledAt, CancellationToken ct);
     Task SaveOccurrenceAsync(ReminderOccurrence occurrence, CancellationToken ct);
     Task<bool> TryMarkFiredAsync(Guid occurrenceId, DateTimeOffset firedAt, CancellationToken ct);
+    Task<bool> TryBeginDeliveryAsync(
+        Guid occurrenceId, DateTimeOffset attemptedAt, CancellationToken ct);
+    Task CompleteDeliveryAsync(
+        Guid occurrenceId,
+        DateTimeOffset firedAt,
+        ReminderOccurrence? nextOccurrence,
+        CancellationToken ct);
+    Task RecordDeliveryFailureAsync(
+        Guid occurrenceId,
+        DateTimeOffset attemptedAt,
+        string errorCode,
+        DateTimeOffset? retryAt,
+        CancellationToken ct);
+    Task<bool> RetryDeliveryAsync(
+        Guid occurrenceId, DateTimeOffset retryAt, CancellationToken ct);
     Task<bool> TryTransitionAsync(
         Guid occurrenceId,
         OccurrenceState expected,

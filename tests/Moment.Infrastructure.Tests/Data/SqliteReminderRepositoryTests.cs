@@ -448,6 +448,75 @@ public sealed class SqliteReminderRepositoryTests
     }
 
     [Fact]
+    public async Task Delivery_failure_is_persisted_and_can_be_retried_atomically()
+    {
+        using var temp = new TempDirectory();
+        var repository = await SqliteReminderRepository.OpenAsync(
+            Path.Combine(temp.Path, "moment.db"), CancellationToken.None);
+        var due = new DateTimeOffset(2026, 8, 13, 17, 0, 0, TimeSpan.FromHours(8));
+        var attemptedAt = due.AddSeconds(1);
+        var retryAt = due.AddSeconds(16);
+        var item = ReminderItem.Create(
+            "投递失败", ReminderKind.Alarm, ReminderImportance.Normal,
+            due.AddHours(-1), due);
+        var occurrence = ReminderOccurrence.Schedule(item.Id, due);
+        await repository.SaveItemWithOccurrenceAsync(item, occurrence, CancellationToken.None);
+
+        Assert.True(await repository.TryBeginDeliveryAsync(
+            occurrence.Id, attemptedAt, CancellationToken.None));
+        Assert.False(await repository.TryBeginDeliveryAsync(
+            occurrence.Id, attemptedAt, CancellationToken.None));
+        await repository.RecordDeliveryFailureAsync(
+            occurrence.Id, attemptedAt, "InvalidOperationException", retryAt,
+            CancellationToken.None);
+
+        var failed = await repository.GetScheduledReminderAsync(
+            occurrence.Id, CancellationToken.None);
+        Assert.Equal(OccurrenceState.DeliveryFailed, failed!.Occurrence.State);
+        Assert.Equal(1, failed.Occurrence.DeliveryAttempts);
+        Assert.Equal("InvalidOperationException", failed.Occurrence.LastDeliveryError);
+        Assert.Equal(retryAt, failed.Occurrence.NextDeliveryAttemptAt);
+
+        Assert.True(await repository.RetryDeliveryAsync(
+            occurrence.Id, retryAt, CancellationToken.None));
+        var retried = await repository.GetScheduledReminderAsync(
+            occurrence.Id, CancellationToken.None);
+        Assert.Equal(OccurrenceState.Scheduled, retried!.Occurrence.State);
+        Assert.Null(retried.Occurrence.HandledAt);
+        Assert.Null(retried.Occurrence.NextDeliveryAttemptAt);
+    }
+
+    [Fact]
+    public async Task Completing_delivery_and_creating_recurring_successor_is_atomic()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        var repository = await SqliteReminderRepository.OpenAsync(
+            path, CancellationToken.None);
+        var due = new DateTimeOffset(2026, 8, 13, 17, 0, 0, TimeSpan.FromHours(8));
+        var item = new ReminderItem(
+            Guid.NewGuid(), "每天吃饭", ReminderKind.Alarm,
+            ReminderImportance.Normal, due.AddHours(-1),
+            RecurrenceRule.Daily(new TimeOnly(17, 0)));
+        var occurrence = ReminderOccurrence.Schedule(item.Id, due);
+        var next = ReminderOccurrence.Schedule(item.Id, due.AddDays(1));
+        await repository.SaveItemWithOccurrenceAsync(item, occurrence, CancellationToken.None);
+        Assert.True(await repository.TryBeginDeliveryAsync(
+            occurrence.Id, due, CancellationToken.None));
+
+        await repository.CompleteDeliveryAsync(
+            occurrence.Id, due.AddSeconds(1), next, CancellationToken.None);
+
+        var fired = await repository.GetScheduledReminderAsync(
+            occurrence.Id, CancellationToken.None);
+        var scheduled = await repository.GetScheduledReminderAsync(
+            next.Id, CancellationToken.None);
+        Assert.Equal(OccurrenceState.Fired, fired!.Occurrence.State);
+        Assert.Equal(due.AddSeconds(1), fired.Occurrence.HandledAt);
+        Assert.Equal(OccurrenceState.Scheduled, scheduled!.Occurrence.State);
+    }
+
+    [Fact]
     public async Task GetRecoverableAsync_returns_due_scheduled_and_normal_fired_occurrences_in_due_time_and_id_order()
     {
         using var temp = new TempDirectory();

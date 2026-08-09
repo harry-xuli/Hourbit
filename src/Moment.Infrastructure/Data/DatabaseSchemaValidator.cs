@@ -61,6 +61,22 @@ internal static class DatabaseSchemaValidator
         );
         """;
 
+    internal const string CreateOccurrencesVersionFiveSql = """
+        CREATE TABLE occurrences (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+            due_at TEXT NOT NULL,
+            due_at_utc TEXT NOT NULL,
+            state INTEGER NOT NULL CHECK(state IN (0, 1, 2, 3, 4, 5, 6, 7)),
+            handled_at TEXT NULL,
+            snooze_parent_id TEXT NULL,
+            deleted_at TEXT NULL,
+            delivery_attempts INTEGER NOT NULL CHECK(delivery_attempts >= 0),
+            last_delivery_error TEXT NULL,
+            next_delivery_attempt_at TEXT NULL
+        );
+        """;
+
     private const string CreateEarlyVersionFourOccurrencesSql = """
         CREATE TABLE occurrences (
             id TEXT PRIMARY KEY,
@@ -99,6 +115,12 @@ internal static class DatabaseSchemaValidator
         "CREATE INDEX ix_todos_due_date_id ON todos(due_date, id);",
         "CREATE INDEX ix_todos_completed_at_id ON todos(completed_at, id);",
         "CREATE INDEX ix_action_log_handled_at_occurrence_id ON action_log(handled_at, occurrence_id, id);"
+    ];
+
+    internal static readonly string[] CreateVersionFiveIndexesSql =
+    [
+        .. CreateVersionFourIndexesSql,
+        "CREATE INDEX ix_occurrences_active_delivery_retry ON occurrences(state, next_delivery_attempt_at) WHERE deleted_at IS NULL;"
     ];
 
     internal static IReadOnlyList<string> CreateVersionFourAnalyticsIndexesSql =>
@@ -184,6 +206,14 @@ internal static class DatabaseSchemaValidator
         new("deleted_at", "TEXT", false, false)
     ];
 
+    private static readonly ColumnShape[] OccurrenceVersionFiveColumns =
+    [
+        .. OccurrenceVersionFourColumns,
+        new("delivery_attempts", "INTEGER", true, false),
+        new("last_delivery_error", "TEXT", false, false),
+        new("next_delivery_attempt_at", "TEXT", false, false)
+    ];
+
     private static readonly ColumnShape[] RecurrenceColumns =
     [
         new("item_id", "TEXT", false, true),
@@ -261,6 +291,13 @@ internal static class DatabaseSchemaValidator
             ["completed_at", "id"], CreateVersionFourIndexesSql[11]),
         new("action_log", "ix_action_log_handled_at_occurrence_id", false, false,
             ["handled_at", "occurrence_id", "id"], CreateVersionFourIndexesSql[12])
+    ];
+
+    private static readonly IndexShape[] VersionFiveIndexes =
+    [
+        .. VersionFourIndexes,
+        new("occurrences", "ix_occurrences_active_delivery_retry", false, true,
+            ["state", "next_delivery_attempt_at"], CreateVersionFiveIndexesSql[^1])
     ];
 
     internal static async Task<int> CountVersionMarkersAsync(
@@ -355,6 +392,39 @@ internal static class DatabaseSchemaValidator
         CancellationToken ct) =>
         await ValidateVersionFourAsync(
             connection, transaction, VersionFourIndexes.Length, ct);
+
+    internal static async Task ValidateVersionFiveAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        await ValidateExactMarkersAsync(
+            connection, transaction, [1, 2, 3, 4, 5], ct);
+        await ValidateTableAsync(
+            connection, transaction, "schema_info", SchemaInfoColumns,
+            CreateSchemaInfoSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "items", ItemColumns,
+            CreateItemsSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "occurrences", OccurrenceVersionFiveColumns,
+            CreateOccurrencesVersionFiveSql, ItemForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "recurrence_rules", RecurrenceColumns,
+            CreateRecurrenceRulesSql, ItemForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "todos", TodoColumnsVersionFour,
+            CreateTodosVersionFourSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "action_log", ActionLogColumns,
+            CreateActionLogVersionFourSql, OccurrenceForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "settings", SettingsColumns,
+            CreateSettingsSql, [], ct);
+        foreach (var index in VersionFiveIndexes)
+            await ValidateIndexAsync(connection, transaction, index, ct);
+        await ValidateForeignKeyCheckAsync(connection, transaction, ct);
+    }
 
     internal static async Task ValidateVersionFourUpgradeBaseAsync(
         SqliteConnection connection,
