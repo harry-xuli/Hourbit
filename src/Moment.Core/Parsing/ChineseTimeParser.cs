@@ -31,7 +31,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseDateMarkerPattern = new(
-        "(?<![A-Za-z\\d])(?:(?:[+-]?\\d+)年)?[+-]?\\d+月[+-]?\\d+日(?![A-Za-z])",
+        "(?<![\\d年])(?:(?:[+-]?\\d+)年)?[+-]?\\d+月[+-]?\\d+日(?!\\d)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseClockPattern = new(

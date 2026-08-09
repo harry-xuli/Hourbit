@@ -84,6 +84,10 @@ public sealed class ChineseTimeParserTests
     [InlineData("10月333日早上6点开会")]
     [InlineData("-10月3日早上6点开会")]
     [InlineData("10月+3日早上6点开会")]
+    [InlineData("A123月5日早上6点开会")]
+    [InlineData("A10月+3日早上6点开会")]
+    [InlineData("A-10月3日早上6点开会")]
+    [InlineData("A10月333日B早上6点开会")]
     public void Rejects_malformed_Chinese_date_markers_instead_of_scheduling_only_the_clock(
         string text)
     {
@@ -99,6 +103,15 @@ public sealed class ChineseTimeParserTests
             zone: TimeZoneInfo.Utc);
 
         Assert.IsType<ParseResult.Invalid>(result);
+    }
+
+    [Fact]
+    public void Preserves_year_prefixed_title_text_that_is_not_a_date_token()
+    {
+        var draft = Todo("周年10月3日活动");
+
+        Assert.Equal("周年10月3日活动", draft.Title);
+        Assert.Null(draft.DueDate);
     }
 
     [Theory]
