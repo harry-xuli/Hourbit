@@ -46,6 +46,40 @@ public sealed class ChineseTimeParserTests
     }
 
     [Theory]
+    [InlineData(
+        "2026-08-09T10:25:00+08:00",
+        "10月3日早上6点小朋友办宴",
+        "小朋友办宴",
+        "2026-10-03T06:00:00+08:00")]
+    [InlineData(
+        "2026-12-20T10:25:00+08:00",
+        "1月2日早上6点新年安排",
+        "新年安排",
+        "2027-01-02T06:00:00+08:00")]
+    [InlineData(
+        "2026-10-03T10:25:00+08:00",
+        "10月3日早上6点明年复诊",
+        "明年复诊",
+        "2027-10-03T06:00:00+08:00")]
+    public void Parses_yearless_Chinese_dates_as_the_next_future_occurrence(
+        string now, string text, string expectedTitle, string expectedDue)
+    {
+        var draft = Reminder(text, now: DateTimeOffset.Parse(now));
+
+        Assert.Equal(expectedTitle, draft.Title);
+        Assert.Equal(DateTimeOffset.Parse(expectedDue), draft.DueAt);
+    }
+
+    [Fact]
+    public void Parses_a_yearless_Chinese_date_without_a_clock_as_a_dated_todo()
+    {
+        var draft = Todo("10月3日小朋友办宴");
+
+        Assert.Equal("小朋友办宴", draft.Title);
+        Assert.Equal(new DateOnly(2026, 10, 3), draft.DueDate);
+    }
+
+    [Theory]
     [InlineData("en-US", "08/09/2026 14:30 复盘", "2026-08-09T14:30:00+08:00")]
     [InlineData("en-GB", "08/09/2026 14:30 复盘", "2026-09-08T14:30:00+08:00")]
     [InlineData("zh-CN", "08/09/2026 14:30 复盘", "2026-08-09T14:30:00+08:00")]

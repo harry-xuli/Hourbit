@@ -19,7 +19,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseDatePattern = new(
-        "(?<!\\d)(?<year>\\d{4})年(?<month>\\d{1,2})月(?<day>\\d{1,2})日(?!\\d)",
+        "(?<![\\d年])(?:(?<year>\\d{4})年)?(?<month>\\d{1,2})月(?<day>\\d{1,2})日(?!\\d)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex NumericDatePattern = new(
@@ -31,7 +31,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseClockPattern = new(
-        "(?<![\\d+-])(?<period>上午|中午|下午|晚上)?\\s*(?<hour>\\d{1,2})点(?:(?<half>半)|(?<minute>\\d{1,2})分?)?(?![\\d点分+-])",
+        "(?<![\\d+-])(?<period>早上|上午|中午|下午|晚上)?\\s*(?<hour>\\d{1,2})点(?:(?<half>半)|(?<minute>\\d{1,2})分?)?(?![\\d点分+-])",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ColonClockPattern = new(
@@ -233,6 +233,21 @@ public sealed class ChineseTimeParser : IChineseTimeParser
                 ? NextOneOffOccurrence(time, now, zone)
                 : ResolveLocal(date.Value.ToDateTime(time), zone);
 
+        if (due <= now && IsYearlessChineseDate(dateMatch))
+        {
+            var nextLocalDate = DateOnly.FromDateTime(localNow.DateTime).AddDays(1);
+            if (!TryCreateNextAnnualDate(
+                    dateMatch.Groups["month"].Value,
+                    dateMatch.Groups["day"].Value,
+                    nextLocalDate,
+                    out var nextDate))
+            {
+                return Invalid(originalText, "日期格式无效。");
+            }
+
+            due = ResolveLocal(nextDate!.Value.ToDateTime(time), zone);
+        }
+
         if (due <= now)
         {
             return Invalid(originalText, "提醒时间必须晚于当前时间。");
@@ -331,6 +346,15 @@ public sealed class ChineseTimeParser : IChineseTimeParser
                 match.Groups["year"].Value,
                 match.Groups["month"].Value,
                 match.Groups["day"].Value,
+                out date);
+        }
+
+        if (match.Groups["month"].Success && match.Groups["day"].Success)
+        {
+            return TryCreateNextAnnualDate(
+                match.Groups["month"].Value,
+                match.Groups["day"].Value,
+                DateOnly.FromDateTime(localNow.DateTime),
                 out date);
         }
 
@@ -440,6 +464,46 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         }
     }
 
+    private static bool TryCreateNextAnnualDate(
+        string monthText,
+        string dayText,
+        DateOnly notBefore,
+        out DateOnly? date)
+    {
+        date = null;
+        if (!TryParseNonNegativeInteger(monthText, out var month) ||
+            !TryParseNonNegativeInteger(dayText, out var day))
+        {
+            return false;
+        }
+
+        var lastYear = Math.Min(DateOnly.MaxValue.Year, notBefore.Year + 400);
+        for (var year = notBefore.Year; year <= lastYear; year++)
+        {
+            try
+            {
+                var candidate = new DateOnly(year, month, day);
+                if (candidate >= notBefore)
+                {
+                    date = candidate;
+                    return true;
+                }
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // Keep looking so a yearless February 29 can resolve to the next leap year.
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsYearlessChineseDate(Match match) =>
+        match.Success &&
+        match.Groups["month"].Success &&
+        match.Groups["day"].Success &&
+        !match.Groups["year"].Success;
+
     private static bool TryParseClock(Match match, out TimeOnly time)
     {
         time = default;
@@ -488,7 +552,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
             return true;
         }
 
-        if (period == "上午")
+        if (period is "早上" or "上午")
         {
             if (hour is < 0 or > 12)
             {
