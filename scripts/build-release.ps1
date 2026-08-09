@@ -16,6 +16,8 @@ $publishDirectory = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot 'publish'))
 $portableDirectory = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot 'portable'))
+$releaseBuildDirectory = [System.IO.Path]::GetFullPath(
+    (Join-Path $artifactsRoot 'release-build'))
 $applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
 $windowsProject = Join-Path $repositoryRoot 'src\Moment.Windows\Moment.Windows.csproj'
 $solution = Join-Path $repositoryRoot 'Moment.slnx'
@@ -266,6 +268,9 @@ try {
     Remove-ExactStagingDirectory `
         -Candidate $portableDirectory `
         -Expected $portableDirectory
+    Remove-ExactStagingDirectory `
+        -Candidate $releaseBuildDirectory `
+        -Expected $releaseBuildDirectory
 
     # Generate the RID-specific PRI before publishing the app. ProjectReference
     # property propagation is not sufficient on a clean checkout: the app PRI
@@ -290,6 +295,7 @@ try {
         -c Release `
         -r win-x64 `
         --self-contained true `
+        --artifacts-path $releaseBuildDirectory `
         -p:PublishSingleFile=true `
         -o $publishDirectory
     if ($LASTEXITCODE -ne 0) {
