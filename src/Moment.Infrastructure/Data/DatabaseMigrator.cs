@@ -54,9 +54,21 @@ public static class DatabaseMigrator
                 connection, (SqliteTransaction)transaction, 4, ct);
         if (versionFourMarkers > 0)
         {
-            await DatabaseSchemaValidator.ValidateVersionFourUpgradeBaseAsync(
-                connection, (SqliteTransaction)transaction, ct);
-            await EnsureVersionFourAnalyticsIndexesAsync(command, ct);
+            if (await DatabaseSchemaValidator.IsEarlyVersionFourUpgradeSourceAsync(
+                    connection, (SqliteTransaction)transaction, ct))
+            {
+                await RebuildVersionFourOccurrencesAsync(
+                    command, preserveDeletedAt: true, ct);
+                await EnsureVersionFourIndexesAsync(
+                    command, analyticsOnly: false, ct);
+            }
+            else
+            {
+                await DatabaseSchemaValidator.ValidateVersionFourUpgradeBaseAsync(
+                    connection, (SqliteTransaction)transaction, ct);
+                await EnsureVersionFourIndexesAsync(
+                    command, analyticsOnly: true, ct);
+            }
             await DatabaseSchemaValidator.ValidateVersionFourAsync(
                 connection, (SqliteTransaction)transaction, ct);
             await transaction.CommitAsync(ct);
@@ -184,11 +196,15 @@ public static class DatabaseMigrator
         await transaction.CommitAsync(ct);
     }
 
-    private static async Task EnsureVersionFourAnalyticsIndexesAsync(
+    private static async Task EnsureVersionFourIndexesAsync(
         SqliteCommand command,
+        bool analyticsOnly,
         CancellationToken ct)
     {
-        foreach (var indexSql in DatabaseSchemaValidator.CreateVersionFourAnalyticsIndexesSql)
+        var indexSqlStatements = analyticsOnly
+            ? DatabaseSchemaValidator.CreateVersionFourAnalyticsIndexesSql
+            : DatabaseSchemaValidator.CreateVersionFourIndexesSql;
+        foreach (var indexSql in indexSqlStatements)
         {
             command.CommandText = indexSql.Replace(
                 "CREATE INDEX ",
@@ -200,6 +216,18 @@ public static class DatabaseMigrator
 
     private static async Task UpgradeToVersionFourAsync(
         SqliteCommand command,
+        CancellationToken ct)
+    {
+        await RebuildVersionFourOccurrencesAsync(
+            command, preserveDeletedAt: false, ct);
+        command.CommandText =
+            "ALTER TABLE todos ADD COLUMN deleted_at TEXT NULL;";
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task RebuildVersionFourOccurrencesAsync(
+        SqliteCommand command,
+        bool preserveDeletedAt,
         CancellationToken ct)
     {
         var occurrencesSql = DatabaseSchemaValidator.CreateOccurrencesVersionFourSql.Replace(
@@ -215,6 +243,7 @@ public static class DatabaseMigrator
                 "REFERENCES occurrences(id)",
                 "REFERENCES occurrences_v4(id)",
                 StringComparison.Ordinal);
+        var deletedAtExpression = preserveDeletedAt ? "deleted_at" : "NULL";
 
         command.CommandText = $"""
             {occurrencesSql}
@@ -223,7 +252,7 @@ public static class DatabaseMigrator
                 handled_at, snooze_parent_id, deleted_at)
             SELECT
                 id, item_id, due_at, due_at_utc, state,
-                handled_at, snooze_parent_id, NULL
+                handled_at, snooze_parent_id, {deletedAtExpression}
             FROM occurrences;
 
             {actionLogSql}
@@ -235,7 +264,6 @@ public static class DatabaseMigrator
             DROP TABLE occurrences;
             ALTER TABLE occurrences_v4 RENAME TO occurrences;
             ALTER TABLE action_log_v4 RENAME TO action_log;
-            ALTER TABLE todos ADD COLUMN deleted_at TEXT NULL;
             """;
         await command.ExecuteNonQueryAsync(ct);
     }

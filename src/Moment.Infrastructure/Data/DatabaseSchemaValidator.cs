@@ -39,6 +39,20 @@ internal static class DatabaseSchemaValidator
         );
         """;
 
+    private const string CreateEarlyVersionFourOccurrencesSql = """
+        CREATE TABLE occurrences (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+            due_at TEXT NOT NULL,
+            due_at_utc TEXT NOT NULL,
+            state INTEGER NOT NULL,
+            handled_at TEXT NULL,
+            snooze_parent_id TEXT NULL,
+            deleted_at TEXT NULL,
+            UNIQUE(item_id, due_at_utc)
+        );
+        """;
+
     internal const string CreateActionLogVersionFourSql = """
         CREATE TABLE action_log (
             id TEXT PRIMARY KEY,
@@ -325,6 +339,55 @@ internal static class DatabaseSchemaValidator
         SqliteTransaction? transaction,
         CancellationToken ct) =>
         await ValidateVersionFourAsync(connection, transaction, 8, ct);
+
+    internal static async Task<bool> IsEarlyVersionFourUpgradeSourceAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken ct)
+    {
+        var occurrencesSql = await ReadCreateTableSqlAsync(
+            connection, transaction, "occurrences", ct);
+        var occurrenceColumns = await ReadColumnsAsync(
+            connection, transaction, "occurrences", ct);
+        if (!occurrenceColumns.SequenceEqual(OccurrenceVersionFourColumns) ||
+            !HasCanonicalCreateBody(
+                occurrencesSql, CreateEarlyVersionFourOccurrencesSql))
+        {
+            return false;
+        }
+
+        await ValidateExactMarkersAsync(
+            connection, transaction, [1, 2, 3, 4], ct);
+        await ValidateTableAsync(
+            connection, transaction, "schema_info", SchemaInfoColumns,
+            CreateSchemaInfoSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "items", ItemColumns,
+            CreateItemsSql, [], ct);
+        await ValidatePrimaryKeyIndexAsync(
+            connection, transaction, "occurrences", "id", ct);
+        await ValidateForeignKeysAsync(
+            connection, transaction, "occurrences", ItemForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "recurrence_rules", RecurrenceColumns,
+            CreateRecurrenceRulesSql, ItemForeignKey, ct);
+
+        var versionFourTodosSql = CreateTodosTableSql.Replace(
+            "    completed_at TEXT NULL,\n    CHECK(",
+            "    completed_at TEXT NULL, deleted_at TEXT NULL,\n    CHECK(",
+            StringComparison.Ordinal);
+        await ValidateTableAsync(
+            connection, transaction, "todos", TodoColumnsVersionFour,
+            versionFourTodosSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "action_log", ActionLogColumns,
+            CreateActionLogVersionThreeSql, OccurrenceForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "settings", SettingsColumns,
+            CreateSettingsSql, [], ct);
+        await ValidateForeignKeyCheckAsync(connection, transaction, ct);
+        return true;
+    }
 
     private static async Task ValidateVersionFourAsync(
         SqliteConnection connection,

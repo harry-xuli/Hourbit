@@ -395,6 +395,90 @@ public sealed class SqliteTodoRepositoryTests
     }
 
     [Fact]
+    public async Task Migration_repairs_the_early_version_four_occurrence_shape_without_losing_history()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+
+        var itemId = Guid.NewGuid();
+        var occurrenceId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var due = CreatedAt.AddHours(1);
+        await ExecuteAsync(path, $"""
+            DROP TABLE action_log;
+            DROP TABLE occurrences;
+            CREATE TABLE occurrences (
+                id TEXT PRIMARY KEY,
+                item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                due_at TEXT NOT NULL,
+                due_at_utc TEXT NOT NULL,
+                state INTEGER NOT NULL,
+                handled_at TEXT NULL,
+                snooze_parent_id TEXT NULL, deleted_at TEXT NULL,
+                UNIQUE(item_id, due_at_utc)
+            );
+            CREATE TABLE action_log (
+                id TEXT PRIMARY KEY,
+                occurrence_id TEXT NOT NULL REFERENCES occurrences(id) ON DELETE CASCADE,
+                state INTEGER NOT NULL,
+                handled_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX ux_occurrences_item_due_at_utc
+                ON occurrences(item_id, due_at_utc);
+            CREATE INDEX ix_occurrences_state_due_at_utc
+                ON occurrences(state, due_at_utc);
+            CREATE INDEX ix_occurrences_item_id
+                ON occurrences(item_id);
+            CREATE INDEX ix_occurrences_active_state_due_at_utc
+                ON occurrences(state, due_at_utc)
+                WHERE deleted_at IS NULL;
+            CREATE INDEX ix_occurrences_deleted_due_at_utc
+                ON occurrences(deleted_at, due_at_utc);
+            CREATE INDEX ix_occurrences_deleted_handled_at
+                ON occurrences(deleted_at, handled_at);
+            INSERT INTO items(id, title, kind, importance, created_at)
+                VALUES ('{itemId:D}', '早期 v4 提醒', 2, 0, '{CreatedAt:O}');
+            INSERT INTO occurrences(
+                id, item_id, due_at, due_at_utc, state,
+                handled_at, snooze_parent_id, deleted_at)
+                VALUES (
+                    '{occurrenceId:D}', '{itemId:D}', '{due:O}',
+                    '{due.UtcDateTime:O}', 2, '{due.AddMinutes(1):O}', NULL, NULL);
+            INSERT INTO action_log(id, occurrence_id, state, handled_at)
+                VALUES (
+                    '{actionId:D}', '{occurrenceId:D}', 2,
+                    '{due.AddMinutes(1):O}');
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM occurrences WHERE id = $id;", occurrenceId));
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM action_log WHERE id = $id;", actionId));
+        Assert.Equal(0, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM pragma_foreign_key_check;"));
+        Assert.Equal(1, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'ux_occurrences_active_item_due_at_utc';
+            """));
+        Assert.Equal(0, await ScalarIntAsync(connection, """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name IN (
+                  'ux_occurrences_item_due_at_utc',
+                  'sqlite_autoindex_occurrences_2');
+            """));
+    }
+
+    [Fact]
     public async Task Migration_rejects_version_four_when_action_log_is_missing()
     {
         using var temp = new TempDirectory();
