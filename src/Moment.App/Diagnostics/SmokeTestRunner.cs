@@ -179,20 +179,20 @@ internal static class SmokeTestRunner
             retained.Occurrence.DueAt != fixture.DueAt)
         {
             throw new InvalidOperationException(
-                "A legacy reminder was not retained during the schema v3 upgrade.");
+                "A legacy reminder was not retained during the current schema upgrade.");
         }
 
         await using var connection = await DatabaseMigrator.OpenConnectionAsync(
             databasePath, ct);
         await using var marker = connection.CreateCommand();
         marker.CommandText =
-            "SELECT COUNT(*) FROM schema_info WHERE version = 3;";
+            "SELECT COUNT(*) FROM schema_info WHERE version = 5;";
         if (Convert.ToInt32(
                 await marker.ExecuteScalarAsync(ct),
                 CultureInfo.InvariantCulture) != 1)
         {
             throw new InvalidOperationException(
-                "The legacy database does not have exactly one schema v3 marker.");
+                "The legacy database does not have exactly one current schema marker.");
         }
 
         await events.RecordAsync(eventName, ct);
@@ -300,10 +300,14 @@ internal static class SmokeTestRunner
         EventLog events,
         CancellationToken ct)
     {
+        var recoveryDatabasePath = Path.Combine(
+            Path.GetDirectoryName(databasePath)!,
+            "moment-self-test-missed.db");
         var clock = new ControllableClock(
             new DateTimeOffset(2026, 1, 5, 18, 59, 0, TimeSpan.Zero));
         var zone = TimeZoneInfo.Utc;
-        var repository = await SqliteReminderRepository.OpenAsync(databasePath, ct);
+        var repository = await SqliteReminderRepository.OpenAsync(
+            recoveryDatabasePath, ct);
         var reminders = new ReminderService(repository, new SchedulerSignalProxy(), clock);
         var occurrence = await reminders.CreateAsync(
             ParseSuccess(
@@ -322,7 +326,7 @@ internal static class SmokeTestRunner
         var persisted = await repository.GetScheduledReminderAsync(occurrence.Id, ct);
         var timelineDate = DateOnly.FromDateTime(
             TimeZoneInfo.ConvertTime(clock.Now, zone).DateTime);
-        var snapshot = await new SqliteTimelineQuery(databasePath).GetTimelineAsync(
+        var snapshot = await new SqliteTimelineQuery(recoveryDatabasePath).GetTimelineAsync(
             new LocalDateRange(timelineDate, timelineDate),
             clock.Now,
             zone,
@@ -341,7 +345,11 @@ internal static class SmokeTestRunner
             sink.SummaryCount != 1)
         {
             throw new InvalidOperationException(
-                "The 19:00 reminder was not recovered once as a visible missed reminder at 20:04.");
+                $"The 19:00 reminder recovery result was unexpected: " +
+                $"first={first}, second={second}, " +
+                $"state={persisted?.Occurrence.State}, " +
+                $"status={visible.StatusText}, group={visible.GroupName}, " +
+                $"summaries={sink.SummaryCount}.");
         }
 
         await events.RecordAsync("missed-recovery", ct);
@@ -442,6 +450,27 @@ internal static class SmokeTestRunner
 
             clock.AdvanceBy(TimeSpan.FromMinutes(1));
             await firstSink.WaitAsync(ct);
+
+            var deliveryPersisted = false;
+            for (var attempt = 0; attempt < 100; attempt++)
+            {
+                var normalState = await repository.GetScheduledReminderAsync(normal.Id, ct);
+                var importantState = await repository.GetScheduledReminderAsync(important.Id, ct);
+                var scheduled = await repository.GetScheduledAsync(ct);
+                if (normalState?.Occurrence.State == OccurrenceState.Fired &&
+                    importantState?.Occurrence.State == OccurrenceState.Fired &&
+                    scheduled.Any(reminder =>
+                        reminder.Item.Id == normal.ItemId &&
+                        reminder.Occurrence.Id != normal.Id))
+                {
+                    deliveryPersisted = true;
+                    break;
+                }
+                await Task.Delay(TimeSpan.FromMilliseconds(20), ct);
+            }
+            if (!deliveryPersisted)
+                throw new InvalidOperationException(
+                    "Reminder delivery did not reach its persisted terminal state.");
 
             await actions.CompleteAsync(normal.Id, ct);
             var completed = await repository.GetScheduledReminderAsync(normal.Id, ct);

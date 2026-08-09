@@ -103,7 +103,11 @@ public sealed class ApplicationBootstrapTests
             Assert.Equal(OccurrenceState.Missed,
                 (await repository.GetScheduledReminderAsync(
                     expired.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
-            var summary = Assert.Single(platform.Payloads);
+            Assert.Equal(2, platform.Payloads.Count);
+            Assert.Contains(platform.Payloads,
+                payload => payload.Tag == important.Occurrence.Id.ToString("D"));
+            var summary = Assert.Single(platform.Payloads,
+                payload => payload.Tag == "missed-summary");
             Assert.Equal("missed-summary", summary.Tag);
             Assert.Equal(1, Volatile.Read(ref schedulerStarts));
             Assert.Equal(1, Volatile.Read(ref timelineRefreshes));
