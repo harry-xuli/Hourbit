@@ -265,9 +265,6 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="52" />
                     <RowDefinition Height="72" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="42" />
-                    <RowDefinition Height="56" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
@@ -401,10 +398,24 @@
                     </Button>
                 </UniformGrid>
 
-                <StackPanel x:Name="TodoSection"
-                            Grid.Row="2"
-                            Margin="26,8,26,0">
+                <Grid x:Name="TimelineColumns"
+                      Grid.Row="2"
+                      Margin="26,8,26,20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3*" MinWidth="620" />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition Width="2*" MinWidth="360" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid x:Name="TodoColumn" Grid.Column="2">
+                    <Grid x:Name="TodoSection">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
                     <TextBlock x:Name="TodoSectionHeader"
+                               Grid.Row="0"
                                Text="待办事项"
                                automation:AutomationProperties.Name="待办事项"
                                FontSize="20"
@@ -412,12 +423,12 @@
                                Foreground="{DynamicResource AccentBrush}"
                                Margin="0,0,0,6" />
                     <ListBox x:Name="PendingTodoList"
+                             Grid.Row="1"
                              ItemsSource="{Binding PendingTodos}"
                              ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
                              SelectionChanged="OnTimelineSelectionChanged"
                              BorderThickness="0"
                              Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                             MaxHeight="150"
                              ScrollViewer.CanContentScroll="True"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -438,6 +449,7 @@
                         </ListBox.ItemsPanel>
                     </ListBox>
                     <Expander x:Name="CompletedTodosExpander"
+                              Grid.Row="2"
                               Header="已完成"
                               IsExpanded="False"
                               Margin="0,4,0,0"
@@ -479,20 +491,33 @@
                             </ListBox.ItemsPanel>
                         </ListBox>
                     </Expander>
-                </StackPanel>
+                    </Grid>
+                    </Grid>
+
+                    <Border Grid.Column="1"
+                            Width="1"
+                            HorizontalAlignment="Center"
+                            Background="{DynamicResource BorderBrush}" />
+
+                    <Grid x:Name="ReminderColumn" Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="44" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
                 <TextBlock x:Name="ReminderSectionHeader"
-                           Grid.Row="3"
+                           Grid.Row="0"
                            Text="定时提醒"
                            automation:AutomationProperties.Name="定时提醒"
                            FontSize="20"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource AccentBrush}"
                            VerticalAlignment="Center"
-                           Margin="26,0" />
+                           Margin="0,0,0,6" />
 
                 <Border x:Name="TimelineHeader"
-                        Grid.Row="4" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                        Grid.Row="1" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                         BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,0,0,1">
                     <Grid Margin="54,0,26,0">
                         <Grid.ColumnDefinitions>
@@ -510,7 +535,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Row="5">
+                <Grid Grid.Row="2">
                     <Border Margin="12,8,12,0"
                             Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                             BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
@@ -708,6 +733,8 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
+                </Grid>
+                    </Grid>
                 </Grid>
             </Grid>
         </Grid>

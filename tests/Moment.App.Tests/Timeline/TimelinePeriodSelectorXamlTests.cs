@@ -56,6 +56,27 @@ public sealed class TimelinePeriodSelectorXamlTests
         Assert.Contains("\"PeriodMonthSelectedBrush\"", highContrastSource);
     }
 
+    [Fact]
+    public void Timeline_places_reminders_left_and_todos_right_in_three_to_two_columns()
+    {
+        var timelineXaml = ReadRepositoryFile(
+            "src", "Moment.App", "Timeline", "TimelineView.xaml");
+
+        Assert.Contains("x:Name=\"TimelineColumns\"", timelineXaml);
+        Assert.Contains("<ColumnDefinition Width=\"3*\"", timelineXaml);
+        Assert.Contains("<ColumnDefinition Width=\"2*\"", timelineXaml);
+        Assert.Contains(
+            "x:Name=\"ReminderColumn\" Grid.Column=\"0\"",
+            timelineXaml);
+        Assert.Contains(
+            "x:Name=\"TodoColumn\" Grid.Column=\"2\"",
+            timelineXaml);
+        Assert.Contains("x:Name=\"ReminderSectionHeader\"", timelineXaml);
+        Assert.Contains("x:Name=\"TodoSectionHeader\"", timelineXaml);
+        Assert.Contains("x:Name=\"CompletedTodosExpander\"", timelineXaml);
+        Assert.Contains("IsExpanded=\"False\"", timelineXaml);
+    }
+
     private static string ReadRepositoryFile(params string[] segments)
     {
         var repositoryRoot = Path.GetFullPath(Path.Combine(
