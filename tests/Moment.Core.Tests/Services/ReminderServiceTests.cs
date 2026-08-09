@@ -71,6 +71,64 @@ public sealed class ReminderServiceTests
         Assert.Equal("编辑前", (await repository.GetScheduledReminderAsync(existing.Occurrence.Id, CancellationToken.None))!.Item.Title);
     }
 
+    [Fact]
+    public async Task Fired_reminder_can_be_rescheduled_and_signals_scheduler()
+    {
+        var events = new List<string>();
+        var repository = new RecordingRepository(events);
+        var scheduled = TestData.Scheduled("按时吃饭", "2026-07-29T15:50:00+08:00");
+        var existing = scheduled with
+        {
+            Occurrence = scheduled.Occurrence with
+            {
+                State = OccurrenceState.Fired,
+                HandledAt = DateTimeOffset.Parse("2026-07-29T15:50:00+08:00")
+            }
+        };
+        await repository.AddAsync(existing, CancellationToken.None);
+        events.Clear();
+        var service = new ReminderService(repository, new RecordingSignal(events),
+            new FakeClock("2026-07-29T15:56:00+08:00"));
+
+        await service.EditAsync(existing.Occurrence.Id,
+            TestData.Draft("按时吃饭", "2026-07-29T17:00:00+08:00"),
+            SeriesScope.OccurrenceOnly, CancellationToken.None);
+
+        var updated = await repository.GetScheduledReminderAsync(
+            existing.Occurrence.Id, CancellationToken.None);
+        Assert.Equal("按时吃饭", updated!.Item.Title);
+        Assert.Equal(DateTimeOffset.Parse("2026-07-29T17:00:00+08:00"), updated.Occurrence.DueAt);
+        Assert.Equal(OccurrenceState.Scheduled, updated.Occurrence.State);
+        Assert.Contains("refresh", events);
+    }
+
+    [Fact]
+    public async Task Missed_reminder_can_be_deleted()
+    {
+        var events = new List<string>();
+        var repository = new RecordingRepository(events);
+        var scheduled = TestData.Scheduled("旧提醒", "2026-07-29T15:50:00+08:00");
+        var existing = scheduled with
+        {
+            Occurrence = scheduled.Occurrence with
+            {
+                State = OccurrenceState.Missed,
+                HandledAt = DateTimeOffset.Parse("2026-07-29T15:56:00+08:00")
+            }
+        };
+        await repository.AddAsync(existing, CancellationToken.None);
+        events.Clear();
+        var service = new ReminderService(repository, new RecordingSignal(events),
+            new FakeClock("2026-07-29T16:00:00+08:00"));
+
+        await service.DeleteAsync(existing.Occurrence.Id,
+            SeriesScope.OccurrenceOnly, CancellationToken.None);
+
+        Assert.Null(await repository.GetScheduledReminderAsync(
+            existing.Occurrence.Id, CancellationToken.None));
+        Assert.Contains("refresh", events);
+    }
+
     public static TheoryData<ReminderDraft> InvalidDrafts =>
     [
         new ReminderDraft("无效种类", new DateTimeOffset(2026, 7, 29, 9, 20, 0, TimeSpan.FromHours(8)),

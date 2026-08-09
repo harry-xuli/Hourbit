@@ -41,6 +41,7 @@ public sealed class TimelineItemViewModel : ObservableObject
     {
         OccurrenceState.Completed => "✓",
         OccurrenceState.Missed => "!",
+        OccurrenceState.DeliveryFailed => "!",
         OccurrenceState.Ignored => "×",
         _ => "◷"
     };
@@ -52,7 +53,6 @@ public sealed class TimelineItemViewModel : ObservableObject
     {
         OccurrenceState.Completed or OccurrenceState.Ignored => "已完成",
         OccurrenceState.Missed => "已错过",
-        OccurrenceState.Scheduled when row.DueAt < now => "已错过",
         _ => "接下来"
     };
 
@@ -63,7 +63,8 @@ public sealed class TimelineItemViewModel : ObservableObject
         OccurrenceState.Ignored => "已忽略",
         OccurrenceState.Missed => "已错过",
         OccurrenceState.Snoozed => "已推迟",
-        OccurrenceState.Scheduled when row.DueAt < now => "已错过",
+        OccurrenceState.Delivering => "正在提醒",
+        OccurrenceState.DeliveryFailed => "提醒失败",
         _ => "等待中"
     };
 }

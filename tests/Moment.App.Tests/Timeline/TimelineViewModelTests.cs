@@ -293,6 +293,21 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public void Reminder_status_uses_persisted_delivery_state_instead_of_clock_guessing()
+    {
+        var now = DateTimeOffset.Parse("2026-07-29T15:56:00+08:00");
+        var scheduled = new TimelineItemViewModel(
+            TestData.Row("等待投递", "2026-07-29T15:50:00+08:00", OccurrenceState.Scheduled),
+            now);
+        var failed = new TimelineItemViewModel(
+            TestData.Row("投递失败", "2026-07-29T15:51:00+08:00", OccurrenceState.DeliveryFailed),
+            now);
+
+        Assert.Equal(("接下来", "等待中"), (scheduled.GroupName, scheduled.StatusText));
+        Assert.Equal(("接下来", "提醒失败"), (failed.GroupName, failed.StatusText));
+    }
+
+    [Fact]
     public async Task Timeline_separates_and_orders_todos_without_changing_the_next_reminder()
     {
         var sameDateSecond = Guid.Parse("00000000-0000-0000-0000-000000000002");

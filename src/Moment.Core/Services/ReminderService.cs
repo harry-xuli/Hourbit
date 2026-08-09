@@ -37,7 +37,10 @@ public sealed class ReminderService(
         ValidateScope(scope);
 
         var current = await repository.GetScheduledReminderAsync(occurrenceId, ct);
-        if (current?.Occurrence.State != OccurrenceState.Scheduled)
+        if (current is null || current.Occurrence.State is
+            OccurrenceState.Completed or
+            OccurrenceState.Ignored or
+            OccurrenceState.Delivering)
         {
             return;
         }
@@ -49,7 +52,10 @@ public sealed class ReminderService(
             ItemId = item.Id,
             DueAt = draft.DueAt,
             State = OccurrenceState.Scheduled,
-            HandledAt = null
+            HandledAt = null,
+            DeliveryAttempts = 0,
+            LastDeliveryError = null,
+            NextDeliveryAttemptAt = null
         };
 
         await repository.EditAsync(occurrenceId, item, occurrence, scope, ct);
@@ -61,7 +67,7 @@ public sealed class ReminderService(
         ValidateScope(scope);
 
         var current = await repository.GetScheduledReminderAsync(occurrenceId, ct);
-        if (current?.Occurrence.State != OccurrenceState.Scheduled)
+        if (current is null || current.Occurrence.State == OccurrenceState.Delivering)
         {
             return;
         }
