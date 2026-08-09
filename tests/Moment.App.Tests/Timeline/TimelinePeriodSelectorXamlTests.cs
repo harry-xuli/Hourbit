@@ -21,6 +21,10 @@ public sealed class TimelinePeriodSelectorXamlTests
         Assert.Contains("VerticalAlignment=\"Center\"", timelineXaml);
         Assert.Contains("Property=\"IsChecked\" Value=\"True\"", timelineXaml);
         Assert.Contains("Property=\"IsKeyboardFocused\" Value=\"True\"", timelineXaml);
+        Assert.Equal(
+            3,
+            CountOccurrences(timelineXaml, "<PathGeometry Figures=\""));
+        Assert.DoesNotContain("Tag=\"M", timelineXaml);
 
         foreach (var name in new[]
                  {

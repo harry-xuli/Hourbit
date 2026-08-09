@@ -296,7 +296,6 @@
                         <RadioButton x:Name="DayPeriodButton"
                                      GroupName="TimelinePeriod"
                                      Content="日"
-                                     Tag="M3,4 L17,4 17,18 3,18 Z M3,8 L17,8 M7,2 L7,6 M13,2 L13,6 M7,12 L10,12 10,15 7,15 Z"
                                      Command="{Binding SelectDayPeriodCommand}"
                                      IsChecked="{Binding IsDayPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按日查看"
@@ -304,11 +303,14 @@
                                      Background="{DynamicResource PeriodDaySelectedBrush}"
                                      BorderBrush="{DynamicResource PeriodDayBrush}"
                                      Foreground="{DynamicResource PeriodDaySelectedForegroundBrush}"
-                                     Margin="0,0,3,0" />
+                                     Margin="0,0,3,0">
+                            <RadioButton.Tag>
+                                <PathGeometry Figures="M3,4 L17,4 17,18 3,18 Z M3,8 L17,8 M7,2 L7,6 M13,2 L13,6 M7,12 L10,12 10,15 7,15 Z" />
+                            </RadioButton.Tag>
+                        </RadioButton>
                         <RadioButton x:Name="WeekPeriodButton"
                                      GroupName="TimelinePeriod"
                                      Content="周"
-                                     Tag="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,12 L8,12 M10,12 L12,12 M14,12 L16,12"
                                      Command="{Binding SelectWeekPeriodCommand}"
                                      IsChecked="{Binding IsWeekPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按周查看"
@@ -316,18 +318,25 @@
                                      Background="{DynamicResource PeriodWeekSelectedBrush}"
                                      BorderBrush="{DynamicResource PeriodWeekBrush}"
                                      Foreground="{DynamicResource PeriodWeekSelectedForegroundBrush}"
-                                     Margin="0,0,3,0" />
+                                     Margin="0,0,3,0">
+                            <RadioButton.Tag>
+                                <PathGeometry Figures="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,12 L8,12 M10,12 L12,12 M14,12 L16,12" />
+                            </RadioButton.Tag>
+                        </RadioButton>
                         <RadioButton x:Name="MonthPeriodButton"
                                      GroupName="TimelinePeriod"
                                      Content="月"
-                                     Tag="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,11 L8,11 M10,11 L12,11 M14,11 L16,11 M6,15 L8,15 M10,15 L12,15 M14,15 L16,15"
                                      Command="{Binding SelectMonthPeriodCommand}"
                                      IsChecked="{Binding IsMonthPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按月查看"
                                      Style="{StaticResource PeriodSegmentRadioButtonStyle}"
                                      Background="{DynamicResource PeriodMonthSelectedBrush}"
                                      BorderBrush="{DynamicResource PeriodMonthBrush}"
-                                     Foreground="{DynamicResource PeriodMonthSelectedForegroundBrush}" />
+                                     Foreground="{DynamicResource PeriodMonthSelectedForegroundBrush}">
+                            <RadioButton.Tag>
+                                <PathGeometry Figures="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,11 L8,11 M10,11 L12,11 M14,11 L16,11 M6,15 L8,15 M10,15 L12,15 M14,15 L16,15" />
+                            </RadioButton.Tag>
+                        </RadioButton>
                     </StackPanel>
                     </Border>
                     <TextBlock x:Name="PeriodLabel"
