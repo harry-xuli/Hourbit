@@ -43,7 +43,6 @@ public sealed class EditReminderViewModel : ObservableObject
     private ReminderKind _selectedKind;
     private ReminderImportance _selectedImportance;
     private EditRecurrenceMode _selectedRecurrence;
-    private string _weeklyDaysText;
     private string? _errorMessage;
     private ReminderDraft? _persistedEditDraft;
     private SeriesScope _persistedEditScope;
@@ -73,9 +72,12 @@ public sealed class EditReminderViewModel : ObservableObject
             RecurrenceKind.Weekly => EditRecurrenceMode.Weekly,
             _ => EditRecurrenceMode.None
         };
-        _weeklyDaysText = string.Join("、", DayLabels
-            .Where(pair => draft.Recurrence?.DaysOfWeek.Contains(pair.Value) == true)
-            .Select(pair => pair.Key));
+        Weekdays = DayLabels
+            .Select(pair => new WeekdayOptionViewModel(
+                pair.Value,
+                pair.Key,
+                draft.Recurrence?.DaysOfWeek.Contains(pair.Value) == true))
+            .ToArray();
         SaveCommand = new AsyncCommand((_, ct) => SaveAsync(ct), _ => !IsBusy);
     }
 
@@ -197,15 +199,7 @@ public sealed class EditReminderViewModel : ObservableObject
         }
     }
 
-    public string WeeklyDaysText
-    {
-        get => _weeklyDaysText;
-        set
-        {
-            if (CanEdit)
-                SetProperty(ref _weeklyDaysText, value ?? string.Empty);
-        }
-    }
+    public IReadOnlyList<WeekdayOptionViewModel> Weekdays { get; }
 
     public bool IsWeekly => SelectedRecurrence == EditRecurrenceMode.Weekly;
     public bool ConvertsToTodo => string.IsNullOrWhiteSpace(TimeText);
@@ -255,14 +249,14 @@ public sealed class EditReminderViewModel : ObservableObject
                 recurrence = RecurrenceRule.Weekdays(time);
                 break;
             case EditRecurrenceMode.Weekly:
-                var days = DayLabels
-                    .Where(pair => WeeklyDaysText.Contains(pair.Key, StringComparison.Ordinal))
-                    .Select(pair => pair.Value)
+                var days = Weekdays
+                    .Where(option => option.IsSelected)
+                    .Select(option => option.Day)
                     .Distinct()
                     .ToArray();
                 if (days.Length == 0)
                 {
-                    ErrorMessage = "每周重复请至少选择一天。";
+                    ErrorMessage = "请至少选择一个星期几。";
                     return false;
                 }
                 recurrence = RecurrenceRule.Weekly(days, time);

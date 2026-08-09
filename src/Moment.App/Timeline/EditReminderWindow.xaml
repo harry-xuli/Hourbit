@@ -98,10 +98,24 @@
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
             <TextBlock Text="每周日期" VerticalAlignment="Center" />
-            <TextBox Grid.Column="1"
-                     Text="{Binding WeeklyDaysText, UpdateSourceTrigger=PropertyChanged}"
-                     automation:AutomationProperties.Name="每周日期"
-                     ToolTip="例如：周一、周三" />
+            <ItemsControl Grid.Column="1"
+                          ItemsSource="{Binding Weekdays}"
+                          automation:AutomationProperties.Name="每周日期">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Rows="1" Columns="7" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <ToggleButton Content="{Binding Label}"
+                                      IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                      MinHeight="36"
+                                      Margin="2,0"
+                                      automation:AutomationProperties.Name="{Binding Label}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </Grid>
 
         <TextBlock Grid.Row="6"

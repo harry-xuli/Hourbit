@@ -21,7 +21,8 @@ public sealed class EditReminderViewModelTests
         vm.SelectedKind = ReminderKind.Plan;
         vm.SelectedImportance = ReminderImportance.Important;
         vm.SelectedRecurrence = EditRecurrenceMode.Weekly;
-        vm.WeeklyDaysText = "周一、周三";
+        vm.Weekdays.Single(day => day.Day == DayOfWeek.Monday).IsSelected = true;
+        vm.Weekdays.Single(day => day.Day == DayOfWeek.Wednesday).IsSelected = true;
 
         var valid = vm.TryBuildDraft(out var draft);
 
@@ -71,13 +72,12 @@ public sealed class EditReminderViewModelTests
     {
         var vm = Create();
         vm.SelectedRecurrence = EditRecurrenceMode.Weekly;
-        vm.WeeklyDaysText = "每个月";
 
         var valid = vm.TryBuildDraft(out var draft);
 
         Assert.False(valid);
         Assert.Null(draft);
-        Assert.Equal("每周重复请至少选择一天。", vm.ErrorMessage);
+        Assert.Equal("请至少选择一个星期几。", vm.ErrorMessage);
     }
 
     [Fact]

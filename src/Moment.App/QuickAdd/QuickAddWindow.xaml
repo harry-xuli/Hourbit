@@ -216,10 +216,25 @@
                     <TextBlock Grid.Column="3" Text="每周日期"
                                VerticalAlignment="Center"
                                Visibility="{Binding Details.IsWeekly, Converter={StaticResource BooleanToVisibility}}" />
-                    <TextBox Grid.Column="4"
-                             Text="{Binding Details.WeeklyDaysText, UpdateSourceTrigger=PropertyChanged}"
-                             automation:AutomationProperties.Name="详细每周日期"
-                             Visibility="{Binding Details.IsWeekly, Converter={StaticResource BooleanToVisibility}}" />
+                    <ItemsControl Grid.Column="4"
+                                  ItemsSource="{Binding Details.Weekdays}"
+                                  automation:AutomationProperties.Name="详细每周日期"
+                                  Visibility="{Binding Details.IsWeekly, Converter={StaticResource BooleanToVisibility}}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" Columns="7" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <ToggleButton Content="{Binding Label}"
+                                              IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                              MinHeight="36"
+                                              Margin="1,0"
+                                              automation:AutomationProperties.Name="{Binding Label}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </Grid>
             </StackPanel>
         </Border>
