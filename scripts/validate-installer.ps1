@@ -15,6 +15,16 @@ if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
 }
 $source = Get-Content -Raw -LiteralPath $installerPath
 
+if (-not $source.Contains('DefaultDirName={localappdata}\Programs\Hourbit')) {
+    throw 'New installations must use the Hourbit program directory.'
+}
+if ($source.Contains('DefaultDirName={localappdata}\Programs\Moment')) {
+    throw 'The legacy Moment directory must not be the default for new installations.'
+}
+if (-not $source.Contains('UsePreviousAppDir=yes')) {
+    throw 'Upgrades must preserve the existing installation directory.'
+}
+
 function Get-SectionLines {
     param([Parameter(Mandatory = $true)][string]$Name)
 

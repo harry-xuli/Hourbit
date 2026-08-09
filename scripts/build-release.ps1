@@ -289,6 +289,15 @@ try {
         throw "Release publish failed with exit code $LASTEXITCODE."
     }
 
+    $forbiddenPublishFiles = @(Get-ChildItem -LiteralPath $publishDirectory -File -Recurse |
+        Where-Object {
+            $_.Name -match '^(?i:moment\.db(?:-wal|-shm)?|settings\.json)$' -or
+            $_.Extension -match '^(?i:\.sqlite|\.moment-backup)$'
+        })
+    if ($forbiddenPublishFiles.Count -ne 0) {
+        throw "Release publish contains user data: $($forbiddenPublishFiles.FullName -join ', ')"
+    }
+
     Copy-Item -LiteralPath $publishDirectory -Destination $portableDirectory -Recurse
     New-Item -Path (Join-Path $portableDirectory 'portable.flag') `
         -ItemType File -Force | Out-Null
