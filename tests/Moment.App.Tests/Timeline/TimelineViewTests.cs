@@ -49,7 +49,7 @@ public sealed class TimelineViewTests
             var past = Assert.IsType<Button>(view.FindName("PastSevenDaysCard"));
             var future = Assert.IsType<Button>(view.FindName("NextFourteenDaysCard"));
             var periodLabel = Assert.IsType<TextBlock>(view.FindName("PeriodLabel"));
-            var todoSection = Assert.IsType<StackPanel>(view.FindName("TodoSection"));
+            var todoSection = Assert.IsType<Grid>(view.FindName("TodoSection"));
 
             Assert.Equal(["日", "周", "月"],
                 new[] { day, week, month }.Select(button => button.Content));
@@ -60,6 +60,9 @@ public sealed class TimelineViewTests
             Assert.Equal("按日查看", PeerName(day));
             Assert.Equal("按周查看", PeerName(week));
             Assert.Equal("按月查看", PeerName(month));
+            Assert.All(
+                new[] { day, week, month },
+                button => Assert.IsAssignableFrom<Geometry>(button.Tag));
             Assert.Equal("上一时段", PeerName(previous));
             Assert.Equal("下一时段", PeerName(next));
             Assert.Equal("过去 7 天已完成：3，打开分析", PeerName(past));
@@ -185,7 +188,7 @@ public sealed class TimelineViewTests
         });
 
     [Fact]
-    public Task Split_timeline_renders_accessible_todos_above_reminders_and_collapses_completed_todos() =>
+    public Task Split_timeline_renders_accessible_reminders_left_of_todos_and_collapses_completed_todos() =>
         WpfTestHost.RunAsync(() =>
         {
             var query = new QueryStub(new TimelineSnapshot(
@@ -222,8 +225,8 @@ public sealed class TimelineViewTests
             Assert.Equal(
                 "待办：逾期任务，2026-07-28，重要，已逾期",
                 PeerName(todoRow));
-            Assert.True(todoHeader.TranslatePoint(new Point(), view).Y <
-                        reminderHeader.TranslatePoint(new Point(), view).Y);
+            Assert.True(reminderHeader.TranslatePoint(new Point(), view).X <
+                        todoHeader.TranslatePoint(new Point(), view).X);
             Assert.False(completed.IsExpanded);
             Assert.Equal("待办：1，提醒：0", completedSummary.ToolTip);
             Assert.Contains("已逾期", VisibleText(view));
