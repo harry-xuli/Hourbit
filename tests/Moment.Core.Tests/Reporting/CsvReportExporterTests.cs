@@ -55,6 +55,7 @@ public sealed class CsvReportExporterTests
         }
 
         const string expectedText =
+            MetadataText +
             "RecordId,ItemType,Title,Importance,CreatedAt,DueDate,DueAt,CompletedAt,DeletedAt,Status\r\n" +
             "10000000-0000-0000-0000-000000000001,Reminder,\"复盘, \"\"关键\"\"\r\n下一行\",Important,2026-07-01T08:09:10.1234567+08:00,,2026-08-01T09:10:11.7654321+05:30,2026-08-01T03:40:12.0000000+00:00,,Completed\r\n" +
             "10000000-0000-0000-0000-000000000002,Todo,已删除待办,Normal,2026-07-02T01:02:03.0000000+00:00,2026-08-09,,,2026-08-08T07:06:05.0000000-04:00,Deleted\r\n";
@@ -85,6 +86,7 @@ public sealed class CsvReportExporterTests
             snapshot, ReportPrivacyMode.Anonymous, destination, CancellationToken.None);
 
         const string expectedText =
+            MetadataText +
             "ItemType,Importance,CreatedAt,DueDate,DueAt,CompletedAt,DeletedAt,Status\r\n" +
             "Reminder,Important,2026-08-01T01:02:03.0000000+00:00,,2026-08-02T04:05:06.0000000+08:00,,,Incomplete\r\n";
         var bytes = destination.ToArray();
@@ -96,7 +98,7 @@ public sealed class CsvReportExporterTests
     }
 
     [Fact]
-    public async Task Empty_export_writes_BOM_and_header_only()
+    public async Task Empty_export_writes_BOM_metadata_blank_record_and_header_only()
     {
         await using var destination = new MemoryStream();
 
@@ -105,6 +107,7 @@ public sealed class CsvReportExporterTests
 
         Assert.Equal(
             Utf8BomBytes(
+                MetadataText +
                 "RecordId,ItemType,Title,Importance,CreatedAt,DueDate,DueAt,CompletedAt,DeletedAt,Status\r\n"),
             destination.ToArray());
     }
@@ -153,8 +156,20 @@ public sealed class CsvReportExporterTests
             Parse("2026-08-09T12:00:00.0000000+08:00"),
             new LocalDateRange(new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 9)),
             "UTC+08",
-            new AnalyticsTotals(0, 0, 0, 0, 0, 0, 0, 0),
+            new AnalyticsTotals(11, 12, 13, 14, 15, 16, 17, 18),
             [], [], [], [], details);
+
+    private const string MetadataText =
+        "SnapshotId,50000000-0000-0000-0000-000000000001\r\n" +
+        "Active,11\r\n" +
+        "Completed,12\r\n" +
+        "FuturePlanned,13\r\n" +
+        "Overdue,14\r\n" +
+        "Deleted,15\r\n" +
+        "Todos,16\r\n" +
+        "Reminders,17\r\n" +
+        "UndatedTodos,18\r\n" +
+        "\r\n";
 
     private static DateTimeOffset Parse(string value) =>
         DateTimeOffset.Parse(value, CultureInfo.InvariantCulture);

@@ -53,6 +53,7 @@ public static class CsvReportExporter
         ct.ThrowIfCancellationRequested();
 
         var csv = new StringBuilder();
+        AppendMetadata(csv, snapshot);
         AppendRow(csv, privacy == ReportPrivacyMode.Full ? FullHeaders : AnonymousHeaders);
         foreach (var row in snapshot.Details)
         {
@@ -70,6 +71,21 @@ public static class CsvReportExporter
         content.CopyTo(payload, preamble.Length);
 
         await destination.WriteAsync(payload.AsMemory(), ct).ConfigureAwait(false);
+    }
+
+    private static void AppendMetadata(StringBuilder csv, AnalyticsSnapshot snapshot)
+    {
+        var totals = snapshot.Totals;
+        AppendRow(csv, ["SnapshotId", snapshot.SnapshotId.ToString("D")]);
+        AppendRow(csv, ["Active", Format(totals.Active)]);
+        AppendRow(csv, ["Completed", Format(totals.Completed)]);
+        AppendRow(csv, ["FuturePlanned", Format(totals.FuturePlanned)]);
+        AppendRow(csv, ["Overdue", Format(totals.Overdue)]);
+        AppendRow(csv, ["Deleted", Format(totals.Deleted)]);
+        AppendRow(csv, ["Todos", Format(totals.Todos)]);
+        AppendRow(csv, ["Reminders", Format(totals.Reminders)]);
+        AppendRow(csv, ["UndatedTodos", Format(totals.UndatedTodos)]);
+        AppendRow(csv, []);
     }
 
     private static string[] FullFields(AnalyticsDetailRow row) =>
@@ -106,6 +122,9 @@ public static class CsvReportExporter
 
     private static string Format(DateTimeOffset? value) =>
         value?.ToString("O", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private static string Format(int value) =>
+        value.ToString(CultureInfo.InvariantCulture);
 
     private static void AppendRow(StringBuilder csv, IReadOnlyList<string> fields)
     {
