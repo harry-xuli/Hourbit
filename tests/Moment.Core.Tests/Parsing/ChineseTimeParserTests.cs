@@ -70,12 +70,37 @@ public sealed class ChineseTimeParserTests
         Assert.Equal(DateTimeOffset.Parse(expectedDue), draft.DueAt);
     }
 
+    [Theory]
+    [InlineData("10月3日 早上6点 闺女办事")]
+    [InlineData("10月3号 早上6点 闺女办事")]
+    [InlineData("2026年10月3号 早上6点 闺女办事")]
+    public void Parses_Chinese_day_suffix_variants(string text)
+    {
+        var draft = Reminder(
+            text,
+            now: DateTimeOffset.Parse("2026-08-09T10:25:00+08:00"));
+
+        Assert.Equal("闺女办事", draft.Title);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-10-03T06:00:00+08:00"),
+            draft.DueAt);
+    }
+
     [Fact]
     public void Parses_a_yearless_Chinese_date_without_a_clock_as_a_dated_todo()
     {
         var draft = Todo("10月3日小朋友办宴");
 
         Assert.Equal("小朋友办宴", draft.Title);
+        Assert.Equal(new DateOnly(2026, 10, 3), draft.DueDate);
+    }
+
+    [Fact]
+    public void Parses_a_hao_suffixed_date_without_a_clock_as_a_dated_todo()
+    {
+        var draft = Todo("10月3号闺女办事");
+
+        Assert.Equal("闺女办事", draft.Title);
         Assert.Equal(new DateOnly(2026, 10, 3), draft.DueDate);
     }
 
@@ -88,6 +113,10 @@ public sealed class ChineseTimeParserTests
     [InlineData("A10月+3日早上6点开会")]
     [InlineData("A-10月3日早上6点开会")]
     [InlineData("A10月333日B早上6点开会")]
+    [InlineData("13月3号早上6点开会")]
+    [InlineData("123月5号早上6点开会")]
+    [InlineData("10月+3号早上6点开会")]
+    [InlineData("A-10月3号早上6点开会")]
     public void Rejects_malformed_Chinese_date_markers_instead_of_scheduling_only_the_clock(
         string text)
     {
@@ -111,6 +140,15 @@ public sealed class ChineseTimeParserTests
         var draft = Todo("周年10月3日活动");
 
         Assert.Equal("周年10月3日活动", draft.Title);
+        Assert.Null(draft.DueDate);
+    }
+
+    [Fact]
+    public void Preserves_hao_in_ordinary_undated_title_text()
+    {
+        var draft = Todo("核对工号123");
+
+        Assert.Equal("核对工号123", draft.Title);
         Assert.Null(draft.DueDate);
     }
 

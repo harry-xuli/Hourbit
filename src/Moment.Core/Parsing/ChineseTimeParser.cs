@@ -19,7 +19,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseDatePattern = new(
-        "(?<![\\d年])(?:(?<year>\\d{4})年)?(?<month>\\d{1,2})月(?<day>\\d{1,2})日(?!\\d)",
+        "(?<![\\d年])(?:(?<year>\\d{4})年)?(?<month>\\d{1,2})月(?<day>\\d{1,2})(?:日|号)(?!\\d)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex NumericDatePattern = new(
@@ -31,7 +31,7 @@ public sealed class ChineseTimeParser : IChineseTimeParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseDateMarkerPattern = new(
-        "(?<![\\d年])(?:(?:[+-]?\\d+)年)?[+-]?\\d+月[+-]?\\d+日(?!\\d)",
+        "(?<![\\d年])(?:(?:[+-]?\\d+)年)?[+-]?\\d+月[+-]?\\d+(?:日|号)(?!\\d)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex ChineseClockPattern = new(
