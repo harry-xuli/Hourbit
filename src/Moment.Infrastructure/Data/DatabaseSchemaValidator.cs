@@ -26,6 +26,28 @@ internal static class DatabaseSchemaValidator
         );
         """;
 
+    internal const string CreateTodosVersionFourSql = """
+        CREATE TABLE todos (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 200),
+            created_at TEXT NOT NULL,
+            due_date TEXT NULL CHECK(
+                due_date IS NULL OR (
+                    length(due_date) = 10 AND
+                    due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                )
+            ),
+            importance INTEGER NOT NULL CHECK(importance IN (0, 1)),
+            is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1)),
+            completed_at TEXT NULL,
+            deleted_at TEXT NULL,
+            CHECK(
+                (is_completed = 0 AND completed_at IS NULL) OR
+                (is_completed = 1 AND completed_at IS NOT NULL)
+            )
+        );
+        """;
+
     internal const string CreateOccurrencesVersionFourSql = """
         CREATE TABLE occurrences (
             id TEXT PRIMARY KEY,
@@ -372,13 +394,9 @@ internal static class DatabaseSchemaValidator
             connection, transaction, "recurrence_rules", RecurrenceColumns,
             CreateRecurrenceRulesSql, ItemForeignKey, ct);
 
-        var versionFourTodosSql = CreateTodosTableSql.Replace(
-            "    completed_at TEXT NULL,\n    CHECK(",
-            "    completed_at TEXT NULL, deleted_at TEXT NULL,\n    CHECK(",
-            StringComparison.Ordinal);
         await ValidateTableAsync(
             connection, transaction, "todos", TodoColumnsVersionFour,
-            versionFourTodosSql, [], ct);
+            CreateTodosVersionFourSql, [], ct);
         await ValidateTableAsync(
             connection, transaction, "action_log", ActionLogColumns,
             CreateActionLogVersionThreeSql, OccurrenceForeignKey, ct);
@@ -410,13 +428,9 @@ internal static class DatabaseSchemaValidator
             connection, transaction, "recurrence_rules", RecurrenceColumns,
             CreateRecurrenceRulesSql, ItemForeignKey, ct);
 
-        var versionFourTodosSql = CreateTodosTableSql.Replace(
-            "    completed_at TEXT NULL,\n    CHECK(",
-            "    completed_at TEXT NULL, deleted_at TEXT NULL,\n    CHECK(",
-            StringComparison.Ordinal);
         await ValidateTableAsync(
             connection, transaction, "todos", TodoColumnsVersionFour,
-            versionFourTodosSql, [], ct);
+            CreateTodosVersionFourSql, [], ct);
         await ValidateTableAsync(
             connection, transaction, "action_log", ActionLogColumns,
             CreateActionLogVersionFourSql, OccurrenceForeignKey, ct);

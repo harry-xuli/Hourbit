@@ -498,6 +498,69 @@ public sealed class SqliteTodoRepositoryTests
     }
 
     [Fact]
+    public async Task Migration_accepts_the_installed_version_four_todo_shape_without_losing_data()
+    {
+        using var temp = new TempDirectory();
+        var path = Path.Combine(temp.Path, "moment.db");
+        await InitializeVersionFourAsync(path);
+
+        var todoId = Guid.NewGuid();
+        var completedAt = CreatedAt.AddHours(1);
+        var deletedAt = CreatedAt.AddHours(2);
+        await ExecuteAsync(path, $"""
+            DROP TABLE todos;
+            CREATE TABLE todos (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 200),
+                created_at TEXT NOT NULL,
+                due_date TEXT NULL CHECK(
+                    due_date IS NULL OR (
+                        length(due_date) = 10 AND
+                        due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                    )
+                ),
+                importance INTEGER NOT NULL CHECK(importance IN (0, 1)),
+                is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1)),
+                completed_at TEXT NULL, deleted_at TEXT NULL,
+                CHECK(
+                    (is_completed = 0 AND completed_at IS NULL) OR
+                    (is_completed = 1 AND completed_at IS NOT NULL)
+                )
+            );
+            CREATE INDEX ix_todos_active_due_date
+                ON todos(due_date, id) WHERE deleted_at IS NULL;
+            CREATE INDEX ix_todos_deleted_due_date
+                ON todos(deleted_at, due_date);
+            CREATE INDEX ix_todos_deleted_completed_at
+                ON todos(deleted_at, completed_at);
+            CREATE INDEX ix_todos_due_date_id ON todos(due_date, id);
+            CREATE INDEX ix_todos_completed_at_id ON todos(completed_at, id);
+            INSERT INTO todos(
+                id, title, created_at, due_date, importance,
+                is_completed, completed_at, deleted_at)
+            VALUES (
+                '{todoId:D}', '保留待办', '{CreatedAt:O}', '2026-08-02', 1,
+                1, '{completedAt:O}', '{deletedAt:O}');
+            """);
+
+        await using var connection =
+            await DatabaseMigrator.OpenConnectionAsync(path, default);
+        await DatabaseMigrator.MigrateAsync(connection, default);
+
+        Assert.Equal(1, await ScalarIntAsync(connection, $"""
+            SELECT COUNT(*) FROM todos
+            WHERE id = '{todoId:D}'
+              AND title = '保留待办'
+              AND created_at = '{CreatedAt:O}'
+              AND due_date = '2026-08-02'
+              AND importance = 1
+              AND is_completed = 1
+              AND completed_at = '{completedAt:O}'
+              AND deleted_at = '{deletedAt:O}';
+            """));
+    }
+
+    [Fact]
     public async Task Migration_rejects_version_four_when_action_log_is_missing()
     {
         using var temp = new TempDirectory();
@@ -666,7 +729,7 @@ public sealed class SqliteTodoRepositoryTests
     public static TheoryData<string> MalformedTodosSchemas =>
         new()
         {
-            CanonicalTodosSql.Replace(
+            CanonicalTodosSql.ReplaceLineEndings("\n").Replace(
                     "completed_at TEXT NULL,", string.Empty,
                     StringComparison.Ordinal)
                 .Replace(
@@ -706,7 +769,7 @@ public sealed class SqliteTodoRepositoryTests
                 "is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1))",
                 "is_completed INTEGER NOT NULL",
                 StringComparison.Ordinal),
-            CanonicalTodosSql.Replace(
+            CanonicalTodosSql.ReplaceLineEndings("\n").Replace(
                 "CHECK(\n        (is_completed = 0 AND completed_at IS NULL) OR\n        (is_completed = 1 AND completed_at IS NOT NULL)\n    )",
                 "CHECK(1)",
                 StringComparison.Ordinal)
