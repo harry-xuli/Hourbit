@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Automation.Peers;
 using System.Windows.Media;
 using Moment.Core.Analytics;
+using Moment.App.Styles;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfPoint = System.Windows.Point;
 using WpfPen = System.Windows.Media.Pen;
@@ -35,7 +36,12 @@ public sealed class DonutChartControl : FrameworkElement
     {
         Focusable = true;
         System.Windows.Input.KeyboardNavigation.SetIsTabStop(this, true);
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
+
+    internal int PaletteRevision { get; private set; }
+    internal WpfBrush? LastPrimaryBrush { get; private set; }
 
     public DonutGeometry Geometry
     {
@@ -55,6 +61,7 @@ public sealed class DonutChartControl : FrameworkElement
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
+        LastPrimaryBrush = null;
         var diameter = Math.Max(0, Math.Min(ActualWidth, ActualHeight) - 12);
         if (diameter <= 0)
             return;
@@ -73,6 +80,7 @@ public sealed class DonutChartControl : FrameworkElement
         foreach (var sector in Geometry.Sectors)
         {
             var brush = ResolveBrush(sector.ColorKey, WpfSystemColors.HighlightBrush);
+            LastPrimaryBrush ??= brush;
             if (sector.SweepAngle >= 359.999)
             {
                 drawingContext.DrawEllipse(brush, null, center, radius, radius);
@@ -95,6 +103,25 @@ public sealed class DonutChartControl : FrameworkElement
 
     private WpfBrush ResolveBrush(string key, WpfBrush fallback) =>
         TryFindResource(key) as WpfBrush ?? fallback;
+
+    private void OnLoaded(object sender, RoutedEventArgs args)
+    {
+        HighContrastPalette.PaletteChanged -= OnPaletteChanged;
+        HighContrastPalette.PaletteChanged += OnPaletteChanged;
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs args) =>
+        HighContrastPalette.PaletteChanged -= OnPaletteChanged;
+
+    private void OnPaletteChanged(object? sender, EventArgs args)
+    {
+        PaletteRevision++;
+        LastPrimaryBrush = Geometry.Sectors.IsEmpty
+            ? null
+            : ResolveBrush(
+                Geometry.Sectors[0].ColorKey, WpfSystemColors.HighlightBrush);
+        InvalidateVisual();
+    }
 
     private static Geometry CreateSector(
         WpfPoint center,

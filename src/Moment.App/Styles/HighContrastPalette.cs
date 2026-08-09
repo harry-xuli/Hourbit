@@ -6,6 +6,8 @@ namespace Moment.App.Styles;
 
 internal static class HighContrastPalette
 {
+    internal static event EventHandler? PaletteChanged;
+
     private static readonly string[] OverriddenKeys =
     [
         "WindowBackgroundBrush", "SubtleBackgroundBrush",
@@ -29,7 +31,10 @@ internal static class HighContrastPalette
             resources.Remove(key);
 
         if (!enabled)
+        {
+            PaletteChanged?.Invoke(null, EventArgs.Empty);
             return;
+        }
 
         WpfBrush Resolve(object key, WpfBrush fallback) =>
             findResource(key) as WpfBrush ?? fallback;
@@ -70,5 +75,6 @@ internal static class HighContrastPalette
         resources["ChartNormalBrush"] = grayText;
         resources["ChartImportantBrush"] = highlight;
         resources["ChartOtherBrush"] = windowText;
+        PaletteChanged?.Invoke(null, EventArgs.Empty);
     }
 }

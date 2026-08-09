@@ -164,6 +164,56 @@ public sealed class AnalyticsViewModelTests
         Assert.Equal(exact.End, vm.CustomEnd);
     }
 
+    [Fact]
+    public async Task Disposing_cancels_an_active_load_and_ignores_a_loader_that_completes_late()
+    {
+        var completion = new TaskCompletionSource<AnalyticsSnapshot>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken observed = default;
+        var vm = Create((range, ct) =>
+        {
+            observed = ct;
+            return completion.Task;
+        });
+
+        var load = vm.SelectRangeAsync(AnalyticsRangeKind.Recent7Days);
+        vm.Dispose();
+        completion.SetResult(CreateSnapshot(
+            new LocalDateRange(new DateOnly(2026, 8, 3), new DateOnly(2026, 8, 9))));
+        await load;
+
+        Assert.True(observed.IsCancellationRequested);
+        Assert.Null(vm.Snapshot);
+        Assert.False(vm.IsLoading);
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => vm.SelectRangeAsync(AnalyticsRangeKind.Recent30Days));
+        vm.Dispose();
+    }
+
+    [Fact]
+    public async Task Cancelling_a_window_load_keeps_the_view_model_reusable_for_reopen()
+    {
+        var first = new TaskCompletionSource<AnalyticsSnapshot>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var current = CreateSnapshot(
+            new LocalDateRange(new DateOnly(2026, 7, 11), new DateOnly(2026, 8, 9)),
+            completed: 9);
+        var vm = Create((range, ct) => Interlocked.Increment(ref calls) == 1
+            ? first.Task
+            : Task.FromResult(current));
+
+        var stale = vm.SelectRangeAsync(AnalyticsRangeKind.Recent7Days);
+        vm.CancelActiveLoad();
+        await vm.SelectRangeAsync(AnalyticsRangeKind.Recent30Days);
+        first.SetResult(CreateSnapshot(
+            new LocalDateRange(new DateOnly(2026, 8, 3), new DateOnly(2026, 8, 9))));
+        await stale;
+
+        Assert.Same(current, vm.Snapshot);
+        Assert.Equal(9, vm.Completed);
+    }
+
     private static AnalyticsViewModel Create(
         Func<LocalDateRange, CancellationToken, Task<AnalyticsSnapshot>> loader) =>
         new(loader, new FixedTimeProvider(Now.ToUniversalTime()), Zone,

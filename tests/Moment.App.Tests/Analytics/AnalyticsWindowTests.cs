@@ -47,6 +47,15 @@ public sealed class AnalyticsWindowTests
                 window.FindName("DonutSummaryText")).Text);
             Assert.Equal(vm.TrendSummary, Assert.IsType<TextBlock>(
                 window.FindName("TrendSummaryText")).Text);
+            var legend = Assert.IsType<ItemsControl>(window.FindName("DonutLegend"));
+            Assert.Equal("分布图例", PeerName(legend));
+            Assert.Equal(3, legend.Items.Count);
+            Assert.Equal(
+                ["已完成 4，占 57%", "未完成 2，占 29%", "已逾期 1，占 14%"],
+                vm.LegendItems.Select(static item => item.AccessibleName));
+            Assert.Equal(
+                ["图例标记 已完成", "图例标记 未完成", "图例标记 已逾期"],
+                Descendants<LegendSwatchControl>(legend).Select(PeerName));
         });
 
     [Fact]
@@ -119,12 +128,30 @@ public sealed class AnalyticsWindowTests
             window.Resources[SystemColors.HighlightBrushKey] = Brushes.Yellow;
             window.Resources[SystemColors.WindowTextBrushKey] = Brushes.White;
             window.Resources[SystemColors.GrayTextBrushKey] = Brushes.Gray;
+            var donut = Assert.IsType<DonutChartControl>(window.FindName("DonutChart"));
+            var trend = Assert.IsType<TrendChartControl>(window.FindName("TrendChart"));
+            _ = RenderedPixelCount(donut);
+            _ = RenderedPixelCount(trend);
+            var donutRevision = donut.PaletteRevision;
+            var trendRevision = trend.PaletteRevision;
             HighContrastPalette.Apply(window.Resources, true, window.FindResource);
+            _ = RenderedPixelCount(donut);
+            _ = RenderedPixelCount(trend);
 
             Assert.Same(Brushes.Yellow, window.Resources["ChartCompletedBrush"]);
             Assert.Same(Brushes.White, window.Resources["ChartIncompleteBrush"]);
             Assert.Same(Brushes.Gray, window.Resources["ChartOverdueBrush"]);
             Assert.Same(Brushes.Yellow, window.Resources["ChartImportantBrush"]);
+            Assert.True(donut.PaletteRevision > donutRevision);
+            Assert.True(trend.PaletteRevision > trendRevision);
+            Assert.Same(Brushes.Yellow, donut.LastPrimaryBrush);
+            Assert.Same(Brushes.Yellow, trend.LastPrimaryBrush);
+
+            var enabledDonutRevision = donut.PaletteRevision;
+            var enabledTrendRevision = trend.PaletteRevision;
+            HighContrastPalette.Apply(window.Resources, false, window.FindResource);
+            Assert.True(donut.PaletteRevision > enabledDonutRevision);
+            Assert.True(trend.PaletteRevision > enabledTrendRevision);
         });
 
     [Fact]
@@ -141,6 +168,15 @@ public sealed class AnalyticsWindowTests
             Assert.Empty(Descendants<System.Windows.Shapes.Shape>(trend));
             Assert.NotEqual(0, RenderedPixelCount(donut));
             Assert.NotEqual(0, RenderedPixelCount(trend));
+            Assert.NotEmpty(trend.LastBarBounds);
+            Assert.All(trend.LastBarBounds, bounds =>
+            {
+                Assert.True(bounds.Left >= 10d - 0.001d);
+                Assert.True(bounds.Right <= trend.ActualWidth - 10d + 0.001d);
+                Assert.True(bounds.Width > 0);
+            });
+            Assert.Equal(trend.LastBarBounds[0].Width,
+                trend.LastBarBounds[^1].Width, 6);
         });
 
     [Fact]
@@ -167,6 +203,55 @@ public sealed class AnalyticsWindowTests
             query.EndExclusive);
         Assert.True(query.IncludeDeleted);
     }
+
+    [Fact]
+    public Task Closing_the_window_cancels_the_active_load_and_the_view_model_can_reopen() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var first = new TaskCompletionSource<AnalyticsSnapshot>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            CancellationToken firstToken = default;
+            var calls = 0;
+            var vm = Create((range, ct) =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                {
+                    firstToken = ct;
+                    return first.Task;
+                }
+                return Task.FromResult(Snapshot(completed: 8));
+            });
+            var firstWindow = new AnalyticsWindow { DataContext = vm };
+            firstWindow.Show();
+            var stale = vm.SelectRangeAsync(AnalyticsRangeKind.Recent7Days);
+
+            firstWindow.Close();
+            Assert.True(firstToken.IsCancellationRequested);
+            first.SetResult(Snapshot(completed: 1));
+            await stale;
+            Assert.Null(vm.Snapshot);
+
+            var secondWindow = new AnalyticsWindow { DataContext = vm };
+            secondWindow.Show();
+            await vm.SelectRangeAsync(AnalyticsRangeKind.Recent30Days);
+
+            Assert.Equal(8, vm.Completed);
+            secondWindow.Close();
+        });
+
+    [Fact]
+    public Task Composition_lifetime_guard_rejects_disposed_and_cancelled_dispatches() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            using var lifetime = new CancellationTokenSource();
+            var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+
+            Assert.True(CompositionRoot.CanShowAnalytics(0, lifetime.Token, dispatcher));
+            Assert.False(CompositionRoot.CanShowAnalytics(1, lifetime.Token, dispatcher));
+            lifetime.Cancel();
+            Assert.False(CompositionRoot.CanShowAnalytics(0, lifetime.Token, dispatcher));
+            return Task.CompletedTask;
+        });
 
     private static int RenderedPixelCount(FrameworkElement element)
     {

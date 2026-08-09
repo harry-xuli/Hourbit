@@ -5,6 +5,11 @@ public partial class AnalyticsWindow : System.Windows.Window
     public AnalyticsWindow()
     {
         InitializeComponent();
+        Closed += (_, _) =>
+        {
+            if (DataContext is AnalyticsViewModel viewModel)
+                viewModel.CancelActiveLoad();
+        };
     }
 
     public void ShowAndActivate()

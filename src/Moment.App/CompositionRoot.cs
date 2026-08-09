@@ -381,6 +381,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         _resumeMonitor.RecoveryFailed -= OnRuntimeError;
         _tray.ErrorOccurred -= OnRuntimeError;
         _lifetime.Cancel();
+        Analytics.Dispose();
         _tray.Dispose();
         _analyticsWindow?.Close();
         _settingsWindow?.Close();
@@ -563,6 +564,10 @@ public sealed class CompositionRoot : IAsyncDisposable
 
     private void ShowAnalyticsCore(LocalDateRange? range)
     {
+        if (!CanShowAnalytics(
+                Volatile.Read(ref _disposed), _lifetime.Token, MainWindow.Dispatcher))
+            return;
+
         if (!MainWindow.Dispatcher.CheckAccess())
         {
             _ = MainWindow.Dispatcher.BeginInvoke(
@@ -579,6 +584,7 @@ public sealed class CompositionRoot : IAsyncDisposable
             };
             window.Closed += (_, _) =>
             {
+                Analytics.CancelActiveLoad();
                 if (ReferenceEquals(_analyticsWindow, window))
                     _analyticsWindow = null;
             };
@@ -589,6 +595,18 @@ public sealed class CompositionRoot : IAsyncDisposable
         _ = range is null
             ? Analytics.SelectRangeAsync(Analytics.SelectedRangeKind)
             : Analytics.LoadRangeAsync(range);
+    }
+
+    internal static bool CanShowAnalytics(
+        int disposed,
+        CancellationToken lifetime,
+        System.Windows.Threading.Dispatcher dispatcher)
+    {
+        ArgumentNullException.ThrowIfNull(dispatcher);
+        return disposed == 0 &&
+               !lifetime.IsCancellationRequested &&
+               !dispatcher.HasShutdownStarted &&
+               !dispatcher.HasShutdownFinished;
     }
 
     private static IImportantAlertAudio CreateAppAlertAudio(Func<int> volume) =>

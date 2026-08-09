@@ -179,7 +179,8 @@
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="240" />
+                            <RowDefinition Height="220" />
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                         <Grid Grid.Row="0" Margin="0,0,0,8">
@@ -204,8 +205,45 @@
                                                      Summary="{Binding DonutSummary}"
                                                      MinHeight="200"
                                                      Margin="8" />
+                        <ItemsControl x:Name="DonutLegend"
+                                      Grid.Row="2"
+                                      ItemsSource="{Binding LegendItems}"
+                                      Margin="4,4,4,8"
+                                      automation:AutomationProperties.Name="分布图例">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,2"
+                                          automation:AutomationProperties.Name="{Binding AccessibleName}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="22" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="56" />
+                                        </Grid.ColumnDefinitions>
+                                        <analytics:LegendSwatchControl Width="18"
+                                                                       Height="18"
+                                                                       ColorKey="{Binding ColorKey}"
+                                                                       automation:AutomationProperties.Name="{Binding Label, StringFormat='图例标记 {0}'}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Label}"
+                                                   Margin="6,0"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding Value}"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding Percentage}"
+                                                   Margin="8,0,0,0"
+                                                   TextAlignment="Right"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <TextBlock x:Name="DonutSummaryText"
-                                   Grid.Row="2"
+                                   Grid.Row="3"
                                    Text="{Binding DonutSummary}"
                                    TextWrapping="Wrap"
                                    Foreground="{DynamicResource SecondaryTextBrush}" />

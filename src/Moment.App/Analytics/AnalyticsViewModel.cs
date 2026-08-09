@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Collections.Immutable;
 using Moment.App.Commands;
 using Moment.Core.Analytics;
 
@@ -22,8 +23,14 @@ public enum DonutDimension
 
 public sealed record AnalyticsRangeOption(AnalyticsRangeKind Kind, string Label);
 public sealed record DonutDimensionOption(DonutDimension Dimension, string Label);
+public sealed record AnalyticsLegendItem(
+    string Label,
+    int Value,
+    string Percentage,
+    string ColorKey,
+    string AccessibleName);
 
-public sealed class AnalyticsViewModel : ObservableObject
+public sealed class AnalyticsViewModel : ObservableObject, IDisposable
 {
     private readonly Func<LocalDateRange, CancellationToken, Task<AnalyticsSnapshot>> _loadSnapshot;
     private readonly TimeProvider _timeProvider;
@@ -47,6 +54,8 @@ public sealed class AnalyticsViewModel : ObservableObject
     private bool _isLoading;
     private DonutGeometry _donutGeometry = DonutGeometry.Empty;
     private TrendGeometry _trendGeometry = TrendGeometry.Empty;
+    private ImmutableArray<AnalyticsLegendItem> _legendItems = [];
+    private int _disposed;
 
     public AnalyticsViewModel(
         Func<LocalDateRange, CancellationToken, Task<AnalyticsSnapshot>> loadSnapshot,
@@ -196,6 +205,12 @@ public sealed class AnalyticsViewModel : ObservableObject
         private set => SetProperty(ref _trendGeometry, value);
     }
 
+    public ImmutableArray<AnalyticsLegendItem> LegendItems
+    {
+        get => _legendItems;
+        private set => SetProperty(ref _legendItems, value);
+    }
+
     public string DonutSummary
     {
         get => _donutSummary;
@@ -228,6 +243,7 @@ public sealed class AnalyticsViewModel : ObservableObject
 
     public Task SelectRangeAsync(AnalyticsRangeKind kind)
     {
+        ThrowIfDisposed();
         SelectedRangeKind = kind;
         if (kind == AnalyticsRangeKind.Custom)
             return ApplyCustomRangeAsync();
@@ -247,6 +263,7 @@ public sealed class AnalyticsViewModel : ObservableObject
 
     public Task ApplyCustomRangeAsync()
     {
+        ThrowIfDisposed();
         SelectedRangeKind = AnalyticsRangeKind.Custom;
         if (CustomStart > CustomEnd)
         {
@@ -258,6 +275,7 @@ public sealed class AnalyticsViewModel : ObservableObject
 
     public Task LoadRangeAsync(LocalDateRange range)
     {
+        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(range);
         SelectedRangeKind = AnalyticsRangeKind.Custom;
         CustomStart = range.Start;
@@ -267,6 +285,22 @@ public sealed class AnalyticsViewModel : ObservableObject
 
     public void SelectDimension(DonutDimension dimension) =>
         SelectedDimension = dimension;
+
+    public void CancelActiveLoad()
+    {
+        Interlocked.Increment(ref _generation);
+        var previous = Interlocked.Exchange(ref _loadCancellation, null);
+        previous?.Cancel();
+        previous?.Dispose();
+        IsLoading = false;
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+        CancelActiveLoad();
+    }
 
     private LocalDateRange CreateRange(AnalyticsRangeKind kind)
     {
@@ -291,6 +325,7 @@ public sealed class AnalyticsViewModel : ObservableObject
 
     private async Task LoadCoreAsync(LocalDateRange range)
     {
+        ThrowIfDisposed();
         if (range.Start > range.End)
         {
             RejectRange("开始日期不能晚于结束日期。");
@@ -308,7 +343,8 @@ public sealed class AnalyticsViewModel : ObservableObject
         {
             var snapshot = await _loadSnapshot(range, cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
-            if (generation != Volatile.Read(ref _generation))
+            if (Volatile.Read(ref _disposed) != 0 ||
+                generation != Volatile.Read(ref _generation))
                 return;
             ApplySnapshot(snapshot);
         }
@@ -317,12 +353,14 @@ public sealed class AnalyticsViewModel : ObservableObject
         }
         catch (Exception exception)
         {
-            if (generation == Volatile.Read(ref _generation))
+            if (Volatile.Read(ref _disposed) == 0 &&
+                generation == Volatile.Read(ref _generation))
                 ErrorMessage = exception.Message;
         }
         finally
         {
-            if (generation == Volatile.Read(ref _generation))
+            if (Volatile.Read(ref _disposed) == 0 &&
+                generation == Volatile.Read(ref _generation))
                 IsLoading = false;
             if (ReferenceEquals(
                     Interlocked.CompareExchange(ref _loadCancellation, null, cancellation),
@@ -364,6 +402,19 @@ public sealed class AnalyticsViewModel : ObservableObject
             _ => throw new ArgumentOutOfRangeException()
         };
         DonutGeometry = ChartGeometryBuilder.CreateDonut(slices);
+        LegendItems = DonutGeometry.Sectors.Select(sector =>
+        {
+            var percentage = DonutGeometry.Total == 0
+                ? 0d
+                : (double)sector.Value / DonutGeometry.Total;
+            var percentageText = percentage.ToString("P0", _culture);
+            return new AnalyticsLegendItem(
+                sector.Label,
+                sector.Value,
+                percentageText,
+                sector.ColorKey,
+                $"{sector.Label} {sector.Value}，占 {percentageText}");
+        }).ToImmutableArray();
         DonutSummary = slices.IsEmpty
             ? $"{label}分布：暂无数据。"
             : $"{label}分布：{string.Join("，", slices.Select(static slice => $"{slice.Label} {slice.Count}"))}。";
@@ -381,4 +432,7 @@ public sealed class AnalyticsViewModel : ObservableObject
 
     private string FormatDate(DateOnly value) =>
         value.ToString("yyyy-MM-dd", _culture);
+
+    private void ThrowIfDisposed() =>
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 }
