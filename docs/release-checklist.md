@@ -20,7 +20,7 @@
 | Setup/ZIP 文件名与版本一致 | 通过 | smoke 验证 Hourbit 日程 0.3.0 / 2026-08-12 |
 | SHA256 | 通过 | 见下方产物证据；两个 sidecar 均匹配 |
 | Authenticode | 已检查 | Setup 为 `NotSigned`；ZIP 不适用（PowerShell 返回 `UnknownError`） |
-| GitHub Release v0.3.0 | 未创建 | 上传并读回附件后填写链接 |
+| GitHub Release v0.3.0 | 通过 | https://github.com/harry-xuli/Hourbit/releases/tag/v0.3.0；四个附件均读回为 `uploaded` |
 
 ## 目标附件
 
@@ -53,4 +53,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 Get-AuthenticodeSignature .\artifacts\Hourbit-Setup-x64.exe
 ```
 
-GitHub Release 创建并读回四个附件后，才可宣布 v0.3.0 发布完成。
+GitHub Release 已创建并读回四个附件，v0.3.0 发布完成。

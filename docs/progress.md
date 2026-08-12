@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-v0.3.0 功能开发、本地全量验证、安装包与免安装包构建均已完成，正在进行最终复核和 GitHub 发布。该分支完整包含此前尚未发布的 v0.2.2 提醒可靠性与安装兼容修复，不会从旧版 `origin/main` 重新开发。
+v0.3.0 功能开发、全量验证、安装包与免安装包构建、独立复核及 GitHub 发布均已完成。该版本完整包含此前尚未发布的 v0.2.2 提醒可靠性与安装兼容修复。
 
 ## 已完成
 
@@ -45,7 +45,7 @@ v0.3.0 功能开发、本地全量验证、安装包与免安装包构建均已�
 
 - 普通 Git HTTPS 推送 dry-run 已通过；
 - Git HTTPS 凭据可用；GitHub CLI 登录状态将在上传附件前再次确认；
-- `v0.3.0` 标签和 GitHub Release 尚未创建；
+- `main`、`v0.3.0` 标签及 GitHub Release 已同步：https://github.com/harry-xuli/Hourbit/releases/tag/v0.3.0；
 - 最终附件将包含 Setup EXE、Portable ZIP 和两个 SHA256 文件；
 - 如最终仍未配置 Authenticode，Release Notes 将明确标注 `NotSigned`。
 
