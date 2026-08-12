@@ -6,6 +6,8 @@ namespace Moment.App.Timeline;
 
 public sealed class TimelineItemViewModel : ObservableObject
 {
+    private DateTimeOffset _now;
+
     public TimelineItemViewModel(TimelineRow row, DateTimeOffset now)
     {
         OccurrenceId = row.OccurrenceId;
@@ -15,6 +17,7 @@ public sealed class TimelineItemViewModel : ObservableObject
         Importance = row.Importance;
         State = row.State;
         RecurrenceText = row.RecurrenceText;
+        _now = now;
         GroupName = GroupFor(row, now);
         StatusText = StatusFor(row, now);
     }
@@ -24,6 +27,27 @@ public sealed class TimelineItemViewModel : ObservableObject
     public DateTimeOffset DueAt { get; }
     public string TimeText => DueAt.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
     public ReminderKind Kind { get; }
+    public bool IsCountdown => Kind == ReminderKind.Countdown;
+    public string RemainingText
+    {
+        get
+        {
+            if (!IsCountdown)
+                return string.Empty;
+            var remaining = DueAt - _now;
+            if (remaining <= TimeSpan.Zero)
+                return "已到时";
+            var totalSeconds = (long)Math.Floor(remaining.TotalSeconds);
+            if (totalSeconds <= 0)
+                return "已到时";
+            var hours = totalSeconds / 3600;
+            var minutes = totalSeconds % 3600 / 60;
+            var seconds = totalSeconds % 60;
+            return hours > 0
+                ? $"剩余 {hours}:{minutes:00}:{seconds:00}"
+                : $"剩余 {minutes:00}:{seconds:00}";
+        }
+    }
     public ReminderImportance Importance { get; }
     public OccurrenceState State { get; }
     public string? RecurrenceText { get; }
@@ -48,6 +72,14 @@ public sealed class TimelineItemViewModel : ObservableObject
     public string StatusText { get; }
     public string GroupName { get; }
     public int GroupOrder => GroupName switch { "已错过" => 0, "接下来" => 1, _ => 2 };
+
+    public void UpdateNow(DateTimeOffset now)
+    {
+        if (!IsCountdown || _now == now)
+            return;
+        _now = now;
+        OnPropertyChanged(nameof(RemainingText));
+    }
 
     private static string GroupFor(TimelineRow row, DateTimeOffset now) => row.State switch
     {

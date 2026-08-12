@@ -13,6 +13,24 @@ namespace Moment.App.Tests.Timeline;
 public sealed class TimelineViewModelTests
 {
     [Fact]
+    public async Task Countdown_tick_updates_loaded_rows_without_querying_database()
+    {
+        var query = new MutableTimelineQuery(new TimelineSnapshot(
+            [],
+            [TestData.Row(
+                "倒计时", "2026-07-29T10:05:00+08:00") with
+            { Kind = ReminderKind.Countdown }],
+            0, 0));
+        var vm = Create(query);
+        await vm.LoadAsync();
+
+        vm.UpdateCountdowns(DateTimeOffset.Parse("2026-07-29T10:00:01+08:00"));
+
+        Assert.Equal("剩余 04:59", Assert.Single(vm.Items).RemainingText);
+        Assert.Equal(1, query.Calls);
+    }
+
+    [Fact]
     public void Timeline_period_uses_the_active_culture_week_start()
     {
         var culture = CultureInfo.GetCultureInfo("fr-FR");

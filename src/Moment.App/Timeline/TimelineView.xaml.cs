@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using ItemsControl = System.Windows.Controls.ItemsControl;
 using ListBox = System.Windows.Controls.ListBox;
@@ -15,10 +16,19 @@ public partial class TimelineView : UserControl
 {
     private TimelineViewModel? _viewModel;
     private bool _isSynchronizingSelection;
+    private readonly DispatcherTimer _countdownTimer;
 
     public TimelineView()
     {
         InitializeComponent();
+        _countdownTimer = new DispatcherTimer(
+            TimeSpan.FromSeconds(1),
+            DispatcherPriority.Background,
+            (_, _) => _viewModel?.UpdateCountdowns(DateTimeOffset.Now),
+            Dispatcher)
+        {
+            IsEnabled = false
+        };
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -132,11 +142,15 @@ public partial class TimelineView : UserControl
     private void OnLoaded(object sender, RoutedEventArgs eventArgs)
     {
         AttachViewModel(DataContext as TimelineViewModel);
+        _countdownTimer.Start();
         SynchronizeSelection();
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs eventArgs) =>
+    private void OnUnloaded(object sender, RoutedEventArgs eventArgs)
+    {
+        _countdownTimer.Stop();
         AttachViewModel(null);
+    }
 
     private void OnDataContextChanged(
         object sender,

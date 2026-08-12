@@ -397,6 +397,12 @@ public sealed class TimelineViewModel : ObservableObject
         await LoadAsync();
     }
 
+    public void UpdateCountdowns(DateTimeOffset now)
+    {
+        foreach (var item in Items)
+            item.UpdateNow(now);
+    }
+
     private Task CopyAsync(CancellationToken ct)
     {
         if (SelectedTodo is { } todo)
