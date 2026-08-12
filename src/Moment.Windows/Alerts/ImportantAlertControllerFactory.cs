@@ -5,13 +5,19 @@ namespace Moment.Windows.Alerts;
 /// <summary>Production construction path: never selects the silent test fallback.</summary>
 public static class ImportantAlertControllerFactory
 {
-    public static ImportantAlertController Create(IImportantAlertPresenter presenter, IReminderActionService actions, ILoopingAudioPlayer? player = null) =>
-        new(presenter, actions, CreateAudio(player));
+    public static ImportantAlertController Create(
+        IImportantAlertPresenter presenter,
+        IReminderActionService actions,
+        ILoopingAudioPlayer? player = null,
+        Notifications.IReminderActionCompletedObserver? actionCompletedObserver = null) =>
+        new(presenter, actions, CreateAudio(player),
+            actionCompletedObserver: actionCompletedObserver);
 
     public static ImportantAlertController CreatePresenterManaged(
         IImportantAlertPresenter presenter,
-        IReminderActionService actions) =>
-        new(presenter, actions);
+        IReminderActionService actions,
+        Notifications.IReminderActionCompletedObserver? actionCompletedObserver = null) =>
+        new(presenter, actions, actionCompletedObserver: actionCompletedObserver);
 
     public static IImportantAlertAudio CreateAudio(
         ILoopingAudioPlayer? player = null,

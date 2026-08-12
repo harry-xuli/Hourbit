@@ -8,6 +8,38 @@ public sealed class NotificationLifecycleTests
 {
     private static readonly Guid OccurrenceId = Guid.Parse("4b3eb3c9-970d-47d7-89e2-bab9778a406d");
 
+    [Theory]
+    [InlineData("complete")]
+    [InlineData("ignore")]
+    [InlineData("snooze10")]
+    public async Task Successful_button_action_requests_one_timeline_refresh(string action)
+    {
+        var source = new FakeActivationSource();
+        var observer = new RecordingActionCompletedObserver();
+        await using var router = new NotificationActivationRouter(
+            source, new RecordingActions(), new RecordingNavigation(), observer);
+        router.Start();
+
+        await source.RaiseAsync($"action={action}&occurrenceId={OccurrenceId}");
+
+        Assert.Equal(1, observer.CallCount);
+    }
+
+    [Fact]
+    public async Task Failed_button_action_does_not_request_timeline_refresh()
+    {
+        var source = new FakeActivationSource();
+        var observer = new RecordingActionCompletedObserver();
+        await using var router = new NotificationActivationRouter(
+            source, new ThrowingActions(), new RecordingNavigation(), observer);
+        router.Start();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            source.RaiseAsync($"action=complete&occurrenceId={OccurrenceId}"));
+
+        Assert.Equal(0, observer.CallCount);
+    }
+
     [Fact]
     public async Task Router_separates_button_actions_from_navigation_and_rejects_malformed_input()
     {
@@ -327,4 +359,23 @@ public sealed class NotificationLifecycleTests
         }
     }
     private sealed class RecordingActions : IReminderActionService { public List<string> Calls { get; }=[]; public Task CompleteAsync(Guid id,CancellationToken ct){Calls.Add("complete:"+id);return Task.CompletedTask;} public Task IgnoreAsync(Guid id,CancellationToken ct){Calls.Add("ignore:"+id);return Task.CompletedTask;} public Task<ReminderOccurrence> SnoozeAsync(Guid id,TimeSpan delay,CancellationToken ct)=>Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(),DateTimeOffset.UtcNow)); }
+    private sealed class ThrowingActions : IReminderActionService
+    {
+        public Task CompleteAsync(Guid id, CancellationToken ct) =>
+            Task.FromException(new InvalidOperationException("action failed"));
+        public Task IgnoreAsync(Guid id, CancellationToken ct) =>
+            Task.FromException(new InvalidOperationException("action failed"));
+        public Task<ReminderOccurrence> SnoozeAsync(Guid id, TimeSpan delay, CancellationToken ct) =>
+            Task.FromException<ReminderOccurrence>(new InvalidOperationException("action failed"));
+    }
+    private sealed class RecordingActionCompletedObserver : IReminderActionCompletedObserver
+    {
+        public int CallCount { get; private set; }
+        public Task OnCompletedAsync(CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            CallCount++;
+            return Task.CompletedTask;
+        }
+    }
 }

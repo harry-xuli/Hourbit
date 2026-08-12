@@ -10,11 +10,20 @@ public sealed class WindowsNotificationRuntime : IAsyncDisposable
     private bool _started;
     private TaskCompletionSource? _disposeCompletion;
 
-    public WindowsNotificationRuntime(INotificationActivationSource source, IReminderActionService actions, INotificationNavigator navigator) =>
-        _router = new NotificationActivationRouter(source, actions, navigator);
+    public WindowsNotificationRuntime(
+        INotificationActivationSource source,
+        IReminderActionService actions,
+        INotificationNavigator navigator,
+        IReminderActionCompletedObserver? actionCompletedObserver = null) =>
+        _router = new NotificationActivationRouter(
+            source, actions, navigator, actionCompletedObserver);
 
-    public WindowsNotificationRuntime(IReminderActionService actions, INotificationNavigator navigator) :
-        this(new WindowsAppNotificationActivationSource(), actions, navigator) { }
+    public WindowsNotificationRuntime(
+        IReminderActionService actions,
+        INotificationNavigator navigator,
+        IReminderActionCompletedObserver? actionCompletedObserver = null) :
+        this(new WindowsAppNotificationActivationSource(), actions, navigator,
+            actionCompletedObserver) { }
 
     public void Start()
     {

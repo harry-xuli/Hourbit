@@ -2,11 +2,45 @@ using Moment.Core.Domain;
 using Moment.Core.Services;
 using Moment.TestSupport;
 using Moment.Windows.Alerts;
+using Moment.Windows.Notifications;
 
 namespace Moment.Windows.Tests.Alerts;
 
 public sealed class ImportantAlertControllerTests
 {
+    [Theory]
+    [InlineData(ImportantAlertAction.Complete)]
+    [InlineData(ImportantAlertAction.Ignore)]
+    [InlineData(ImportantAlertAction.Snooze30)]
+    public async Task Successful_alert_action_requests_one_timeline_refresh(
+        ImportantAlertAction action)
+    {
+        var observer = new RecordingActionCompletedObserver();
+        await using var controller = new ImportantAlertController(
+            new RecordingPresenter(action), new RecordingActions(),
+            actionCompletedObserver: observer);
+
+        await controller.EnqueueAsync(
+            TestData.Alert("Important", dueMinute: 1), CancellationToken.None);
+
+        Assert.Equal(1, observer.CallCount);
+    }
+
+    [Fact]
+    public async Task Failed_alert_action_does_not_request_timeline_refresh()
+    {
+        var observer = new RecordingActionCompletedObserver();
+        await using var controller = new ImportantAlertController(
+            new RecordingPresenter(ImportantAlertAction.Complete),
+            new ThrowingActions(new InvalidOperationException("action failed")),
+            actionCompletedObserver: observer);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            controller.EnqueueAsync(
+                TestData.Alert("Important", dueMinute: 1), CancellationToken.None));
+
+        Assert.Equal(0, observer.CallCount);
+    }
     [Fact]
     public async Task Admission_completes_while_the_owned_alert_is_waiting_for_user_action()
     {
@@ -335,5 +369,16 @@ public sealed class ImportantAlertControllerTests
         public Task<ReminderOccurrence> SnoozeAsync(
             Guid occurrenceId, TimeSpan delay, CancellationToken ct) =>
             Task.FromException<ReminderOccurrence>(failure);
+    }
+
+    private sealed class RecordingActionCompletedObserver : IReminderActionCompletedObserver
+    {
+        public int CallCount { get; private set; }
+        public Task OnCompletedAsync(CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            CallCount++;
+            return Task.CompletedTask;
+        }
     }
 }

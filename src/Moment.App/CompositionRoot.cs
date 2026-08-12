@@ -159,6 +159,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         await TryCreateDailyBackupAsync(backupService, settings, ct);
 
         var schedulerSignal = new SchedulerSignalProxy();
+        var actionCompletedObserver = new ReminderActionCompletedObserverProxy();
         var recurrence = new RecurrenceCalculator();
         var actions = new ReminderActionService(repository, recurrence, schedulerSignal, clock, zone);
         var windowPlacement = new WindowPlacementService();
@@ -168,7 +169,7 @@ public sealed class CompositionRoot : IAsyncDisposable
             () => CreateAppAlertAudio(() => settings.AlertVolume),
             () => settings.CustomAlertSoundPath);
         var importantAlerts = ImportantAlertControllerFactory.CreatePresenterManaged(
-            importantAlertPresenter, actions);
+            importantAlertPresenter, actions, actionCompletedObserver);
         var notificationPlatform = new WindowsAppNotificationPlatform();
         var notificationSink = new AppNotificationSink(notificationPlatform, importantAlerts, actions);
         var scheduler = new ReminderScheduler(
@@ -220,6 +221,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);
+        actionCompletedObserver.Target = timelineRefresh;
         var lifetime = new CancellationTokenSource();
         var reminderRecoveryService = new ReminderRecoveryService(
             repository,
@@ -244,7 +246,8 @@ public sealed class CompositionRoot : IAsyncDisposable
             timeline);
         var mainWindow = new MainWindow { DataContext = timeline };
         var navigator = new WindowNotificationNavigator(mainWindow);
-        var notificationRuntime = new WindowsNotificationRuntime(actions, navigator);
+        var notificationRuntime = new WindowsNotificationRuntime(
+            actions, navigator, actionCompletedObserver);
         var resumeMonitor = new SystemResumeMonitor(
             (_, resumeCancellation) =>
                 reminderRecovery.RecoverAndRefreshAsync(resumeCancellation));
@@ -391,6 +394,8 @@ public sealed class CompositionRoot : IAsyncDisposable
         _hotkey.Dispose();
         await _resumeMonitor.DisposeAsync();
         await _reminderRecovery.DisposeAsync();
+        await _notificationRuntime.DisposeAsync();
+        await _importantAlerts.DisposeAsync();
         try
         {
             await _timelineRefresh.DisposeAsync();
@@ -406,10 +411,8 @@ public sealed class CompositionRoot : IAsyncDisposable
                 // Refresh disposal must not prevent the remaining runtime cleanup.
             }
         }
-        await _notificationRuntime.DisposeAsync();
         await _singleInstance.DisposeAsync();
         _scheduler.Dispose();
-        await _importantAlerts.DisposeAsync();
         _runtimeFailureReporting.Dispose();
         _lifetime.Dispose();
     }
@@ -628,6 +631,15 @@ public sealed class CompositionRoot : IAsyncDisposable
     {
         public ISchedulerSignal? Target { get; set; }
         public void Refresh() => Target?.Refresh();
+    }
+
+    private sealed class ReminderActionCompletedObserverProxy :
+        IReminderActionCompletedObserver
+    {
+        public TimelineRefreshCoordinator? Target { get; set; }
+
+        public Task OnCompletedAsync(CancellationToken ct) =>
+            Target?.RequestAsync(ct) ?? Task.CompletedTask;
     }
 
     internal sealed class ConfigurableBackupRestoreLifecycle :

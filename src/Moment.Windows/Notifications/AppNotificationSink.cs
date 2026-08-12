@@ -55,6 +55,22 @@ public interface INotificationActivationSource
 public sealed record NotificationNavigation(string Section, Guid? OccurrenceId);
 public interface INotificationNavigator { Task NavigateAsync(NotificationNavigation navigation, CancellationToken ct); }
 
+public interface IReminderActionCompletedObserver
+{
+    Task OnCompletedAsync(CancellationToken ct);
+}
+
+public sealed class NoopReminderActionCompletedObserver : IReminderActionCompletedObserver
+{
+    public static NoopReminderActionCompletedObserver Instance { get; } = new();
+    private NoopReminderActionCompletedObserver() { }
+    public Task OnCompletedAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return Task.CompletedTask;
+    }
+}
+
 public interface IImportantAlertDelivery
 {
     Task EnqueueAsync(ReminderAlert alert, CancellationToken ct);
@@ -234,8 +250,14 @@ public sealed class AppNotificationSink(INotificationPlatform platform, IImporta
 /// disposal gate closes may finish, and disposal drains it; callbacks reaching the gate after
 /// it closes are ignored, including delegates captured by the source before unsubscription.
 /// </summary>
-public sealed class NotificationActivationRouter(INotificationActivationSource source, IReminderActionService actions, INotificationNavigator navigator) : IAsyncDisposable
+public sealed class NotificationActivationRouter(
+    INotificationActivationSource source,
+    IReminderActionService actions,
+    INotificationNavigator navigator,
+    IReminderActionCompletedObserver? actionCompletedObserver = null) : IAsyncDisposable
 {
+    private readonly IReminderActionCompletedObserver _actionCompletedObserver =
+        actionCompletedObserver ?? NoopReminderActionCompletedObserver.Instance;
     private readonly object _lifecycleGate = new();
     private bool _started;
     private int _inFlight;
@@ -301,6 +323,7 @@ public sealed class NotificationActivationRouter(INotificationActivationSource s
                 if (action.Action == NotificationAction.Complete) await actions.CompleteAsync(action.OccurrenceId, CancellationToken.None);
                 else if (action.Action == NotificationAction.Ignore) await actions.IgnoreAsync(action.OccurrenceId, CancellationToken.None);
                 else await actions.SnoozeAsync(action.OccurrenceId, TimeSpan.FromMinutes(10), CancellationToken.None);
+                await _actionCompletedObserver.OnCompletedAsync(CancellationToken.None);
                 return;
             }
 

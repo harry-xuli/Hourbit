@@ -17,6 +17,7 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
     private readonly IImportantAlertPresenter _presenter;
     private readonly IReminderActionService _actions;
     private readonly IImportantAlertAudio _audio;
+    private readonly IReminderActionCompletedObserver _actionCompletedObserver;
     private readonly TimeProvider _timeProvider;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Task _worker;
@@ -29,7 +30,8 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         IReminderActionService actions,
         IImportantAlertAudio? audio = null,
         TimeProvider? timeProvider = null,
-        int queueCapacity = DefaultQueueCapacity)
+        int queueCapacity = DefaultQueueCapacity,
+        IReminderActionCompletedObserver? actionCompletedObserver = null)
     {
         if (queueCapacity <= 0)
         {
@@ -39,6 +41,8 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
         _presenter = presenter ?? throw new ArgumentNullException(nameof(presenter));
         _actions = actions ?? throw new ArgumentNullException(nameof(actions));
         _audio = audio ?? SilentImportantAlertAudio.Instance;
+        _actionCompletedObserver = actionCompletedObserver ??
+            NoopReminderActionCompletedObserver.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _queue = Channel.CreateBounded<PendingAlert>(new BoundedChannelOptions(queueCapacity)
         {
@@ -173,7 +177,10 @@ public sealed class ImportantAlertController : IImportantAlertDelivery, IAsyncDi
                 ReportPresentationFailure(new ImportantAlertFailure(pending.Alert, exception));
             }
             if (action is { } selectedAction)
+            {
                 await ApplyActionAsync(pending.Alert.OccurrenceId, selectedAction, ct).ConfigureAwait(false);
+                await _actionCompletedObserver.OnCompletedAsync(ct).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
