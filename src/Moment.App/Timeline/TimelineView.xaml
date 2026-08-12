@@ -92,25 +92,30 @@
                     automation:AutomationProperties.Name="{Binding AccessibleName}">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="112" />
-                        <ColumnDefinition Width="112" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="TodoDueDate"
+                    <TextBlock x:Name="TodoStatusSymbol"
                                Grid.Column="0"
-                               Text="{Binding DueDateText}"
+                               Text="{Binding StatusSymbol}"
+                               FontFamily="Segoe UI Symbol"
+                               Foreground="{DynamicResource AccentBrush}"
+                               FontSize="17"
+                               Margin="0,0,12,0"
                                VerticalAlignment="Center" />
                     <TextBlock x:Name="TodoTitle"
                                Grid.Column="1"
                                Text="{Binding Title}"
                                FontSize="17"
                                FontWeight="SemiBold"
+                               MinWidth="40"
                                TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center" />
                     <StackPanel Grid.Column="2"
                                 Orientation="Horizontal"
-                                VerticalAlignment="Center">
+                                VerticalAlignment="Center"
+                                Margin="12,0,0,0">
                         <TextBlock x:Name="TodoImportanceSymbol"
                                    Text="{Binding ImportanceSymbol}"
                                    Foreground="{DynamicResource SecondaryTextBrush}"
@@ -118,19 +123,6 @@
                                    Margin="0,0,8,0" />
                         <TextBlock x:Name="TodoImportance"
                                    Text="{Binding ImportanceText}" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="3"
-                                Orientation="Horizontal"
-                                VerticalAlignment="Center">
-                        <TextBlock x:Name="TodoStatusSymbol"
-                                   Text="{Binding StatusSymbol}"
-                                   FontFamily="Segoe UI Symbol"
-                                   Foreground="{DynamicResource AccentBrush}"
-                                   FontSize="17"
-                                   Margin="0,0,8,0" />
-                        <TextBlock x:Name="TodoStatus"
-                                   Text="{Binding StatusText}"
-                                   Foreground="{DynamicResource AccentBrush}" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -144,23 +136,15 @@
                             Value="SemiBold" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsOverdue}" Value="True">
-                    <Setter TargetName="TodoDueDate" Property="Foreground"
-                            Value="{DynamicResource MissedBrush}" />
                     <Setter TargetName="TodoStatusSymbol" Property="Foreground"
-                            Value="{DynamicResource MissedBrush}" />
-                    <Setter TargetName="TodoStatus" Property="Foreground"
                             Value="{DynamicResource MissedBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsCompleted}" Value="True">
                     <Setter TargetName="TodoStatusSymbol" Property="Foreground"
                             Value="{DynamicResource CompletedBrush}" />
-                    <Setter TargetName="TodoStatus" Property="Foreground"
-                            Value="{DynamicResource CompletedBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                              Value="True">
-                    <Setter TargetName="TodoDueDate" Property="Foreground"
-                            Value="{DynamicResource SelectionTextBrush}" />
                     <Setter TargetName="TodoTitle" Property="Foreground"
                             Value="{DynamicResource SelectionTextBrush}" />
                     <Setter TargetName="TodoImportanceSymbol" Property="Foreground"
@@ -168,8 +152,6 @@
                     <Setter TargetName="TodoImportance" Property="Foreground"
                             Value="{DynamicResource SelectionTextBrush}" />
                     <Setter TargetName="TodoStatusSymbol" Property="Foreground"
-                            Value="{DynamicResource SelectionTextBrush}" />
-                    <Setter TargetName="TodoStatus" Property="Foreground"
                             Value="{DynamicResource SelectionTextBrush}" />
                 </DataTrigger>
             </DataTemplate.Triggers>

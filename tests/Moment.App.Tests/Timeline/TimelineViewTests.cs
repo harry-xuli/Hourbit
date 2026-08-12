@@ -216,6 +216,8 @@ public sealed class TimelineViewTests
             var pending = Assert.IsType<ListBox>(view.FindName("PendingTodoList"));
             var todoRow = Assert.IsType<ListBoxItem>(
                 pending.ItemContainerGenerator.ContainerFromIndex(0));
+            var todoTitle = Assert.Single(
+                Descendants<TextBlock>(todoRow), text => text.Name == "TodoTitle");
 
             Assert.Equal("待办事项", todoHeader.Text);
             Assert.Equal("待办事项", PeerName(todoHeader));
@@ -229,9 +231,12 @@ public sealed class TimelineViewTests
                         todoHeader.TranslatePoint(new Point(), view).X);
             Assert.False(completed.IsExpanded);
             Assert.Equal("待办：1，提醒：0", completedSummary.ToolTip);
-            Assert.Contains("已逾期", VisibleText(view));
+            Assert.Contains("!", VisibleText(view));
             Assert.Contains("重要", VisibleText(view));
-            Assert.Contains("无日期", VisibleText(view));
+            Assert.DoesNotContain("无日期", VisibleText(view));
+            Assert.DoesNotContain(
+                Descendants<TextBlock>(todoRow), text => text.Name == "TodoDueDate");
+            Assert.True(todoTitle.ActualWidth >= 40d);
             Assert.DoesNotContain("完成任务", VisibleText(view));
         });
 
