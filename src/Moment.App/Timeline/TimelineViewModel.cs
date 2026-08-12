@@ -32,6 +32,7 @@ public sealed class TimelineViewModel : ObservableObject
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
     private readonly Action<LocalDateRange> _openAnalytics;
+    private readonly Action _openHelp;
     private CancellationTokenSource? _loadCancellation;
     private TimelineItemViewModel? _selectedItem;
     private TodoTimelineItemViewModel? _selectedTodo;
@@ -56,7 +57,8 @@ public sealed class TimelineViewModel : ObservableObject
         ITodoDialogService todoDialogs,
         TimeZoneInfo zone,
         CultureInfo? culture = null,
-        Action<LocalDateRange>? openAnalytics = null)
+        Action<LocalDateRange>? openAnalytics = null,
+        Action? openHelp = null)
     {
         _query = query;
         _clock = clock;
@@ -68,6 +70,7 @@ public sealed class TimelineViewModel : ObservableObject
         _zone = zone;
         _culture = culture ?? CultureInfo.CurrentCulture;
         _openAnalytics = openAnalytics ?? (_ => { });
+        _openHelp = openHelp ?? (() => { });
         _selectedDate = LocalToday;
         _selectedPeriodKind = TimelinePeriodKind.Day;
         _currentPeriod = TimelinePeriod.Create(
@@ -87,6 +90,11 @@ public sealed class TimelineViewModel : ObservableObject
         OpenQuickAddCommand = new AsyncCommand((_, _) => ObserveAsync(() =>
         {
             _dialogs.OpenQuickAdd();
+            return Task.CompletedTask;
+        }));
+        OpenHelpCommand = new AsyncCommand((_, _) => ObserveAsync(() =>
+        {
+            _openHelp();
             return Task.CompletedTask;
         }));
         SelectDayPeriodCommand = CreatePeriodSelectionCommand(TimelinePeriodKind.Day);
@@ -114,6 +122,7 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand CompleteCommand { get; }
     public IAsyncCommand CopyCommand { get; }
     public IAsyncCommand OpenQuickAddCommand { get; }
+    public IAsyncCommand OpenHelpCommand { get; }
     public IAsyncCommand SelectDayPeriodCommand { get; }
     public IAsyncCommand SelectWeekPeriodCommand { get; }
     public IAsyncCommand SelectMonthPeriodCommand { get; }

@@ -111,6 +111,7 @@ public sealed class TimelineViewTests
             viewModel.LoadAsync().GetAwaiter().GetResult();
             var view = Show(viewModel);
             var button = Assert.IsType<Button>(view.FindName("NewReminderButton"));
+            var help = Assert.IsType<Button>(view.FindName("HelpButton"));
             var content = Assert.IsType<StackPanel>(button.Content);
             var icon = Assert.IsType<Viewbox>(content.Children[0]);
             var label = Assert.IsType<TextBlock>(content.Children[1]);
@@ -119,6 +120,10 @@ public sealed class TimelineViewTests
             Assert.Equal(16d, icon.ActualHeight);
             Assert.Equal("新建提醒", label.Text);
             Assert.Equal(10d, icon.Margin.Right);
+            Assert.Equal("?", help.Content);
+            Assert.Equal("使用说明", PeerName(help));
+            Assert.Equal("使用说明", help.ToolTip);
+            Assert.True(Peer(help).IsKeyboardFocusable());
 
             var iconCenter = icon.TranslatePoint(
                 new Point(icon.ActualWidth / 2d, icon.ActualHeight / 2d), button).Y;

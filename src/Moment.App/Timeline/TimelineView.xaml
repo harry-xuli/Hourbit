@@ -176,6 +176,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0"
                            Text="{Binding ProductName}"
@@ -204,7 +205,7 @@
                                FontWeight="SemiBold" VerticalAlignment="Center" />
                 </StackPanel>
                 <Button x:Name="NewReminderButton"
-                        Grid.Column="8"
+                        Grid.Column="9"
                         VerticalAlignment="Center"
                         Command="{Binding OpenQuickAddCommand}"
                         automation:AutomationProperties.Name="新建提醒"
@@ -226,6 +227,15 @@
                                    VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
+                <Button x:Name="HelpButton"
+                        Grid.Column="8"
+                        Command="{Binding OpenHelpCommand}"
+                        automation:AutomationProperties.Name="使用说明"
+                        Content="?"
+                        ToolTip="使用说明"
+                        FontSize="20"
+                        MinWidth="46" MinHeight="46"
+                        Margin="0,0,12,0" />
             </Grid>
         </Border>
 

@@ -36,6 +36,7 @@ public sealed class TrayIconController : IDisposable
         Action openQuickAdd,
         Action<TimeSpan> createCountdown,
         Action openAnalytics,
+        Action openHelp,
         Action openSettings,
         Func<Task> exit)
     {
@@ -54,6 +55,7 @@ public sealed class TrayIconController : IDisposable
                 new("20 分钟", () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(20))))
             ]),
             new("分析报告", () => InvokeAsync(openAnalytics)),
+            new("使用说明", () => InvokeAsync(openHelp)),
             new("设置", () => InvokeAsync(openSettings)),
             new("退出", ExitAsync)
         ]);
@@ -67,11 +69,12 @@ public sealed class TrayIconController : IDisposable
         Action openQuickAdd,
         Action<TimeSpan> createCountdown,
         Action openAnalytics,
+        Action openHelp,
         Action openSettings,
         Func<Task> exit) =>
         new(new WindowsFormsTrayMenuHost(), hasScheduled,
             new MessageBoxExitConfirmationService(), openTimeline, openQuickAdd,
-            createCountdown, openAnalytics, openSettings, exit);
+            createCountdown, openAnalytics, openHelp, openSettings, exit);
 
     public void Dispose()
     {

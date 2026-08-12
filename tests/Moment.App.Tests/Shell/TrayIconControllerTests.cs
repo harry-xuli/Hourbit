@@ -27,16 +27,19 @@ public sealed class TrayIconControllerTests
     {
         var host = new TrayHost();
         var analyticsOpens = 0;
+        var helpOpens = 0;
         using var controller = new TrayIconController(
             host, () => Task.FromResult(false), new Confirmation(true),
             () => { }, () => { }, _ => { }, () => analyticsOpens++,
-            () => { }, () => Task.CompletedTask);
+            () => helpOpens++, () => { }, () => Task.CompletedTask);
 
         Assert.Equal(
-            ["打开今天时间轴", "快速创建", "常用倒计时", "分析报告", "设置", "退出"],
+            ["打开今天时间轴", "快速创建", "常用倒计时", "分析报告", "使用说明", "设置", "退出"],
             host.Items.Select(item => item.Text));
         await host.Items.Single(item => item.Text == "分析报告").InvokeAsync();
+        await host.Items.Single(item => item.Text == "使用说明").InvokeAsync();
         Assert.Equal(1, analyticsOpens);
+        Assert.Equal(1, helpOpens);
     }
 
     [Fact]
@@ -47,7 +50,7 @@ public sealed class TrayIconControllerTests
         var exits = 0;
         using var controller = new TrayIconController(
             host, () => Task.FromResult(true), confirmation,
-            () => { }, () => { }, _ => { }, () => { }, () => { },
+            () => { }, () => { }, _ => { }, () => { }, () => { }, () => { },
             () => { exits++; return Task.CompletedTask; });
 
         await host.Items.Single(item => item.Text == "退出").InvokeAsync();

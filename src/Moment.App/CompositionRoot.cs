@@ -1,5 +1,6 @@
 using Moment.App.Alerts;
 using Moment.App.Analytics;
+using Moment.App.Help;
 using Moment.App.QuickAdd;
 using Moment.App.Settings;
 using Moment.App.Shell;
@@ -37,6 +38,7 @@ public sealed class CompositionRoot : IAsyncDisposable
     private readonly GlobalHotkeyService _hotkey;
     private readonly SingleInstanceCoordinator _singleInstance;
     private readonly TrayIconController _tray;
+    private readonly HelpWindowController _helpWindow;
     private readonly IReminderService _reminderService;
     private readonly IClock _clock;
     private readonly AppNotificationSink _notificationSink;
@@ -63,6 +65,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         GlobalHotkeyService hotkey,
         SingleInstanceCoordinator singleInstance,
         TrayIconController tray,
+        HelpWindowController helpWindow,
         IReminderService reminderService,
         IClock clock,
         AppNotificationSink notificationSink,
@@ -87,6 +90,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         _hotkey = hotkey;
         _singleInstance = singleInstance;
         _tray = tray;
+        _helpWindow = helpWindow;
         _reminderService = reminderService;
         _clock = clock;
         _notificationSink = notificationSink;
@@ -214,11 +218,13 @@ public sealed class CompositionRoot : IAsyncDisposable
             zone,
             CultureInfo.CurrentCulture);
         CompositionRoot? root = null;
+        var helpWindow = new HelpWindowController();
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, todos,
             dialogs, dialogs, zone,
             CultureInfo.CurrentCulture,
-            range => root?.ShowAnalytics(range));
+            range => root?.ShowAnalytics(range),
+            helpWindow.ShowAndFocus);
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);
@@ -264,6 +270,7 @@ public sealed class CompositionRoot : IAsyncDisposable
                     _ = root.CreateCountdownObservedAsync(delay);
             },
             () => root?.ShowAnalytics(),
+            helpWindow.ShowAndFocus,
             () => root?.ShowSettings(),
             () =>
             {
@@ -276,7 +283,7 @@ public sealed class CompositionRoot : IAsyncDisposable
             repository, scheduler, reminderRecoveryService,
             timelineRefresh, reminderRecovery,
             importantAlerts, notificationRuntime,
-            resumeMonitor, hotkey, singleInstance, tray, reminders, clock,
+            resumeMonitor, hotkey, singleInstance, tray, helpWindow, reminders, clock,
             notificationSink, importantAlertPresenter,
             windowPlacement, lifetime,
             dataFolder,
@@ -390,6 +397,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         _lifetime.Cancel();
         Analytics.Dispose();
         _tray.Dispose();
+        _helpWindow.Dispose();
         _analyticsWindow?.Close();
         _settingsWindow?.Close();
         _hotkey.Dispose();
