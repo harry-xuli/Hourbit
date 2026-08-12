@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-v0.3.0 功能开发已完成，正在进行全量验证、安装包/免安装包构建和 GitHub 发布。该分支完整包含此前尚未发布的 v0.2.2 提醒可靠性与安装兼容修复，不会从旧版 `origin/main` 重新开发。
+v0.3.0 功能开发、本地全量验证、安装包与免安装包构建均已完成，正在进行最终复核和 GitHub 发布。该分支完整包含此前尚未发布的 v0.2.2 提醒可靠性与安装兼容修复，不会从旧版 `origin/main` 重新开发。
 
 ## 已完成
 
@@ -31,7 +31,7 @@ v0.3.0 功能开发已完成，正在进行全量验证、安装包/免安装包
 - 倒计时与真实 WPF：19/19；
 - 帮助窗口、托盘和 TimelineView：18/18。
 
-以上数字是各任务的定向证据，可能互相重叠；最终不重复的全解决方案总数、smoke、产物大小和 SHA256 只在 Task 7 新鲜运行后写入发布检查表。
+最终不重复的全解决方案验证为 721/721（Core 250、Infrastructure 132、Windows 97、App 242），0 failed、0 skipped。发布脚本、12 事件 packaged smoke、敏感数据扫描和两个 SHA256 sidecar 均通过；产物详情见 `docs/release-checklist.md`。
 
 ## 延期
 
@@ -44,7 +44,7 @@ v0.3.0 功能开发已完成，正在进行全量验证、安装包/免安装包
 ## GitHub 与发布
 
 - 普通 Git HTTPS 推送 dry-run 已通过；
-- GitHub CLI 登录仍需在发布附件前完成；
+- Git HTTPS 凭据可用；GitHub CLI 登录状态将在上传附件前再次确认；
 - `v0.3.0` 标签和 GitHub Release 尚未创建；
 - 最终附件将包含 Setup EXE、Portable ZIP 和两个 SHA256 文件；
 - 如最终仍未配置 Authenticode，Release Notes 将明确标注 `NotSigned`。
