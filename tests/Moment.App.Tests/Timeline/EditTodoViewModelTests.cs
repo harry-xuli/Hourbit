@@ -40,6 +40,72 @@ public sealed class EditTodoViewModelTests
     }
 
     [Fact]
+    public async Task Copy_create_success_with_failed_refresh_retries_only_refresh()
+    {
+        var service = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = new EditTodoViewModel(
+            new TodoDraft("天气不错", null, ReminderImportance.Important),
+            Zone,
+            service,
+            _ => ++refreshAttempts == 1
+                ? Task.FromException(new InvalidOperationException("刷新失败"))
+                : Task.CompletedTask);
+
+        await vm.SaveAsync();
+        await vm.SaveAsync();
+
+        var created = Assert.Single(service.Created);
+        Assert.Equal("天气不错", created.Title);
+        Assert.Null(created.DueDate);
+        Assert.Equal(2, refreshAttempts);
+        Assert.False(vm.IsRefreshOnly);
+    }
+
+    [Fact]
+    public void Copy_factory_preserves_todo_fields_and_keeps_time_empty()
+    {
+        var source = new TodoItem(
+            Guid.NewGuid(), "天气不错",
+            DateTimeOffset.Parse("2026-08-10T09:00:00+08:00"),
+            new DateOnly(2026, 8, 15),
+            ReminderImportance.Important, false, null);
+
+        var vm = EditTodoViewModel.CreateCopy(
+            source, Zone, new RecordingTodoService(),
+            new RecordingReminderService());
+
+        Assert.Equal("天气不错", vm.Title);
+        Assert.Equal("2026-08-15", vm.DateText);
+        Assert.Equal("", vm.TimeText);
+        Assert.Equal(ReminderImportance.Important, vm.SelectedImportance);
+        Assert.Equal("新建待办副本", vm.EditorTitle);
+    }
+
+    [Fact]
+    public async Task Copy_todo_with_time_creates_a_new_reminder_without_converting_source()
+    {
+        var todos = new RecordingTodoService();
+        var reminders = new RecordingReminderService();
+        var vm = EditTodoViewModel.CreateCopy(
+            new TodoItem(
+                Guid.NewGuid(), "开会", DateTimeOffset.UtcNow,
+                new DateOnly(2026, 8, 12), ReminderImportance.Normal,
+                false, null),
+            Zone,
+            todos,
+            reminders);
+        vm.TimeText = "16:00";
+
+        await vm.SaveAsync();
+
+        var created = Assert.Single(reminders.Created);
+        Assert.Equal("开会", created.Title);
+        Assert.Empty(todos.ReminderConversions);
+        Assert.True(todos.SourceExists);
+    }
+
+    [Fact]
     public async Task Adding_a_time_converts_the_todo_to_a_reminder_atomically()
     {
         var service = new RecordingTodoService();
@@ -264,6 +330,7 @@ public sealed class EditTodoViewModelTests
 
     private sealed class RecordingTodoService : ITodoService
     {
+        public List<TodoDraft> Created { get; } = [];
         public List<(Guid TodoId, TodoDraft Draft)> Edits { get; } = [];
         public List<(Guid TodoId, ReminderDraft Draft)> ReminderConversions { get; } = [];
         public List<Guid> Completed { get; } = [];
@@ -271,8 +338,14 @@ public sealed class EditTodoViewModelTests
         public Exception? ConversionFailure { get; init; }
         public bool SourceExists { get; private set; } = true;
 
-        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
-            throw new NotSupportedException();
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct)
+        {
+            Created.Add(draft);
+            return Task.FromResult(new TodoItem(
+                Guid.NewGuid(), draft.Title,
+                DateTimeOffset.Parse("2026-08-12T15:42:13+08:00"),
+                draft.DueDate, draft.Importance, false, null));
+        }
 
         public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct)
         {
@@ -322,6 +395,20 @@ public sealed class EditTodoViewModelTests
             if (!SourceExists)
                 throw new InvalidOperationException("待办源已删除。");
         }
+    }
+
+    private sealed class RecordingReminderService : IReminderService
+    {
+        public List<ReminderDraft> Created { get; } = [];
+        public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct)
+        {
+            Created.Add(draft);
+            return Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), draft.DueAt));
+        }
+        public Task EditAsync(Guid occurrenceId, ReminderDraft draft, SeriesScope scope, CancellationToken ct) =>
+            throw new NotSupportedException();
+        public Task DeleteAsync(Guid occurrenceId, SeriesScope scope, CancellationToken ct) =>
+            throw new NotSupportedException();
     }
 
     private sealed class BlockingTodoService : ITodoService

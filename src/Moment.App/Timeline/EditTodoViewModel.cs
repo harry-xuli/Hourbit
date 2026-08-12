@@ -10,6 +10,7 @@ public sealed class EditTodoViewModel : ObservableObject
 {
     private readonly TimeZoneInfo _zone;
     private readonly ITodoService? _service;
+    private IReminderService? _reminderService;
     private readonly Func<CancellationToken, Task> _afterSaved;
     private string _title;
     private string _dateText;
@@ -18,6 +19,7 @@ public sealed class EditTodoViewModel : ObservableObject
     private string? _errorMessage;
     private TodoDraft? _persistedSaveDraft;
     private string? _refreshOnlyMessage;
+    private bool _createMode;
     private int _operationInProgress;
 
     public EditTodoViewModel(TodoDraft draft, TimeZoneInfo zone)
@@ -29,6 +31,18 @@ public sealed class EditTodoViewModel : ObservableObject
         _selectedImportance = draft.Importance;
         _afterSaved = _ => Task.CompletedTask;
         InitializeCommands();
+    }
+
+    public EditTodoViewModel(
+        TodoDraft draft,
+        TimeZoneInfo zone,
+        ITodoService service,
+        Func<CancellationToken, Task>? afterSaved = null)
+        : this(draft, zone)
+    {
+        _service = service ?? throw new ArgumentNullException(nameof(service));
+        _afterSaved = afterSaved ?? (_ => Task.CompletedTask);
+        _createMode = true;
     }
 
     public EditTodoViewModel(
@@ -52,6 +66,7 @@ public sealed class EditTodoViewModel : ObservableObject
     public event EventHandler? CloseRequested;
 
     public Guid TodoId { get; }
+    public string EditorTitle => _createMode ? "新建待办副本" : "编辑待办";
     public bool IsCompleted { get; }
     public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
     public bool IsRefreshOnly => _refreshOnlyMessage is not null;
@@ -117,6 +132,24 @@ public sealed class EditTodoViewModel : ObservableObject
     {
         get => _errorMessage;
         private set => SetProperty(ref _errorMessage, value);
+    }
+
+    public static EditTodoViewModel CreateCopy(
+        TodoItem source,
+        TimeZoneInfo zone,
+        ITodoService service,
+        IReminderService reminderService,
+        Func<CancellationToken, Task>? afterSaved = null)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var viewModel = new EditTodoViewModel(
+            new TodoDraft(source.Title, source.DueDate, source.Importance),
+            zone,
+            service,
+            afterSaved);
+        viewModel._reminderService = reminderService ??
+            throw new ArgumentNullException(nameof(reminderService));
+        return viewModel;
     }
 
     public bool TryBuildDraft(out ItemDraft? draft)
@@ -217,6 +250,13 @@ public sealed class EditTodoViewModel : ObservableObject
             switch (draft)
             {
                 case TodoDraft todoDraft:
+                    if (_createMode)
+                    {
+                        await _service.CreateAsync(todoDraft, ct);
+                        EnterRefreshOnly(
+                            "待办副本已创建，但时间轴刷新失败。请仅重试刷新。");
+                        break;
+                    }
                     if (!TodoDraftEquals(_persistedSaveDraft, todoDraft))
                     {
                         await _service.EditAsync(TodoId, todoDraft, ct);
@@ -225,6 +265,16 @@ public sealed class EditTodoViewModel : ObservableObject
                     ordinarySaveAwaitingRefresh = true;
                     break;
                 case ReminderDraft reminderDraft:
+                    if (_createMode)
+                    {
+                        if (_reminderService is null)
+                            throw new InvalidOperationException(
+                                "Reminder copy service is not connected.");
+                        await _reminderService.CreateAsync(reminderDraft, ct);
+                        EnterRefreshOnly(
+                            "提醒副本已创建，但时间轴刷新失败。请仅重试刷新。");
+                        break;
+                    }
                     await _service.ConvertToReminderAsync(TodoId, reminderDraft, ct);
                     _persistedSaveDraft = null;
                     EnterRefreshOnly(

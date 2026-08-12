@@ -113,6 +113,82 @@ public sealed class EditReminderViewModelTests
         Assert.Null(vm.ErrorMessage);
     }
 
+    [Fact]
+    public async Task Copy_create_success_with_failed_refresh_retries_only_refresh()
+    {
+        var reminders = new RecordingReminderService();
+        var todos = new RecordingTodoService();
+        var refreshAttempts = 0;
+        var vm = new EditReminderViewModel(
+            new ReminderDraft(
+                "按时吃饭",
+                DateTimeOffset.Parse("2026-08-12T15:43:00+08:00"),
+                ReminderKind.Plan,
+                ReminderImportance.Normal,
+                RecurrenceRule.Daily(new TimeOnly(15, 43))),
+            Zone,
+            reminders,
+            todos,
+            _ => ++refreshAttempts == 1
+                ? Task.FromException(new InvalidOperationException("刷新失败"))
+                : Task.CompletedTask);
+
+        await vm.SaveAsync();
+        await vm.SaveAsync();
+
+        var created = Assert.Single(reminders.Created);
+        Assert.Equal("按时吃饭", created.Title);
+        Assert.Equal("15:43", created.DueAt.ToString("HH:mm"));
+        Assert.Equal(2, refreshAttempts);
+        Assert.False(vm.IsRefreshOnly);
+    }
+
+    [Fact]
+    public void Copy_factory_uses_local_today_and_rounds_system_time_up_to_next_minute()
+    {
+        var source = new TimelineItemViewModel(
+            TestData.Row(
+                "按时吃饭", "2026-08-09T17:00:00+08:00",
+                recurrenceText: "每天"),
+            DateTimeOffset.Parse("2026-08-12T15:42:13+08:00"));
+
+        var vm = EditReminderViewModel.CreateCopy(
+            source,
+            Zone,
+            new FakeClock("2026-08-12T15:42:13+08:00"),
+            new RecordingReminderService(),
+            new RecordingTodoService());
+
+        Assert.Equal("按时吃饭", vm.Title);
+        Assert.Equal("2026-08-12", vm.DateText);
+        Assert.Equal("15:43", vm.TimeText);
+        Assert.Equal(EditRecurrenceMode.Daily, vm.SelectedRecurrence);
+        Assert.Equal("新建提醒副本", vm.EditorTitle);
+    }
+
+    [Fact]
+    public async Task Copy_reminder_without_time_creates_a_new_todo_without_converting_source()
+    {
+        var reminders = new RecordingReminderService();
+        var todos = new RecordingTodoService();
+        var vm = EditReminderViewModel.CreateCopy(
+            new TimelineItemViewModel(
+                TestData.Row("买菜", "2026-08-12T17:00:00+08:00"),
+                DateTimeOffset.Parse("2026-08-12T15:42:13+08:00")),
+            Zone,
+            new FakeClock("2026-08-12T15:42:13+08:00"),
+            reminders,
+            todos);
+        vm.TimeText = "";
+
+        await vm.SaveAsync();
+
+        var created = Assert.Single(todos.Created);
+        Assert.Equal("买菜", created.Title);
+        Assert.Empty(todos.ReminderConversions);
+        Assert.Empty(reminders.Created);
+    }
+
     [Theory]
     [InlineData("2026-08-03", "2026-08-03")]
     [InlineData("", null)]
@@ -336,9 +412,13 @@ public sealed class EditReminderViewModelTests
     private sealed class RecordingReminderService : IReminderService
     {
         public List<(Guid OccurrenceId, ReminderDraft Draft, SeriesScope Scope)> Edits { get; } = [];
+        public List<ReminderDraft> Created { get; } = [];
 
-        public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct) =>
-            Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), draft.DueAt));
+        public Task<ReminderOccurrence> CreateAsync(ReminderDraft draft, CancellationToken ct)
+        {
+            Created.Add(draft);
+            return Task.FromResult(ReminderOccurrence.Schedule(Guid.NewGuid(), draft.DueAt));
+        }
 
         public Task EditAsync(
             Guid occurrenceId,
@@ -357,11 +437,17 @@ public sealed class EditReminderViewModelTests
     private sealed class RecordingTodoService : ITodoService
     {
         public List<(Guid OccurrenceId, TodoDraft Draft, SeriesScope Scope)> ReminderConversions { get; } = [];
+        public List<TodoDraft> Created { get; } = [];
         public Exception? ConversionFailure { get; init; }
         public bool ReminderSourceExists { get; private set; } = true;
 
-        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct) =>
-            throw new NotSupportedException();
+        public Task<TodoItem> CreateAsync(TodoDraft draft, CancellationToken ct)
+        {
+            Created.Add(draft);
+            return Task.FromResult(new TodoItem(
+                Guid.NewGuid(), draft.Title, DateTimeOffset.UtcNow,
+                draft.DueDate, draft.Importance, false, null));
+        }
         public Task EditAsync(Guid todoId, TodoDraft draft, CancellationToken ct) =>
             throw new NotSupportedException();
         public Task CompleteAsync(Guid todoId, CancellationToken ct) =>

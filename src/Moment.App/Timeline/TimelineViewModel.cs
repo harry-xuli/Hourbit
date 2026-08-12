@@ -15,6 +15,8 @@ public interface ITimelineDialogService
     Task<SeriesScope?> SelectDeleteScopeAsync(TimelineItemViewModel item, CancellationToken ct);
     Task<bool> ConfirmDeleteAsync(TimelineItemViewModel item, CancellationToken ct);
     Task<ReminderDraft?> EditAsync(TimelineItemViewModel item, CancellationToken ct);
+    Task CopyReminderAsync(TimelineItemViewModel item, CancellationToken ct) =>
+        Task.CompletedTask;
     void OpenQuickAdd();
 }
 
@@ -80,6 +82,8 @@ public sealed class TimelineViewModel : ObservableObject
         CompleteCommand = new AsyncCommand(
             (_, ct) => ObserveAsync(() => CompleteAsync(ct)),
             _ => SelectedItem is not null || SelectedTodo is { IsCompleted: false });
+        CopyCommand = new AsyncCommand(
+            (_, ct) => ObserveAsync(() => CopyAsync(ct)), _ => HasSelection);
         OpenQuickAddCommand = new AsyncCommand((_, _) => ObserveAsync(() =>
         {
             _dialogs.OpenQuickAdd();
@@ -108,6 +112,7 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand EditCommand { get; }
     public IAsyncCommand DeleteCommand { get; }
     public IAsyncCommand CompleteCommand { get; }
+    public IAsyncCommand CopyCommand { get; }
     public IAsyncCommand OpenQuickAddCommand { get; }
     public IAsyncCommand SelectDayPeriodCommand { get; }
     public IAsyncCommand SelectWeekPeriodCommand { get; }
@@ -185,6 +190,7 @@ public sealed class TimelineViewModel : ObservableObject
         EditCommand.RaiseCanExecuteChanged();
         DeleteCommand.RaiseCanExecuteChanged();
         CompleteCommand.RaiseCanExecuteChanged();
+        CopyCommand.RaiseCanExecuteChanged();
     }
 
     public string? ErrorMessage
@@ -389,6 +395,15 @@ public sealed class TimelineViewModel : ObservableObject
             return;
         await _actions.CompleteAsync(item.OccurrenceId, ct);
         await LoadAsync();
+    }
+
+    private Task CopyAsync(CancellationToken ct)
+    {
+        if (SelectedTodo is { } todo)
+            return _todoDialogs.CopyTodoAsync(todo, ct);
+        return SelectedItem is { } reminder
+            ? _dialogs.CopyReminderAsync(reminder, ct)
+            : Task.CompletedTask;
     }
 
     private async Task ObserveAsync(Func<Task> operation)

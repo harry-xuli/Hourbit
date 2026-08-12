@@ -385,6 +385,29 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task Copy_command_routes_to_the_selected_item_type()
+    {
+        var todo = TodoRow("复制待办", null);
+        var reminder = TestData.Row(
+            "复制提醒", "2026-07-29T10:30:00+08:00");
+        var dialogs = new Dialogs();
+        var vm = Create(
+            new FakeTimelineQuery(new TimelineSnapshot([todo], [reminder], 0, 0)),
+            dialogs: dialogs);
+        await vm.LoadAsync();
+
+        Assert.True(vm.CopyCommand.CanExecute(null));
+        await vm.CopyCommand.ExecuteAsync(null);
+        vm.SelectedItem = vm.Items.Single();
+        await vm.CopyCommand.ExecuteAsync(null);
+        vm.SelectedItem = null;
+
+        Assert.Equal([todo.TodoId], dialogs.CopiedTodos);
+        Assert.Equal([reminder.OccurrenceId], dialogs.CopiedReminders);
+        Assert.False(vm.CopyCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task Todo_edit_does_not_duplicate_a_dialog_owned_conversion_refresh()
     {
         var todo = TodoRow("项目复盘", new DateOnly(2026, 7, 29));
@@ -929,6 +952,8 @@ public sealed class TimelineViewModelTests
         public Func<Task>? DuringTodoEdit { get; set; }
         public TodoDialogResult TodoEditResult { get; set; }
         public List<TodoItem> EditedTodos { get; } = [];
+        public List<Guid> CopiedReminders { get; } = [];
+        public List<Guid> CopiedTodos { get; } = [];
         public Task<SeriesScope?> SelectEditScopeAsync(TimelineItemViewModel item, CancellationToken ct) =>
             Task.FromResult(EditScope);
         public Task<SeriesScope?> SelectDeleteScopeAsync(TimelineItemViewModel item, CancellationToken ct) =>
@@ -952,6 +977,16 @@ public sealed class TimelineViewModelTests
             if (DuringTodoEdit is not null)
                 await DuringTodoEdit();
             return TodoEditResult;
+        }
+        public Task CopyReminderAsync(TimelineItemViewModel item, CancellationToken ct)
+        {
+            CopiedReminders.Add(item.OccurrenceId);
+            return Task.CompletedTask;
+        }
+        public Task CopyTodoAsync(TodoTimelineItemViewModel item, CancellationToken ct)
+        {
+            CopiedTodos.Add(item.TodoId);
+            return Task.CompletedTask;
         }
         public void OpenQuickAdd()
         {

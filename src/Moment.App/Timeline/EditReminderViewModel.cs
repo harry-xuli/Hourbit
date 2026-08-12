@@ -1,5 +1,6 @@
 using System.Globalization;
 using Moment.App.Commands;
+using Moment.Core.Abstractions;
 using Moment.Core.Domain;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
@@ -47,6 +48,7 @@ public sealed class EditReminderViewModel : ObservableObject
     private ReminderDraft? _persistedEditDraft;
     private SeriesScope _persistedEditScope;
     private string? _refreshOnlyMessage;
+    private bool _createMode;
     private int _operationInProgress;
 
     public EditReminderViewModel(TimelineItemViewModel item, TimeZoneInfo zone)
@@ -82,6 +84,22 @@ public sealed class EditReminderViewModel : ObservableObject
     }
 
     public EditReminderViewModel(
+        ReminderDraft draft,
+        TimeZoneInfo zone,
+        IReminderService reminderService,
+        ITodoService todoService,
+        Func<CancellationToken, Task>? afterSaved = null)
+        : this(draft, zone)
+    {
+        _reminderService = reminderService ??
+            throw new ArgumentNullException(nameof(reminderService));
+        _todoService = todoService ??
+            throw new ArgumentNullException(nameof(todoService));
+        _afterSaved = afterSaved ?? (_ => Task.CompletedTask);
+        _createMode = true;
+    }
+
+    public EditReminderViewModel(
         TimelineItemViewModel item,
         TimeZoneInfo zone,
         IReminderService reminderService,
@@ -107,6 +125,7 @@ public sealed class EditReminderViewModel : ObservableObject
     public event EventHandler? CloseRequested;
 
     public Guid OccurrenceId { get; }
+    public string EditorTitle => _createMode ? "新建提醒副本" : "编辑提醒";
     public IAsyncCommand SaveCommand { get; }
     public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
     public bool IsRefreshOnly => _refreshOnlyMessage is not null;
@@ -210,6 +229,47 @@ public sealed class EditReminderViewModel : ObservableObject
         private set => SetProperty(ref _errorMessage, value);
     }
 
+    public static EditReminderViewModel CreateCopy(
+        TimelineItemViewModel source,
+        TimeZoneInfo zone,
+        IClock clock,
+        IReminderService reminderService,
+        ITodoService todoService,
+        Func<CancellationToken, Task>? afterSaved = null)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(zone);
+        ArgumentNullException.ThrowIfNull(clock);
+        var localNow = TimeZoneInfo.ConvertTime(clock.Now, zone);
+        var nextMinute = new DateTimeOffset(
+            localNow.Year, localNow.Month, localNow.Day,
+            localNow.Hour, localNow.Minute, 0, localNow.Offset).AddMinutes(1);
+        var sourceDraft = CreateDraft(source);
+        var recurrence = sourceDraft.Recurrence switch
+        {
+            null => null,
+            { Kind: RecurrenceKind.Daily } => RecurrenceRule.Daily(
+                TimeOnly.FromDateTime(nextMinute.DateTime)),
+            { Kind: RecurrenceKind.Weekdays } => RecurrenceRule.Weekdays(
+                TimeOnly.FromDateTime(nextMinute.DateTime)),
+            { Kind: RecurrenceKind.Weekly } rule => RecurrenceRule.Weekly(
+                rule.DaysOfWeek,
+                TimeOnly.FromDateTime(nextMinute.DateTime)),
+            _ => throw new InvalidOperationException("Unsupported recurrence rule.")
+        };
+        return new EditReminderViewModel(
+            new ReminderDraft(
+                source.Title,
+                nextMinute,
+                source.Kind,
+                source.Importance,
+                recurrence),
+            zone,
+            reminderService,
+            todoService,
+            afterSaved);
+    }
+
     public bool TryBuildDraft(out ReminderDraft? draft)
     {
         draft = null;
@@ -296,6 +356,14 @@ public sealed class EditReminderViewModel : ObservableObject
             {
                 if (!TryBuildDraft(out var reminderDraft))
                     return;
+                if (_createMode)
+                {
+                    await _reminderService.CreateAsync(reminderDraft!, ct);
+                    EnterRefreshOnly(
+                        "提醒副本已创建，但时间轴刷新失败。请仅重试刷新。");
+                    await FinishRefreshAsync(ct);
+                    return;
+                }
                 if (!ReminderDraftEquals(
                         _persistedEditDraft,
                         _persistedEditScope,
@@ -314,6 +382,15 @@ public sealed class EditReminderViewModel : ObservableObject
 
             if (!TryBuildTodoDraft(out var todoDraft))
                 return;
+
+            if (_createMode)
+            {
+                await _todoService.CreateAsync(todoDraft!, ct);
+                EnterRefreshOnly(
+                    "待办副本已创建，但时间轴刷新失败。请仅重试刷新。");
+                await FinishRefreshAsync(ct);
+                return;
+            }
 
             SeriesScope conversionScope = SeriesScope.OccurrenceOnly;
             if (_sourceIsRecurring)

@@ -1,4 +1,5 @@
 using Moment.Core.Domain;
+using Moment.Core.Abstractions;
 using Moment.Core.Parsing;
 using Moment.Core.Services;
 
@@ -9,12 +10,15 @@ public readonly record struct TodoDialogResult(bool RequiresCallerRefresh);
 public interface ITodoDialogService
 {
     Task<TodoDialogResult> EditTodoAsync(TodoItem item, CancellationToken ct);
+    Task CopyTodoAsync(TodoTimelineItemViewModel item, CancellationToken ct) =>
+        Task.CompletedTask;
 }
 
 public sealed class TimelineDialogService : ITimelineDialogService, ITodoDialogService
 {
     private readonly Action _openQuickAdd;
     private readonly TimeZoneInfo _zone;
+    private readonly IClock _clock;
     private readonly IReminderService _reminders;
     private readonly ITodoService _todos;
     private readonly Func<CancellationToken, Task> _afterChanged;
@@ -23,12 +27,14 @@ public sealed class TimelineDialogService : ITimelineDialogService, ITodoDialogS
     public TimelineDialogService(
         Action openQuickAdd,
         TimeZoneInfo zone,
+        IClock clock,
         IReminderService reminders,
         ITodoService todos,
         Func<CancellationToken, Task>? afterChanged = null)
     {
         _openQuickAdd = openQuickAdd ?? throw new ArgumentNullException(nameof(openQuickAdd));
         _zone = zone ?? throw new ArgumentNullException(nameof(zone));
+        _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _reminders = reminders ?? throw new ArgumentNullException(nameof(reminders));
         _todos = todos ?? throw new ArgumentNullException(nameof(todos));
         _afterChanged = afterChanged ?? (_ => Task.CompletedTask);
@@ -147,6 +153,30 @@ public sealed class TimelineDialogService : ITimelineDialogService, ITodoDialogS
     }
 
     public void OpenQuickAdd() => _openQuickAdd();
+
+    public Task CopyReminderAsync(TimelineItemViewModel item, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ct.ThrowIfCancellationRequested();
+        var viewModel = EditReminderViewModel.CreateCopy(
+            item, _zone, _clock, _reminders, _todos, _afterChanged);
+        var window = new EditReminderWindow { DataContext = viewModel };
+        SetOwner(window);
+        window.ShowDialog();
+        return Task.CompletedTask;
+    }
+
+    public Task CopyTodoAsync(TodoTimelineItemViewModel item, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ct.ThrowIfCancellationRequested();
+        var viewModel = EditTodoViewModel.CreateCopy(
+            item.Item, _zone, _todos, _reminders, _afterChanged);
+        var window = new EditTodoWindow { DataContext = viewModel };
+        SetOwner(window);
+        window.ShowDialog();
+        return Task.CompletedTask;
+    }
 
     private static void SetOwner(System.Windows.Window window)
     {

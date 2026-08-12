@@ -39,6 +39,7 @@ public partial class TimelineView : UserControl
 
         var command = (eventArgs.Key, modifiers) switch
         {
+            (Key.D, ModifierKeys.Control) => _viewModel.CopyCommand,
             (Key.Enter, ModifierKeys.None) => _viewModel.EditCommand,
             (Key.Delete, ModifierKeys.None) => _viewModel.DeleteCommand,
             (Key.Space, ModifierKeys.Control | ModifierKeys.Shift) =>

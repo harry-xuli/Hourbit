@@ -194,6 +194,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         var dialogs = new TimelineDialogService(
             quickWindow.ShowAndFocus,
             zone,
+            clock,
             reminders,
             todos,
             async refreshCancellation =>

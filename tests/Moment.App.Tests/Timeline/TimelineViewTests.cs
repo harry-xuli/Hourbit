@@ -272,6 +272,10 @@ public sealed class TimelineViewTests
             Assert.Equal([todo.TodoId], dialogs.EditedTodoIds);
             Assert.Empty(dialogs.EditedReminderIds);
 
+            Assert.True(RaiseKey(row, Key.D, ModifierKeys.Control).Handled);
+            Assert.Equal([todo.TodoId], dialogs.CopiedTodoIds);
+            Assert.Empty(dialogs.CopiedReminderIds);
+
             Assert.True(RaiseKey(row, Key.Delete).Handled);
             Assert.Equal([todo.TodoId], todos.DeletedTodoIds);
             Assert.Empty(reminders.DeletedOccurrenceIds);
@@ -329,6 +333,10 @@ public sealed class TimelineViewTests
             Assert.Equal([reminder.OccurrenceId], dialogs.EditedReminderIds);
             Assert.Empty(dialogs.EditedTodoIds);
 
+            Assert.True(RaiseKey(row, Key.D, ModifierKeys.Control).Handled);
+            Assert.Equal([reminder.OccurrenceId], dialogs.CopiedReminderIds);
+            Assert.Empty(dialogs.CopiedTodoIds);
+
             Assert.True(RaiseKey(row, Key.Delete).Handled);
             Assert.Equal([reminder.OccurrenceId], reminders.DeletedOccurrenceIds);
             Assert.Empty(todos.DeletedTodoIds);
@@ -367,9 +375,16 @@ public sealed class TimelineViewTests
             var view = Show(viewModel);
             var button = Assert.IsType<Button>(
                 view.FindName("NewReminderButton"));
+            var copyButton = Assert.IsType<Button>(
+                view.FindName("CopyItemButton"));
             var section = Assert.IsType<TextBlock>(
                 view.FindName("TodoSectionHeader"));
             section.Focusable = true;
+
+            Assert.Equal("复制（Ctrl+D）", copyButton.Content);
+            Assert.Equal("复制当前事项并创建新记录", copyButton.ToolTip);
+            Assert.Equal("复制当前事项", PeerName(copyButton));
+            Assert.True(Peer(copyButton).IsKeyboardFocusable());
 
             foreach (var target in new UIElement[] { button, section })
             {
@@ -377,6 +392,7 @@ public sealed class TimelineViewTests
                 Assert.Same(target, Keyboard.FocusedElement);
                 Assert.False(RaiseKey(target, Key.Enter).Handled);
                 Assert.False(RaiseKey(target, Key.Delete).Handled);
+                Assert.False(RaiseKey(target, Key.D, ModifierKeys.Control).Handled);
                 Assert.False(RaiseKey(
                     target,
                     Key.Space,
@@ -391,6 +407,8 @@ public sealed class TimelineViewTests
             Assert.Empty(reminders.DeletedOccurrenceIds);
             Assert.Empty(todos.CompletedTodoIds);
             Assert.Empty(actions.CompletedOccurrenceIds);
+            Assert.Empty(dialogs.CopiedTodoIds);
+            Assert.Empty(dialogs.CopiedReminderIds);
             Assert.Equal(2, dialogs.QuickAddCalls);
         });
 
@@ -762,6 +780,8 @@ public sealed class TimelineViewTests
     {
         public List<Guid> EditedReminderIds { get; } = [];
         public List<Guid> EditedTodoIds { get; } = [];
+        public List<Guid> CopiedReminderIds { get; } = [];
+        public List<Guid> CopiedTodoIds { get; } = [];
         public int QuickAddCalls { get; private set; }
         public Task<SeriesScope?> SelectEditScopeAsync(
             TimelineItemViewModel item, CancellationToken ct) =>
@@ -782,6 +802,16 @@ public sealed class TimelineViewTests
         {
             EditedTodoIds.Add(item.Id);
             return Task.FromResult(new TodoDialogResult(false));
+        }
+        public Task CopyReminderAsync(TimelineItemViewModel item, CancellationToken ct)
+        {
+            CopiedReminderIds.Add(item.OccurrenceId);
+            return Task.CompletedTask;
+        }
+        public Task CopyTodoAsync(TodoTimelineItemViewModel item, CancellationToken ct)
+        {
+            CopiedTodoIds.Add(item.TodoId);
+            return Task.CompletedTask;
         }
         public void OpenQuickAdd() => QuickAddCalls++;
     }

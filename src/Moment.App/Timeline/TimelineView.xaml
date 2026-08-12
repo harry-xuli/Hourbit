@@ -257,6 +257,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="PreviousPeriodButton"
                             Grid.Column="0"
@@ -328,19 +329,27 @@
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center" />
                     <Button x:Name="RefreshTimelineButton"
-                            Grid.Column="3"
+                            Grid.Column="4"
                             Command="{Binding LoadCommand}"
                             automation:AutomationProperties.Name="刷新时间线"
                             Content="刷新"
                             MinWidth="64"
                             Margin="10,0,0,0" />
                     <Button x:Name="NextPeriodButton"
-                            Grid.Column="4"
+                            Grid.Column="5"
                             Command="{Binding NextPeriodCommand}"
                             automation:AutomationProperties.Name="下一时段"
                             Content="›"
                             FontSize="22"
                             MinWidth="42"
+                            Margin="10,0,0,0" />
+                    <Button x:Name="CopyItemButton"
+                            Grid.Column="3"
+                            Command="{Binding CopyCommand}"
+                            automation:AutomationProperties.Name="复制当前事项"
+                            Content="复制（Ctrl+D）"
+                            ToolTip="复制当前事项并创建新记录"
+                            MinWidth="118"
                             Margin="10,0,0,0" />
                 </Grid>
 
@@ -732,7 +741,7 @@
         <Border Grid.Row="2" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,1,0,0">
             <TextBlock x:Name="TimelineFooterText"
-                       Text="快捷键：Ctrl+N 新建   Ctrl+Shift+Space 完成   Delete 删除   Enter 编辑"
+                       Text="快捷键：Ctrl+N 新建   Ctrl+D 复制   Ctrl+Shift+Space 完成   Delete 删除   Enter 编辑"
                        Foreground="{DynamicResource SecondaryTextBrush}"
                        VerticalAlignment="Center" Margin="30,0" />
         </Border>
