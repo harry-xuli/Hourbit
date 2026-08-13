@@ -257,7 +257,9 @@ New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
 
 Push-Location $repositoryRoot
 try {
-    & dotnet test $solution -c Release
+    # WPF and scheduler timing tests share process-global resources. Keep the
+    # release gate deterministic instead of running all test projects in parallel.
+    & dotnet test $solution -c Release --maxcpucount:1
     if ($LASTEXITCODE -ne 0) {
         throw "Release tests failed with exit code $LASTEXITCODE."
     }
