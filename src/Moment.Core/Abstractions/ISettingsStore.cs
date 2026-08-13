@@ -4,7 +4,8 @@ public sealed record AppSettings(
     string Hotkey,
     bool StartWithWindows,
     int AlertVolume,
-    string? CustomAlertSoundPath);
+    string? CustomAlertSoundPath,
+    string? UiLanguage = null);
 
 public interface ISettingsStore
 {

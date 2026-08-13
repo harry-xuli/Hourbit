@@ -10,6 +10,7 @@ public sealed class SqliteSettingsStore(string databasePath) : ISettingsStore
     private const string StartWithWindowsKey = "start_with_windows";
     private const string AlertVolumeKey = "alert_volume";
     private const string CustomAlertSoundPathKey = "custom_alert_sound_path";
+    private const string UiLanguageKey = "ui_language";
 
     public async Task<AppSettings> LoadAsync(CancellationToken ct)
     {
@@ -19,12 +20,13 @@ public sealed class SqliteSettingsStore(string databasePath) : ISettingsStore
         command.CommandText = """
             SELECT key, value
             FROM settings
-            WHERE key IN ($hotkey, $startup, $volume, $sound);
+            WHERE key IN ($hotkey, $startup, $volume, $sound, $language);
             """;
         command.Parameters.AddWithValue("$hotkey", HotkeyKey);
         command.Parameters.AddWithValue("$startup", StartWithWindowsKey);
         command.Parameters.AddWithValue("$volume", AlertVolumeKey);
         command.Parameters.AddWithValue("$sound", CustomAlertSoundPathKey);
+        command.Parameters.AddWithValue("$language", UiLanguageKey);
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         await using var reader = await command.ExecuteReaderAsync(ct);
@@ -47,7 +49,14 @@ public sealed class SqliteSettingsStore(string databasePath) : ISettingsStore
         if (string.IsNullOrWhiteSpace(soundPath))
             soundPath = null;
 
-        return new AppSettings(hotkey, startup, volume, soundPath);
+        var uiLanguage = values.GetValueOrDefault(UiLanguageKey) switch
+        {
+            "zh-CN" => "zh-CN",
+            "en-US" => "en-US",
+            _ => null
+        };
+
+        return new AppSettings(hotkey, startup, volume, soundPath, uiLanguage);
     }
 
     public async Task SaveAsync(AppSettings settings, CancellationToken ct)
@@ -74,6 +83,17 @@ public sealed class SqliteSettingsStore(string databasePath) : ISettingsStore
         {
             await UpsertAsync(connection, (SqliteTransaction)transaction,
                 CustomAlertSoundPathKey, settings.CustomAlertSoundPath, ct);
+        }
+
+        if (settings.UiLanguage is "zh-CN" or "en-US")
+        {
+            await UpsertAsync(connection, (SqliteTransaction)transaction,
+                UiLanguageKey, settings.UiLanguage, ct);
+        }
+        else
+        {
+            await DeleteAsync(connection, (SqliteTransaction)transaction,
+                UiLanguageKey, ct);
         }
 
         await transaction.CommitAsync(ct);

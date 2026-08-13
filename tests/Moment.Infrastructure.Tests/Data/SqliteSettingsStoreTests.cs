@@ -17,7 +17,7 @@ public sealed class SqliteSettingsStoreTests
 
         var settings = await store.LoadAsync(CancellationToken.None);
 
-        Assert.Equal(new AppSettings("Ctrl+Alt+Space", false, 100, null), settings);
+        Assert.Equal(new AppSettings("Ctrl+Alt+Space", false, 100, null, null), settings);
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public sealed class SqliteSettingsStoreTests
         await InsertAsync(path, "future-setting", "keep");
         var store = new SqliteSettingsStore(path);
         var expected = new AppSettings(
-            "Ctrl+Shift+R", true, 37, @"C:\Sounds\alert.wav");
+            "Ctrl+Shift+R", true, 37, @"C:\Sounds\alert.wav", "en-US");
 
         await store.SaveAsync(expected, CancellationToken.None);
         var actual = await store.LoadAsync(CancellationToken.None);
