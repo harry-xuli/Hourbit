@@ -2,6 +2,7 @@ using Moment.App.Alerts;
 using Moment.App.Analytics;
 using Moment.App.Help;
 using Moment.App.Localization;
+using Moment.App.Search;
 using Moment.App.QuickAdd;
 using Moment.App.Settings;
 using Moment.App.Shell;
@@ -223,6 +224,11 @@ public sealed class CompositionRoot : IAsyncDisposable
         CompositionRoot? root = null;
         var helpWindow = new HelpWindowController();
         var datePicker = new WpfDatePicker(() => root?.MainWindow);
+        TimelineViewModel? timelineForSearch = null;
+        var search = new SearchViewModel(
+            new SqliteItemSearchQuery(databasePath),
+            date => timelineForSearch?.NavigateToDateAsync(date)
+                ?? Task.CompletedTask);
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, todos,
             dialogs, dialogs, zone,
@@ -238,7 +244,9 @@ public sealed class CompositionRoot : IAsyncDisposable
                 if (!result.Succeeded)
                     throw new InvalidOperationException(result.ErrorMessage);
             },
-            datePicker);
+            datePicker,
+            search);
+        timelineForSearch = timeline;
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);

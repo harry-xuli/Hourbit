@@ -3,6 +3,7 @@ using System.Globalization;
 using Moment.App.Commands;
 using Moment.App.Localization;
 using Moment.App.Input;
+using Moment.App.Search;
 using Moment.Core.Abstractions;
 using Moment.Core.Analytics;
 using Moment.Core.Domain;
@@ -68,7 +69,8 @@ public sealed class TimelineViewModel : ObservableObject
         Action? openReports = null,
         ILocalizationService? localization = null,
         Func<UiLanguage, Task>? saveLanguage = null,
-        IDatePicker? datePicker = null)
+        IDatePicker? datePicker = null,
+        SearchViewModel? search = null)
     {
         _query = query;
         _clock = clock;
@@ -85,6 +87,7 @@ public sealed class TimelineViewModel : ObservableObject
         _localization = localization ?? new LocalizationService(_culture, null);
         _saveLanguage = saveLanguage ?? (_ => Task.CompletedTask);
         _datePicker = datePicker ?? new NullDatePicker();
+        Search = search;
         _selectedDate = LocalToday;
         _selectedPeriodKind = TimelinePeriodKind.Day;
         _currentPeriod = TimelinePeriod.Create(
@@ -136,6 +139,7 @@ public sealed class TimelineViewModel : ObservableObject
     }
 
     public ObservableCollection<TimelineItemViewModel> Items { get; } = [];
+    public SearchViewModel? Search { get; }
     public ObservableCollection<TodoTimelineItemViewModel> PendingTodos { get; } = [];
     public ObservableCollection<TodoTimelineItemViewModel> CompletedTodos { get; } = [];
     public IReadOnlyList<TimelineGroupViewModel> Groups { get; }
@@ -463,6 +467,12 @@ public sealed class TimelineViewModel : ObservableObject
         if (selected is null)
             return;
         SetPeriod(_selectedPeriodKind, selected.Value);
+        await LoadAsync();
+    }
+
+    public async Task NavigateToDateAsync(DateOnly date)
+    {
+        SetPeriod(_selectedPeriodKind, date);
         await LoadAsync();
     }
 

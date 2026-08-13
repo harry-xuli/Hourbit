@@ -204,6 +204,66 @@
                     <TextBlock Text="{Binding CompletedCount}" Foreground="{DynamicResource AccentBrush}"
                                FontWeight="SemiBold" VerticalAlignment="Center" />
                 </StackPanel>
+                <Grid Grid.Column="7" Margin="18,0" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="GlobalSearchBox"
+                             Text="{Binding Search.QueryText, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="全局搜索"
+                             ToolTip="搜索提醒和待办（Ctrl+F）"
+                             MinWidth="160" Height="40"
+                             VerticalContentAlignment="Center"
+                             Padding="10,0" />
+                    <Button x:Name="GlobalSearchButton"
+                            Grid.Column="1"
+                            Command="{Binding Search.SearchCommand}"
+                            automation:AutomationProperties.Name="搜索"
+                            Content="搜索"
+                            MinWidth="62" Height="40"
+                            Margin="6,0,0,0" />
+                    <Popup x:Name="GlobalSearchPopup"
+                           IsOpen="{Binding Search.IsOpen, Mode=OneWay}"
+                           PlacementTarget="{Binding ElementName=GlobalSearchBox}"
+                           Placement="Bottom"
+                           StaysOpen="False"
+                           AllowsTransparency="True">
+                        <Border Background="{DynamicResource WindowBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1" CornerRadius="8"
+                                Padding="6" MinWidth="360" MaxWidth="520">
+                            <StackPanel>
+                                <ListBox x:Name="GlobalSearchResults"
+                                         ItemsSource="{Binding Search.Results}"
+                                         automation:AutomationProperties.Name="搜索结果"
+                                         MaxHeight="320"
+                                         MouseDoubleClick="OnSearchResultDoubleClick">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Title}"
+                                                           FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding LocalDate}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           Margin="14,0,0,0" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock Text="{Binding Search.ErrorMessage}"
+                                           Foreground="{DynamicResource MissedBrush}"
+                                           TextWrapping="Wrap" Margin="8,4" />
+                            </StackPanel>
+                        </Border>
+                    </Popup>
+                </Grid>
                 <Button x:Name="NewReminderButton"
                         Grid.Column="9"
                         VerticalAlignment="Center"

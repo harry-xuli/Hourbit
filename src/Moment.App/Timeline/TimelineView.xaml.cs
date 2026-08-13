@@ -8,6 +8,7 @@ using ItemsControl = System.Windows.Controls.ItemsControl;
 using ListBox = System.Windows.Controls.ListBox;
 using ListBoxItem = System.Windows.Controls.ListBoxItem;
 using SelectionChangedEventArgs = System.Windows.Controls.SelectionChangedEventArgs;
+using Moment.Core.Search;
 using UserControl = System.Windows.Controls.UserControl;
 
 namespace Moment.App.Timeline;
@@ -44,6 +45,21 @@ public partial class TimelineView : UserControl
         if ((eventArgs.Key, modifiers) == (Key.N, ModifierKeys.Control))
         {
             ExecuteIfAvailable(_viewModel.OpenQuickAddCommand, eventArgs);
+            return;
+        }
+
+        if ((eventArgs.Key, modifiers) == (Key.F, ModifierKeys.Control))
+        {
+            eventArgs.Handled = true;
+            GlobalSearchBox.Focus();
+            GlobalSearchBox.SelectAll();
+            return;
+        }
+
+        if ((eventArgs.Key, modifiers) == (Key.Escape, ModifierKeys.None)
+            && _viewModel.Search?.IsOpen == true)
+        {
+            ExecuteIfAvailable(_viewModel.Search.CloseCommand, eventArgs);
             return;
         }
 
@@ -150,6 +166,16 @@ public partial class TimelineView : UserControl
         AttachViewModel(DataContext as TimelineViewModel);
         _countdownTimer.Start();
         SynchronizeSelection();
+    }
+
+    private async void OnSearchResultDoubleClick(
+        object sender,
+        System.Windows.Input.MouseButtonEventArgs eventArgs)
+    {
+        if (_viewModel?.Search is not { } search
+            || GlobalSearchResults.SelectedItem is not ItemSearchResult result)
+            return;
+        await search.SelectResultCommand.ExecuteAsync(result);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs eventArgs)

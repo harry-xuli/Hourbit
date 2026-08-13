@@ -8,6 +8,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Input;
 using Moment.App.Timeline;
+using Moment.App.Search;
 using Moment.App.Styles;
 using Moment.Core.Abstractions;
 using Moment.Core.Analytics;
@@ -20,6 +21,24 @@ namespace Moment.App.Tests.Timeline;
 
 public sealed class TimelineViewTests
 {
+    [Fact]
+    public Task Search_controls_are_keyboard_accessible_and_ctrl_f_focuses_the_query_box() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var search = new SearchViewModel(new SearchQueryStub(), _ => Task.CompletedTask);
+            var viewModel = Create(TwoGroupQuery(), search: search);
+            await viewModel.LoadAsync();
+            var view = Show(viewModel);
+            var query = Assert.IsType<TextBox>(view.FindName("GlobalSearchBox"));
+            var button = Assert.IsType<Button>(view.FindName("GlobalSearchButton"));
+            var results = Assert.IsType<ListBox>(view.FindName("GlobalSearchResults"));
+
+            Assert.Equal("全局搜索", PeerName(query));
+            Assert.Equal("搜索", PeerName(button));
+            Assert.Equal("搜索结果", PeerName(results));
+            Assert.True(RaiseKey(view, Key.F, ModifierKeys.Control).Handled);
+            Assert.Same(query, Keyboard.FocusedElement);
+        });
     private static readonly string[] ExpectedGroups = ["已错过", "接下来", "已完成"];
 
     [Fact]
@@ -668,7 +687,8 @@ public sealed class TimelineViewTests
         ReminderServiceStub? reminders = null,
         DialogStub? dialogs = null,
         Action<LocalDateRange>? analyticsNavigation = null,
-        CultureInfo? culture = null) =>
+        CultureInfo? culture = null,
+        SearchViewModel? search = null) =>
         new(query, new FakeClock("2026-07-29T09:00:00+08:00"),
             reminders ?? new ReminderServiceStub(), actions ?? new ActionServiceStub(),
             todos ?? new TodoServiceStub(), dialogs ?? new DialogStub(),
@@ -676,7 +696,15 @@ public sealed class TimelineViewTests
             TimeZoneInfo.CreateCustomTimeZone(
                 "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
             culture,
-            analyticsNavigation);
+            analyticsNavigation,
+            search: search);
+
+    private sealed class SearchQueryStub : Moment.Core.Search.IItemSearchQuery
+    {
+        public Task<IReadOnlyList<Moment.Core.Search.ItemSearchResult>> SearchAsync(
+            Moment.Core.Search.ItemSearchFilter filter, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<Moment.Core.Search.ItemSearchResult>>([]);
+    }
 
     private static TimelineViewModel CreateTraversalViewModel()
     {
