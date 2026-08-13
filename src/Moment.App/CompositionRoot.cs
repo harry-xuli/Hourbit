@@ -222,7 +222,10 @@ public sealed class CompositionRoot : IAsyncDisposable
             zone,
             CultureInfo.CurrentCulture);
         CompositionRoot? root = null;
-        var helpWindow = new HelpWindowController();
+        var helpWindow = new HelpWindowController(() => new HelpWindow
+        {
+            DataContext = new HelpContentViewModel(localization)
+        });
         var datePicker = new WpfDatePicker(() => root?.MainWindow);
         TimelineViewModel? timelineForSearch = null;
         var search = new SearchViewModel(

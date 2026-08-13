@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using Moment.App.Help;
+using Moment.App.Localization;
 
 namespace Moment.App.Tests.Help;
 
@@ -32,7 +33,12 @@ public sealed class HelpWindowTests
     public Task Help_window_packages_the_required_usage_topics() =>
         WpfTestHost.RunAsync(() =>
         {
-            var window = new HelpWindow { ShowInTaskbar = false };
+            var window = new HelpWindow
+            {
+                ShowInTaskbar = false,
+                DataContext = new HelpContentViewModel(new LocalizationService(
+                    System.Globalization.CultureInfo.GetCultureInfo("zh-CN"), "zh-CN"))
+            };
             window.Show();
             window.UpdateLayout();
 
@@ -52,6 +58,30 @@ public sealed class HelpWindowTests
             Assert.Contains("倒计时", text);
             Assert.Contains("升级", text);
             Assert.Contains("托盘", text);
+            window.Close();
+        });
+
+    [Fact]
+    public Task Help_window_switches_UI_copy_and_uses_the_shared_shortcut_catalog() =>
+        WpfTestHost.RunAsync(() =>
+        {
+            var localization = new LocalizationService(
+                System.Globalization.CultureInfo.GetCultureInfo("zh-CN"), "en-US");
+            var window = new HelpWindow
+            {
+                ShowInTaskbar = false,
+                DataContext = new HelpContentViewModel(localization)
+            };
+            window.Show();
+            window.UpdateLayout();
+
+            var text = string.Join(" ", Descendants<TextBlock>(window)
+                .Select(block => block.Text));
+            Assert.Contains("Hourbit Help", text);
+            Assert.Contains("Quick create", text);
+            Assert.Contains("Ctrl+F", text);
+            Assert.Contains("F5", text);
+            Assert.DoesNotContain("快速创建", text);
             window.Close();
         });
 

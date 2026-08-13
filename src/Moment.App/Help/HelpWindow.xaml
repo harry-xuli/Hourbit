@@ -7,31 +7,31 @@
         Background="{DynamicResource WindowBackgroundBrush}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="30">
         <StackPanel>
-            <TextBlock Text="Hourbit 使用说明" FontSize="28" FontWeight="SemiBold"
+            <TextBlock Text="{Binding Title}" FontSize="28" FontWeight="SemiBold"
                        Foreground="{DynamicResource AccentBrush}" Margin="0,0,0,20" />
-            <TextBlock Text="快速创建" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="点击“新建提醒”或按 Ctrl+N。输入日期和时间会创建提醒；没有时间则创建无时间待办。支持 2026-10-03、10月3日、10月3号和 24 小时时间。"
+            <TextBlock Text="{Binding QuickCreateHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding QuickCreateBody}"
                        TextWrapping="Wrap" Margin="0,6,0,18" />
-            <TextBlock Text="时间表达" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="直接写“5点”时，若今天 5 点已过会安排到明天早上；写“下午5点”会识别为 17:00。"
+            <TextBlock Text="{Binding TimeHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding TimeBody}"
                        TextWrapping="Wrap" Margin="0,6,0,18" />
-            <TextBlock Text="重复提醒" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="可选择每天、工作日（周一至周五）或每周，并在每周模式中选择星期。"
+            <TextBlock Text="{Binding RepeatHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding RepeatBody}"
                        TextWrapping="Wrap" Margin="0,6,0,18" />
-            <TextBlock Text="处理提醒" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="通知出现后可选择完成、忽略或稍后提醒；处理成功后主时间线会自动刷新。"
+            <TextBlock Text="{Binding HandleHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding HandleBody}"
                        TextWrapping="Wrap" Margin="0,6,0,18" />
-            <TextBlock Text="复制事项" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="选中提醒或待办后点击“复制（Ctrl+D）”。副本会生成新记录，可修改主题和日期时间，原记录不会改变。"
+            <TextBlock Text="{Binding ShortcutsHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding ShortcutsBody}"
                        TextWrapping="Wrap" Margin="0,6,0,18" />
-            <TextBlock Text="倒计时" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="可从托盘创建常用倒计时。主时间线会显示动态剩余时间，到期后显示“已到时”。"
+            <TextBlock Text="{Binding CountdownHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding CountdownBody}"
                        TextWrapping="Wrap" Margin="0,6,0,18" />
-            <TextBlock Text="数据与升级" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="安装版和免安装版都不会随安装包附带历史数据。以后升级 Hourbit 会保留本机已有客户数据；卸载前如需迁移，请先在设置中导出备份。"
+            <TextBlock Text="{Binding DataHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding DataBody}"
                        TextWrapping="Wrap" Margin="0,6,0,18" />
-            <TextBlock Text="退出程序" FontSize="20" FontWeight="SemiBold" />
-            <TextBlock Text="关闭主窗口只会隐藏 Hourbit。需要彻底退出时，请右键任务栏托盘图标并选择“退出”。"
+            <TextBlock Text="{Binding ExitHeading}" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding ExitBody}"
                        TextWrapping="Wrap" Margin="0,6,0,0" />
         </StackPanel>
     </ScrollViewer>
