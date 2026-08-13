@@ -31,9 +31,9 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
-    public void Timeline_period_uses_the_active_culture_week_start()
+    public void Timeline_period_always_uses_monday_through_sunday()
     {
-        var culture = CultureInfo.GetCultureInfo("fr-FR");
+        var culture = CultureInfo.GetCultureInfo("en-US");
 
         var period = TimelinePeriod.Create(
             new DateOnly(2026, 7, 29), TimelinePeriodKind.Week, culture);
@@ -97,11 +97,11 @@ public sealed class TimelineViewModelTests
         await vm.SelectWeekPeriodCommand.ExecuteAsync(null);
         Assert.Equal(TimelinePeriodKind.Week, vm.SelectedPeriodKind);
         Assert.Equal(
-            new LocalDateRange(new DateOnly(2026, 7, 26), new DateOnly(2026, 8, 1)),
+            new LocalDateRange(new DateOnly(2026, 7, 27), new DateOnly(2026, 8, 2)),
             query.Ranges[^1]);
         await vm.NextPeriodCommand.ExecuteAsync(null);
         Assert.Equal(
-            new LocalDateRange(new DateOnly(2026, 8, 2), new DateOnly(2026, 8, 8)),
+            new LocalDateRange(new DateOnly(2026, 8, 3), new DateOnly(2026, 8, 9)),
             query.Ranges[^1]);
 
         await vm.SelectMonthPeriodCommand.ExecuteAsync(null);

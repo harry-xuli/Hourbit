@@ -22,7 +22,7 @@ public sealed record TimelinePeriod(LocalDateRange Range, string Label)
         {
             TimelinePeriodKind.Day => new LocalDateRange(selectedDate, selectedDate),
             TimelinePeriodKind.Week => CreateWeekRange(
-                selectedDate, culture.DateTimeFormat.FirstDayOfWeek),
+                selectedDate, DayOfWeek.Monday),
             TimelinePeriodKind.Month => new LocalDateRange(
                 new DateOnly(selectedDate.Year, selectedDate.Month, 1),
                 new DateOnly(
