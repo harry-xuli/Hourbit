@@ -166,6 +166,13 @@ public sealed class TimelineViewModel : ObservableObject
     public string NewText => _localization.Translate("Action.New");
     public string ReportsText => _localization.Translate("Action.Report");
     public string HelpText => _localization.Translate("Action.Help");
+    public string SearchText => _localization.Translate("Action.Search");
+    public string ChooseDateText => _localization.Translate("Action.ChooseDate");
+    public string RemindersText => _localization.Translate("Section.Reminders");
+    public string TodosText => _localization.Translate("Section.Todos");
+    public string DayTextLabel => _localization.Translate("Period.Day");
+    public string WeekTextLabel => _localization.Translate("Period.Week");
+    public string MonthTextLabel => _localization.Translate("Period.Month");
     public string ShortcutFooter => ShortcutCatalog.Footer(CurrentLanguage);
     public string DateText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString(
         "yyyy年M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
@@ -346,6 +353,13 @@ public sealed class TimelineViewModel : ObservableObject
         OnPropertyChanged(nameof(NewText));
         OnPropertyChanged(nameof(ReportsText));
         OnPropertyChanged(nameof(HelpText));
+        OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(ChooseDateText));
+        OnPropertyChanged(nameof(RemindersText));
+        OnPropertyChanged(nameof(TodosText));
+        OnPropertyChanged(nameof(DayTextLabel));
+        OnPropertyChanged(nameof(WeekTextLabel));
+        OnPropertyChanged(nameof(MonthTextLabel));
         OnPropertyChanged(nameof(ShortcutFooter));
     }
 

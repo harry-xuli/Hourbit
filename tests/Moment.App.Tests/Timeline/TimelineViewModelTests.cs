@@ -35,6 +35,13 @@ public sealed class TimelineViewModelTests
 
         Assert.Equal("New", vm.NewText);
         Assert.Equal("Reports", vm.ReportsText);
+        Assert.Equal("Reminders", vm.RemindersText);
+        Assert.Equal("To-do", vm.TodosText);
+        Assert.Equal("Search", vm.SearchText);
+        Assert.Equal("Choose date", vm.ChooseDateText);
+        Assert.Equal("Day", vm.DayTextLabel);
+        Assert.Equal("Week", vm.WeekTextLabel);
+        Assert.Equal("Month", vm.MonthTextLabel);
         Assert.Equal(UiLanguage.EnUs, vm.CurrentLanguage);
         Assert.Equal([UiLanguage.EnUs], saved);
         Assert.Equal(range, vm.CurrentPeriod.Range);

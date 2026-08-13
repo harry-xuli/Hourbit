@@ -220,7 +220,7 @@
                             Grid.Column="1"
                             Command="{Binding Search.SearchCommand}"
                             automation:AutomationProperties.Name="搜索"
-                            Content="搜索"
+                            Content="{Binding SearchText}"
                             MinWidth="62" Height="40"
                             Margin="6,0,0,0" />
                     <Popup x:Name="GlobalSearchPopup"
@@ -365,7 +365,7 @@
                                 VerticalAlignment="Center">
                         <RadioButton x:Name="DayPeriodButton"
                                      GroupName="TimelinePeriod"
-                                     Content="日"
+                                     Content="{Binding DayTextLabel}"
                                      Command="{Binding SelectDayPeriodCommand}"
                                      IsChecked="{Binding IsDayPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按日查看"
@@ -380,7 +380,7 @@
                         </RadioButton>
                         <RadioButton x:Name="WeekPeriodButton"
                                      GroupName="TimelinePeriod"
-                                     Content="周"
+                                     Content="{Binding WeekTextLabel}"
                                      Command="{Binding SelectWeekPeriodCommand}"
                                      IsChecked="{Binding IsWeekPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按周查看"
@@ -395,7 +395,7 @@
                         </RadioButton>
                         <RadioButton x:Name="MonthPeriodButton"
                                      GroupName="TimelinePeriod"
-                                     Content="月"
+                                     Content="{Binding MonthTextLabel}"
                                      Command="{Binding SelectMonthPeriodCommand}"
                                      IsChecked="{Binding IsMonthPeriodSelected, Mode=OneWay}"
                                      automation:AutomationProperties.Name="按月查看"
@@ -436,7 +436,7 @@
                             Grid.Column="4"
                             Command="{Binding ChooseDateCommand}"
                             automation:AutomationProperties.Name="选择日期"
-                            Content="选择日期"
+                            Content="{Binding ChooseDateText}"
                             MinWidth="82"
                             Margin="10,0,0,0" />
                     <Button x:Name="CopyItemButton"
@@ -510,7 +510,7 @@
                         </Grid.RowDefinitions>
                     <TextBlock x:Name="TodoSectionHeader"
                                Grid.Row="0"
-                               Text="待办事项"
+                               Text="{Binding TodosText}"
                                automation:AutomationProperties.Name="待办事项"
                                FontSize="20"
                                FontWeight="SemiBold"
@@ -559,7 +559,7 @@
 
                 <TextBlock x:Name="ReminderSectionHeader"
                            Grid.Row="0"
-                           Text="定时提醒"
+                           Text="{Binding RemindersText}"
                            automation:AutomationProperties.Name="定时提醒"
                            FontSize="20"
                            FontWeight="SemiBold"
