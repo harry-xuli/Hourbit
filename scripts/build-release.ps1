@@ -18,10 +18,10 @@ $portableDirectory = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot 'portable'))
 $releaseBuildDirectory = [System.IO.Path]::GetFullPath(
     (Join-Path $artifactsRoot 'release-build'))
-$applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
-$windowsProject = Join-Path $repositoryRoot 'src\Moment.Windows\Moment.Windows.csproj'
-$solution = Join-Path $repositoryRoot 'Moment.slnx'
-$installerScript = Join-Path $repositoryRoot 'installer\Moment.iss'
+$applicationProject = Join-Path $repositoryRoot 'src\Hourbit.App\Hourbit.App.csproj'
+$windowsProject = Join-Path $repositoryRoot 'src\Hourbit.Windows\Hourbit.Windows.csproj'
+$solution = Join-Path $repositoryRoot 'Hourbit.slnx'
+$installerScript = Join-Path $repositoryRoot 'installer\Hourbit.iss'
 $installerValidationScript = Join-Path $repositoryRoot 'scripts\validate-installer.ps1'
 
 function Test-SemanticVersion {
@@ -274,7 +274,7 @@ try {
 
     # Generate the RID-specific PRI before publishing the app. ProjectReference
     # property propagation is not sufficient on a clean checkout: the app PRI
-    # build consumes Moment.Windows.pri from this exact output directory.
+    # build consumes Hourbit.Windows.pri from this exact output directory.
     & dotnet build $windowsProject `
         -c Release `
         -r win-x64 `
@@ -285,7 +285,7 @@ try {
         throw "Windows runtime resource build failed with exit code $LASTEXITCODE."
     }
 
-    # The Windows PRI build can leave an MSBuild node holding Moment.Core.dll
+    # The Windows PRI build can leave an MSBuild node holding Hourbit.Core.dll
     # briefly, which races the immediately following RID publish on Windows.
     & dotnet build-server shutdown
     if ($LASTEXITCODE -ne 0) {

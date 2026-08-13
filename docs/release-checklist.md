@@ -47,7 +47,7 @@
 ## 最终命令
 
 ```powershell
-dotnet test Moment.slnx --configuration Release --no-restore --maxcpucount:1
+dotnet test Hourbit.slnx --configuration Release --no-restore --maxcpucount:1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 Get-AuthenticodeSignature .\artifacts\Hourbit-Setup-x64.exe

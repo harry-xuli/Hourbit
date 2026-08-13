@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Hourbit.App/Hourbit.App.csproj" />
+    <Project Path="src/Hourbit.Core/Hourbit.Core.csproj" />
+    <Project Path="src/Hourbit.Infrastructure/Hourbit.Infrastructure.csproj" />
+    <Project Path="src/Hourbit.Windows/Hourbit.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Hourbit.App.Tests/Hourbit.App.Tests.csproj" />
+    <Project Path="tests/Hourbit.Core.Tests/Hourbit.Core.Tests.csproj" />
+    <Project Path="tests/Hourbit.Infrastructure.Tests/Hourbit.Infrastructure.Tests.csproj" />
+    <Project Path="tests/Hourbit.TestSupport/Hourbit.TestSupport.csproj" />
+    <Project Path="tests/Hourbit.Windows.Tests/Hourbit.Windows.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,282 @@
+<Window x:Class="Hourbit.App.Analytics.AnalyticsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:analytics="clr-namespace:Hourbit.App.Analytics"
+        xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+        Title="分析报告 - Hourbit 日程"
+        Width="1040"
+        Height="760"
+        MinWidth="820"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
+        FontFamily="Segoe UI, Microsoft YaHei UI"
+        KeyboardNavigation.TabNavigation="Continue">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+    </Window.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+        <Grid Margin="28">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="0,0,0,18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="180" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="100" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="150" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="150" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="分析报告"
+                           FontSize="28"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource AccentBrush}"
+                           Margin="0,0,24,0"
+                           VerticalAlignment="Center" />
+                <ComboBox x:Name="RangePicker"
+                          Grid.Column="1"
+                          ItemsSource="{Binding RangeOptions}"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Kind"
+                          SelectedValue="{Binding SelectedRangeKind, Mode=TwoWay}"
+                          automation:AutomationProperties.Name="日期范围"
+                          MinHeight="34"
+                          VerticalContentAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="年份" Margin="14,0,6,0"
+                           VerticalAlignment="Center" />
+                <TextBox Grid.Column="3"
+                         Text="{Binding SelectedYear, UpdateSourceTrigger=PropertyChanged}"
+                         automation:AutomationProperties.Name="分析年份"
+                         MinHeight="34"
+                         VerticalContentAlignment="Center" />
+                <TextBlock Grid.Column="4" Text="从" Margin="14,0,6,0"
+                           VerticalAlignment="Center" />
+                <DatePicker Grid.Column="5"
+                            SelectedDate="{Binding CustomStartDate, Mode=TwoWay}"
+                            automation:AutomationProperties.Name="自定义开始日期" />
+                <TextBlock Grid.Column="6" Text="到" Margin="10,0,6,0"
+                           VerticalAlignment="Center" />
+                <DatePicker Grid.Column="7"
+                            SelectedDate="{Binding CustomEndDate, Mode=TwoWay}"
+                            automation:AutomationProperties.Name="自定义结束日期" />
+                <Button Grid.Column="8"
+                        Content="应用"
+                        Command="{Binding RefreshCommand}"
+                        automation:AutomationProperties.Name="应用日期范围"
+                        MinWidth="72"
+                        Margin="12,0,0,0" />
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding RangeLabel}"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           automation:AutomationProperties.Name="{Binding RangeLabel, StringFormat='当前分析范围 {0}'}" />
+                <TextBlock Grid.Column="1"
+                           Text="正在加载…"
+                           Foreground="{DynamicResource SecondaryTextBrush}"
+                           Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </Grid>
+
+            <Border Grid.Row="2"
+                    Background="{DynamicResource SubtleBackgroundBrush}"
+                    BorderBrush="{DynamicResource MissedBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="12"
+                    Margin="0,0,0,14"
+                    Visibility="{Binding HasError, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="{Binding ErrorMessage}"
+                           Foreground="{DynamicResource MissedBrush}"
+                           TextWrapping="Wrap"
+                           automation:AutomationProperties.LiveSetting="Assertive" />
+            </Border>
+
+            <UniformGrid Grid.Row="3" Rows="1" Columns="3" Margin="0,0,0,20">
+                <Border x:Name="CompletedCard"
+                        Background="{DynamicResource SubtleBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="18"
+                        Margin="0,0,8,0"
+                        automation:AutomationProperties.Name="{Binding Completed, StringFormat='已完成 {0}'}">
+                    <StackPanel>
+                        <TextBlock Text="已完成" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding Completed}" FontSize="30" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource ChartCompletedBrush}" />
+                    </StackPanel>
+                </Border>
+                <Border x:Name="FutureCard"
+                        Background="{DynamicResource SubtleBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="18"
+                        Margin="4,0"
+                        automation:AutomationProperties.Name="{Binding FuturePlanned, StringFormat='未来计划 {0}'}">
+                    <StackPanel>
+                        <TextBlock Text="未来计划" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding FuturePlanned}" FontSize="30" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AccentBrush}" />
+                    </StackPanel>
+                </Border>
+                <Border x:Name="OverdueCard"
+                        Background="{DynamicResource SubtleBackgroundBrush}"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="18"
+                        Margin="8,0,0,0"
+                        automation:AutomationProperties.Name="{Binding Overdue, StringFormat='已逾期 {0}'}">
+                    <StackPanel>
+                        <TextBlock Text="已逾期" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock Text="{Binding Overdue}" FontSize="30" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource ChartOverdueBrush}" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <TextBlock x:Name="EmptyState"
+                       Grid.Row="4"
+                       Text="{Binding EmptyStateMessage}"
+                       Visibility="{Binding HasNoData, Converter={StaticResource BooleanToVisibilityConverter}}"
+                       HorizontalAlignment="Center"
+                       FontSize="17"
+                       Foreground="{DynamicResource SecondaryTextBrush}"
+                       Margin="0,10,0,20"
+                       automation:AutomationProperties.Name="{Binding EmptyStateMessage}" />
+
+            <Grid Grid.Row="5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="0.42*" />
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="0.58*" />
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="18">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="220" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="160" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="分布" FontSize="20" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <ComboBox x:Name="DimensionPicker"
+                                      Grid.Column="1"
+                                      ItemsSource="{Binding DimensionOptions}"
+                                      DisplayMemberPath="Label"
+                                      SelectedValuePath="Dimension"
+                                      SelectedValue="{Binding SelectedDimension, Mode=TwoWay}"
+                                      automation:AutomationProperties.Name="图表维度"
+                                      MinHeight="34" />
+                        </Grid>
+                        <analytics:DonutChartControl x:Name="DonutChart"
+                                                     Grid.Row="1"
+                                                     Geometry="{Binding DonutGeometry}"
+                                                     Summary="{Binding DonutSummary}"
+                                                     MinHeight="200"
+                                                     Margin="8" />
+                        <ItemsControl x:Name="DonutLegend"
+                                      Grid.Row="2"
+                                      ItemsSource="{Binding LegendItems}"
+                                      Margin="4,4,4,8"
+                                      automation:AutomationProperties.Name="分布图例">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,2"
+                                          automation:AutomationProperties.Name="{Binding AccessibleName}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="22" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="56" />
+                                        </Grid.ColumnDefinitions>
+                                        <analytics:LegendSwatchControl Width="18"
+                                                                       Height="18"
+                                                                       ColorKey="{Binding ColorKey}"
+                                                                       automation:AutomationProperties.Name="{Binding Label, StringFormat='图例标记 {0}'}" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Label}"
+                                                   Margin="6,0"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding Value}"
+                                                   FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="3"
+                                                   Text="{Binding Percentage}"
+                                                   Margin="8,0,0,0"
+                                                   TextAlignment="Right"
+                                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock x:Name="DonutSummaryText"
+                                   Grid.Row="3"
+                                   Text="{Binding DonutSummary}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}" />
+                    </Grid>
+                </Border>
+
+                <Border Grid.Column="2"
+                        BorderBrush="{DynamicResource BorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="18">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="240" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="完成趋势" FontSize="20" FontWeight="SemiBold"
+                                   Margin="0,0,0,8" />
+                        <analytics:TrendChartControl x:Name="TrendChart"
+                                                     Grid.Row="1"
+                                                     Geometry="{Binding TrendGeometry}"
+                                                     Summary="{Binding TrendSummary}"
+                                                     MinHeight="200"
+                                                     Margin="4" />
+                        <TextBlock x:Name="TrendSummaryText"
+                                   Grid.Row="2"
+                                   Text="{Binding TrendSummary}"
+                                   TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SecondaryTextBrush}" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+    </ScrollViewer>
+</Window>

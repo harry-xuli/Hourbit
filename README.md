@@ -43,9 +43,9 @@ Hourbit 日程是一款面向 Windows 11 的本地提醒与待办应用。它支
 ## 安装、便携版与兼容性
 
 发布产物为 `Hourbit-Setup-x64.exe` 和 `Hourbit-Portable-x64.zip`，发布程序为
-`Hourbit.exe`。安装版继续使用既有安装 AppId、`Moment` 数据目录、数据库位置和
-内部 `Moment.*` 命名空间，以便从旧版本原地升级并保留提醒与设置。这些名称仅是
-兼容标识，不是产品展示名称。
+`Hourbit.exe`。代码、解决方案和项目名称均已统一为 `Hourbit.*`。安装版继续使用
+既有安装 AppId、`Moment` 数据目录、数据库位置、启动项迁移键和单实例标识，以便
+从旧版本原地升级并保留提醒与设置；这些旧名称仅是兼容标识，不是产品展示名称。
 
 Windows 可能会对未签名测试构建显示安全提示。不要为了安装测试构建而关闭或绕过
 Smart App Control、Microsoft Defender 或其他 Windows 安全功能；正式分发应使用
@@ -56,7 +56,7 @@ Smart App Control、Microsoft Defender 或其他 Windows 安全功能；正式�
 需要 .NET SDK 和 Inno Setup 6：
 
 ```powershell
-dotnet test Moment.slnx --configuration Release --no-restore
+dotnet test Hourbit.slnx --configuration Release --no-restore
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\smoke-test.ps1
 ```

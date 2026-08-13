@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 if ([string]::IsNullOrWhiteSpace($InstallerScript)) {
-    $InstallerScript = Join-Path $PSScriptRoot '..\installer\Moment.iss'
+    $InstallerScript = Join-Path $PSScriptRoot '..\installer\Hourbit.iss'
 }
 $installerPath = [IO.Path]::GetFullPath($InstallerScript)
 if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {

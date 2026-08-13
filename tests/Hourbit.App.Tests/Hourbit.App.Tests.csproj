@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Hourbit.App\Hourbit.App.csproj" />
+    <ProjectReference Include="..\..\src\Hourbit.Infrastructure\Hourbit.Infrastructure.csproj" />
+    <ProjectReference Include="..\Hourbit.TestSupport\Hourbit.TestSupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="ExpectedProductName" Value="$(ProductName)" />
+    <AssemblyMetadata Include="ExpectedExecutableName" Value="$(ExecutableName)" />
+    <AssemblyMetadata Include="ExpectedSemanticVersion" Value="$(SemanticVersion)" />
+    <AssemblyMetadata Include="ExpectedReleaseDate" Value="$(ReleaseDate)" />
+  </ItemGroup>
+</Project>

@@ -25,7 +25,7 @@ $expectedEvents = @(
 )
 $repositoryRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $PSScriptRoot '..'))
-$applicationProject = Join-Path $repositoryRoot 'src\Moment.App\Moment.App.csproj'
+$applicationProject = Join-Path $repositoryRoot 'src\Hourbit.App\Hourbit.App.csproj'
 $evaluatedProperties = (& dotnet msbuild $applicationProject `
     -nologo `
     '-getProperty:AssemblyName,Product,Version,ReleaseDate' |
