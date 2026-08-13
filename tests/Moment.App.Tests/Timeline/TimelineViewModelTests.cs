@@ -39,6 +39,26 @@ public sealed class TimelineViewModelTests
         Assert.Equal([UiLanguage.EnUs], saved);
         Assert.Equal(range, vm.CurrentPeriod.Range);
     }
+
+    [Fact]
+    public async Task Choosing_a_future_date_keeps_the_selected_period_mode_and_loads_that_range()
+    {
+        var query = new RecordingPeriodQuery();
+        var picker = new DatePickerStub(new DateOnly(2027, 3, 18));
+        var vm = Create(
+            query,
+            culture: CultureInfo.GetCultureInfo("en-US"),
+            datePicker: picker);
+
+        await vm.SelectMonthPeriodCommand.ExecuteAsync(null);
+        await vm.ChooseDateCommand.ExecuteAsync(null);
+
+        Assert.Equal(new DateOnly(2027, 3, 18), vm.SelectedDate);
+        Assert.Equal(TimelinePeriodKind.Month, vm.SelectedPeriodKind);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2027, 3, 1), new DateOnly(2027, 3, 31)),
+            query.Ranges[^1]);
+    }
     [Fact]
     public async Task Countdown_tick_updates_loaded_rows_without_querying_database()
     {
@@ -681,7 +701,8 @@ public sealed class TimelineViewModelTests
         Action<LocalDateRange>? analyticsNavigation = null,
         IClock? clock = null,
         ILocalizationService? localization = null,
-        Func<UiLanguage, Task>? saveLanguage = null)
+        Func<UiLanguage, Task>? saveLanguage = null,
+        IDatePicker? datePicker = null)
     {
         var reminderDialogs = dialogs ?? new Dialogs();
         var todoDialogs = reminderDialogs as ITodoDialogService ?? new Dialogs();
@@ -696,7 +717,14 @@ public sealed class TimelineViewModelTests
             culture,
             analyticsNavigation,
             localization: localization,
-            saveLanguage: saveLanguage);
+            saveLanguage: saveLanguage,
+            datePicker: datePicker);
+    }
+
+    private sealed class DatePickerStub(DateOnly? result) : IDatePicker
+    {
+        public Task<DateOnly?> ChooseAsync(DateOnly current, CancellationToken ct) =>
+            Task.FromResult(result);
     }
 
     private sealed class MutableClock(DateTimeOffset now) : IClock

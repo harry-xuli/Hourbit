@@ -222,6 +222,7 @@ public sealed class CompositionRoot : IAsyncDisposable
             CultureInfo.CurrentCulture);
         CompositionRoot? root = null;
         var helpWindow = new HelpWindowController();
+        var datePicker = new WpfDatePicker(() => root?.MainWindow);
         var timeline = new TimelineViewModel(
             timelineQuery, clock, reminders, actions, todos,
             dialogs, dialogs, zone,
@@ -236,7 +237,8 @@ public sealed class CompositionRoot : IAsyncDisposable
                     language == UiLanguage.EnUs ? "en-US" : "zh-CN");
                 if (!result.Succeeded)
                     throw new InvalidOperationException(result.ErrorMessage);
-            });
+            },
+            datePicker);
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);

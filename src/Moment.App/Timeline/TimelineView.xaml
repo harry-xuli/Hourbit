@@ -286,6 +286,7 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="PreviousPeriodButton"
                             Grid.Column="0"
@@ -357,19 +358,26 @@
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center" />
                     <Button x:Name="RefreshTimelineButton"
-                            Grid.Column="4"
+                            Grid.Column="5"
                             Command="{Binding LoadCommand}"
                             automation:AutomationProperties.Name="刷新时间线"
                             Content="刷新"
                             MinWidth="64"
                             Margin="10,0,0,0" />
                     <Button x:Name="NextPeriodButton"
-                            Grid.Column="5"
+                            Grid.Column="6"
                             Command="{Binding NextPeriodCommand}"
                             automation:AutomationProperties.Name="下一时段"
                             Content="›"
                             FontSize="22"
                             MinWidth="42"
+                            Margin="10,0,0,0" />
+                    <Button x:Name="ChooseDateButton"
+                            Grid.Column="4"
+                            Command="{Binding ChooseDateCommand}"
+                            automation:AutomationProperties.Name="选择日期"
+                            Content="选择日期"
+                            MinWidth="82"
                             Margin="10,0,0,0" />
                     <Button x:Name="CopyItemButton"
                             Grid.Column="3"

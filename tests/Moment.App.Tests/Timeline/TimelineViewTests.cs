@@ -46,6 +46,7 @@ public sealed class TimelineViewTests
             var month = Assert.IsType<RadioButton>(view.FindName("MonthPeriodButton"));
             var previous = Assert.IsType<Button>(view.FindName("PreviousPeriodButton"));
             var next = Assert.IsType<Button>(view.FindName("NextPeriodButton"));
+            var chooseDate = Assert.IsType<Button>(view.FindName("ChooseDateButton"));
             var past = Assert.IsType<Button>(view.FindName("PastSevenDaysCard"));
             var future = Assert.IsType<Button>(view.FindName("NextFourteenDaysCard"));
             var periodLabel = Assert.IsType<TextBlock>(view.FindName("PeriodLabel"));
@@ -65,11 +66,12 @@ public sealed class TimelineViewTests
                 button => Assert.IsAssignableFrom<Geometry>(button.Tag));
             Assert.Equal("上一时段", PeerName(previous));
             Assert.Equal("下一时段", PeerName(next));
+            Assert.Equal("选择日期", PeerName(chooseDate));
             Assert.Equal("过去 7 天已完成：3，打开分析", PeerName(past));
             Assert.Equal("未来 14 天计划：5，打开分析", PeerName(future));
             Assert.Equal("2026年7月29日 星期三", periodLabel.Text);
             Assert.All(
-                new Control[] { day, week, month, previous, next, past, future },
+                new Control[] { day, week, month, previous, next, chooseDate, past, future },
                 control => Assert.True(Peer(control).IsKeyboardFocusable()));
             Assert.True(past.TranslatePoint(new Point(), view).Y <
                         todoSection.TranslatePoint(new Point(), view).Y);

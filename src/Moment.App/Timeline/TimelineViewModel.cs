@@ -37,6 +37,7 @@ public sealed class TimelineViewModel : ObservableObject
     private readonly Action _openReports;
     private readonly ILocalizationService _localization;
     private readonly Func<UiLanguage, Task> _saveLanguage;
+    private readonly IDatePicker _datePicker;
     private CancellationTokenSource? _loadCancellation;
     private TimelineItemViewModel? _selectedItem;
     private TodoTimelineItemViewModel? _selectedTodo;
@@ -65,7 +66,8 @@ public sealed class TimelineViewModel : ObservableObject
         Action? openHelp = null,
         Action? openReports = null,
         ILocalizationService? localization = null,
-        Func<UiLanguage, Task>? saveLanguage = null)
+        Func<UiLanguage, Task>? saveLanguage = null,
+        IDatePicker? datePicker = null)
     {
         _query = query;
         _clock = clock;
@@ -81,6 +83,7 @@ public sealed class TimelineViewModel : ObservableObject
         _openReports = openReports ?? (() => { });
         _localization = localization ?? new LocalizationService(_culture, null);
         _saveLanguage = saveLanguage ?? (_ => Task.CompletedTask);
+        _datePicker = datePicker ?? new NullDatePicker();
         _selectedDate = LocalToday;
         _selectedPeriodKind = TimelinePeriodKind.Day;
         _currentPeriod = TimelinePeriod.Create(
@@ -121,6 +124,8 @@ public sealed class TimelineViewModel : ObservableObject
             (_, _) => ObserveAsync(() => MovePeriodAsync(-1)));
         NextPeriodCommand = new AsyncCommand(
             (_, _) => ObserveAsync(() => MovePeriodAsync(1)));
+        ChooseDateCommand = new AsyncCommand(
+            (_, ct) => ObserveAsync(() => ChooseDateAsync(ct)));
         OpenPastSevenDaysAnalyticsCommand = new AsyncCommand(
             (_, _) => ObserveAsync(() => OpenAnalyticsAsync(_pastSevenDaysRange)),
             _ => _pastSevenDaysRange is not null);
@@ -148,6 +153,7 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand SelectMonthPeriodCommand { get; }
     public IAsyncCommand PreviousPeriodCommand { get; }
     public IAsyncCommand NextPeriodCommand { get; }
+    public IAsyncCommand ChooseDateCommand { get; }
     public IAsyncCommand OpenPastSevenDaysAnalyticsCommand { get; }
     public IAsyncCommand OpenNextFourteenDaysAnalyticsCommand { get; }
     public string ProductName => "Hourbit 日程";
@@ -178,6 +184,7 @@ public sealed class TimelineViewModel : ObservableObject
         _selectedPeriodKind == TimelinePeriodKind.Month;
     public TimelinePeriod CurrentPeriod => _currentPeriod;
     public string PeriodLabel => _currentPeriod.Label;
+    public DateOnly SelectedDate => _selectedDate;
     public int PastSevenDaysCompleted => _pastSevenDaysCompleted;
     public int NextFourteenDaysPlanned => _nextFourteenDaysPlanned;
 
@@ -356,6 +363,7 @@ public sealed class TimelineViewModel : ObservableObject
 
     private void SetPeriod(TimelinePeriodKind kind, DateOnly selectedDate)
     {
+        _selectedDate = selectedDate;
         _selectedPeriodKind = kind;
         _currentPeriod = TimelinePeriod.Create(selectedDate, kind, _culture);
         PublishPeriodChanged();
@@ -369,6 +377,7 @@ public sealed class TimelineViewModel : ObservableObject
         OnPropertyChanged(nameof(IsMonthPeriodSelected));
         OnPropertyChanged(nameof(CurrentPeriod));
         OnPropertyChanged(nameof(PeriodLabel));
+        OnPropertyChanged(nameof(SelectedDate));
     }
 
     private Task OpenAnalyticsAsync(LocalDateRange? range)
@@ -442,6 +451,15 @@ public sealed class TimelineViewModel : ObservableObject
         if (item is null)
             return;
         await _actions.CompleteAsync(item.OccurrenceId, ct);
+        await LoadAsync();
+    }
+
+    private async Task ChooseDateAsync(CancellationToken ct)
+    {
+        var selected = await _datePicker.ChooseAsync(_selectedDate, ct);
+        if (selected is null)
+            return;
+        SetPeriod(_selectedPeriodKind, selected.Value);
         await LoadAsync();
     }
 
