@@ -47,6 +47,12 @@ public partial class TimelineView : UserControl
             return;
         }
 
+        if ((eventArgs.Key, modifiers) == (Key.F5, ModifierKeys.None))
+        {
+            ExecuteIfAvailable(_viewModel.LoadCommand, eventArgs);
+            return;
+        }
+
         var command = (eventArgs.Key, modifiers) switch
         {
             (Key.D, ModifierKeys.Control) => _viewModel.CopyCommand,

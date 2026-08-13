@@ -743,7 +743,7 @@
         <Border Grid.Row="2" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,1,0,0">
             <TextBlock x:Name="TimelineFooterText"
-                       Text="快捷键：Ctrl+N 新建   Ctrl+D 复制   Ctrl+Shift+Space 完成   Delete 删除   Enter 编辑"
+                       Text="{Binding ShortcutFooter, StringFormat=快捷键：{0}}"
                        Foreground="{DynamicResource SecondaryTextBrush}"
                        VerticalAlignment="Center" Margin="30,0" />
         </Border>

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using Moment.App.Commands;
 using Moment.App.Localization;
+using Moment.App.Input;
 using Moment.Core.Abstractions;
 using Moment.Core.Analytics;
 using Moment.Core.Domain;
@@ -161,6 +162,7 @@ public sealed class TimelineViewModel : ObservableObject
     public string NewText => _localization.Translate("Action.New");
     public string ReportsText => _localization.Translate("Action.Report");
     public string HelpText => _localization.Translate("Action.Help");
+    public string ShortcutFooter => ShortcutCatalog.Footer(CurrentLanguage);
     public string DateText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString(
         "yyyy年M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
     public string MonthText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString("M月",
@@ -340,6 +342,7 @@ public sealed class TimelineViewModel : ObservableObject
         OnPropertyChanged(nameof(NewText));
         OnPropertyChanged(nameof(ReportsText));
         OnPropertyChanged(nameof(HelpText));
+        OnPropertyChanged(nameof(ShortcutFooter));
     }
 
     private async Task SelectPeriodAsync(TimelinePeriodKind kind)

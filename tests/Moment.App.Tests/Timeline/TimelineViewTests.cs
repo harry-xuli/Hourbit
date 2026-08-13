@@ -314,6 +314,23 @@ public sealed class TimelineViewTests
         });
 
     [Fact]
+    public Task F5_refreshes_from_non_row_focus_without_changing_selection() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var query = TwoGroupQuery();
+            var viewModel = Create(query);
+            await viewModel.LoadAsync();
+            var view = Show(viewModel);
+            var help = Assert.IsType<Button>(view.FindName("HelpButton"));
+            Assert.True(help.Focus());
+
+            Assert.True(RaiseKey(help, Key.F5).Handled);
+            await System.Windows.Threading.Dispatcher.Yield();
+
+            Assert.Equal(2, query.Calls);
+        });
+
+    [Fact]
     public Task Routed_keyboard_shortcuts_switch_to_the_focused_reminder_type() =>
         WpfTestHost.RunAsync(async () =>
         {
@@ -715,10 +732,15 @@ public sealed class TimelineViewTests
 
         public QueryStub(TimelineSnapshot snapshot) => _snapshot = snapshot;
 
+        public int Calls { get; private set; }
+
         public Task<TimelineSnapshot> GetTimelineAsync(
             LocalDateRange range, DateTimeOffset now,
-            TimeZoneInfo zone, CancellationToken ct) =>
-            Task.FromResult(_snapshot);
+            TimeZoneInfo zone, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(_snapshot);
+        }
     }
 
     private sealed class LocalClock(DateTimeOffset now) : IClock
