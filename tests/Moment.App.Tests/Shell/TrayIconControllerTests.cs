@@ -43,6 +43,23 @@ public sealed class TrayIconControllerTests
     }
 
     [Fact]
+    public void Tray_double_click_opens_the_existing_timeline_but_single_click_does_nothing()
+    {
+        var host = new TrayHost();
+        var opens = 0;
+        using var controller = new TrayIconController(
+            host, () => Task.FromResult(false), new Confirmation(true),
+            () => opens++, () => { }, _ => { }, () => { },
+            () => { }, () => { }, () => Task.CompletedTask);
+
+        host.RaiseSingleClick();
+        Assert.Equal(0, opens);
+
+        host.RaiseActivated();
+        Assert.Equal(1, opens);
+    }
+
+    [Fact]
     public async Task Exit_with_scheduled_occurrences_requires_confirmation_before_shutdown()
     {
         var host = new TrayHost();
@@ -61,8 +78,11 @@ public sealed class TrayIconControllerTests
 
     private sealed class TrayHost : ITrayMenuHost
     {
+        public event Action? Activated;
         public IReadOnlyList<TrayMenuItem> Items { get; private set; } = [];
         public void SetItems(IReadOnlyList<TrayMenuItem> items) => Items = items;
+        public void RaiseActivated() => Activated?.Invoke();
+        public void RaiseSingleClick() { }
         public void Dispose() { }
     }
 

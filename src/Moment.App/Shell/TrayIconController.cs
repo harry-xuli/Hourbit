@@ -12,6 +12,7 @@ public sealed class TrayMenuItem(
 
 public interface ITrayMenuHost : IDisposable
 {
+    event Action? Activated;
     void SetItems(IReadOnlyList<TrayMenuItem> items);
 }
 
@@ -44,6 +45,7 @@ public sealed class TrayIconController : IDisposable
         _hasScheduled = hasScheduled;
         _confirmation = confirmation;
         _exit = exit;
+        _host.Activated += openTimeline;
         _host.SetItems(
         [
             new("打开今天时间轴", () => InvokeAsync(openTimeline)),
@@ -143,6 +145,7 @@ public sealed class WindowsFormsTrayMenuHost : ITrayMenuHost
         {
             icon.Icon = _applicationIcon;
             icon.Text = "Hourbit 日程";
+            icon.DoubleClick += OnDoubleClick;
             icon.Visible = true;
             _icon = icon;
         }
@@ -153,6 +156,8 @@ public sealed class WindowsFormsTrayMenuHost : ITrayMenuHost
             throw;
         }
     }
+
+    public event Action? Activated;
 
     public void SetItems(IReadOnlyList<TrayMenuItem> items)
     {
@@ -170,6 +175,7 @@ public sealed class WindowsFormsTrayMenuHost : ITrayMenuHost
         try
         {
             _icon.Visible = false;
+            _icon.DoubleClick -= OnDoubleClick;
             _icon.ContextMenuStrip?.Dispose();
         }
         finally
@@ -184,6 +190,8 @@ public sealed class WindowsFormsTrayMenuHost : ITrayMenuHost
             }
         }
     }
+
+    private void OnDoubleClick(object? sender, EventArgs e) => Activated?.Invoke();
 
     private static System.Drawing.Icon LoadApplicationIcon()
     {
