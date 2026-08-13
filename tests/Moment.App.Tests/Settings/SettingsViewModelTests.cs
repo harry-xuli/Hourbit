@@ -98,7 +98,7 @@ public sealed class SettingsViewModelTests
         var hotkeys = new StubHotkeys(HotkeyRegistrationResult.Registered);
         var store = new RecordingSettingsStore
         {
-            Current = new AppSettings("Ctrl+Alt+Space", true, 42, soundPath)
+            Current = new AppSettings("Ctrl+Alt+Space", true, 42, soundPath, "en-US")
         };
         var vm = new SettingsViewModel(hotkeys, store);
         await vm.LoadAsync();
@@ -106,9 +106,28 @@ public sealed class SettingsViewModelTests
         await vm.SaveHotkeyAsync("Ctrl+Shift+R");
 
         Assert.Equal(
-            new AppSettings("Ctrl+Shift+R", true, 42, soundPath),
+            new AppSettings("Ctrl+Shift+R", true, 42, soundPath, "en-US"),
             store.LastSaved);
         Assert.Null(vm.HotkeyError);
+    }
+
+    [Fact]
+    public async Task Saving_UI_language_preserves_all_other_settings()
+    {
+        var store = new RecordingSettingsStore
+        {
+            Current = new AppSettings("Ctrl+Shift+R", true, 42, null, "zh-CN")
+        };
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered), store);
+        await vm.LoadAsync();
+
+        await vm.SaveUiLanguageAsync("en-US");
+
+        Assert.Equal(
+            new AppSettings("Ctrl+Shift+R", true, 42, null, "en-US"),
+            store.LastSaved);
+        Assert.Equal("en-US", vm.UiLanguage);
     }
 
     [Fact]

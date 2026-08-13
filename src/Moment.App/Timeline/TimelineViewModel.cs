@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using Moment.App.Commands;
+using Moment.App.Localization;
 using Moment.Core.Abstractions;
 using Moment.Core.Analytics;
 using Moment.Core.Domain;
@@ -33,6 +34,9 @@ public sealed class TimelineViewModel : ObservableObject
     private readonly CultureInfo _culture;
     private readonly Action<LocalDateRange> _openAnalytics;
     private readonly Action _openHelp;
+    private readonly Action _openReports;
+    private readonly ILocalizationService _localization;
+    private readonly Func<UiLanguage, Task> _saveLanguage;
     private CancellationTokenSource? _loadCancellation;
     private TimelineItemViewModel? _selectedItem;
     private TodoTimelineItemViewModel? _selectedTodo;
@@ -58,7 +62,10 @@ public sealed class TimelineViewModel : ObservableObject
         TimeZoneInfo zone,
         CultureInfo? culture = null,
         Action<LocalDateRange>? openAnalytics = null,
-        Action? openHelp = null)
+        Action? openHelp = null,
+        Action? openReports = null,
+        ILocalizationService? localization = null,
+        Func<UiLanguage, Task>? saveLanguage = null)
     {
         _query = query;
         _clock = clock;
@@ -71,6 +78,9 @@ public sealed class TimelineViewModel : ObservableObject
         _culture = culture ?? CultureInfo.CurrentCulture;
         _openAnalytics = openAnalytics ?? (_ => { });
         _openHelp = openHelp ?? (() => { });
+        _openReports = openReports ?? (() => { });
+        _localization = localization ?? new LocalizationService(_culture, null);
+        _saveLanguage = saveLanguage ?? (_ => Task.CompletedTask);
         _selectedDate = LocalToday;
         _selectedPeriodKind = TimelinePeriodKind.Day;
         _currentPeriod = TimelinePeriod.Create(
@@ -97,6 +107,13 @@ public sealed class TimelineViewModel : ObservableObject
             _openHelp();
             return Task.CompletedTask;
         }));
+        OpenReportsCommand = new AsyncCommand((_, _) => ObserveAsync(() =>
+        {
+            _openReports();
+            return Task.CompletedTask;
+        }));
+        SelectChineseLanguageCommand = CreateLanguageSelectionCommand(UiLanguage.ZhCn);
+        SelectEnglishLanguageCommand = CreateLanguageSelectionCommand(UiLanguage.EnUs);
         SelectDayPeriodCommand = CreatePeriodSelectionCommand(TimelinePeriodKind.Day);
         SelectWeekPeriodCommand = CreatePeriodSelectionCommand(TimelinePeriodKind.Week);
         SelectMonthPeriodCommand = CreatePeriodSelectionCommand(TimelinePeriodKind.Month);
@@ -123,6 +140,9 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand CopyCommand { get; }
     public IAsyncCommand OpenQuickAddCommand { get; }
     public IAsyncCommand OpenHelpCommand { get; }
+    public IAsyncCommand OpenReportsCommand { get; }
+    public IAsyncCommand SelectChineseLanguageCommand { get; }
+    public IAsyncCommand SelectEnglishLanguageCommand { get; }
     public IAsyncCommand SelectDayPeriodCommand { get; }
     public IAsyncCommand SelectWeekPeriodCommand { get; }
     public IAsyncCommand SelectMonthPeriodCommand { get; }
@@ -131,6 +151,10 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand OpenPastSevenDaysAnalyticsCommand { get; }
     public IAsyncCommand OpenNextFourteenDaysAnalyticsCommand { get; }
     public string ProductName => "Hourbit 日程";
+    public UiLanguage CurrentLanguage => _localization.CurrentLanguage;
+    public string NewText => _localization.Translate("Action.New");
+    public string ReportsText => _localization.Translate("Action.Report");
+    public string HelpText => _localization.Translate("Action.Help");
     public string DateText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString(
         "yyyy年M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
     public string MonthText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString("M月",
@@ -295,6 +319,21 @@ public sealed class TimelineViewModel : ObservableObject
 
     private IAsyncCommand CreatePeriodSelectionCommand(TimelinePeriodKind kind) =>
         new AsyncCommand((_, _) => ObserveAsync(() => SelectPeriodAsync(kind)));
+
+    private IAsyncCommand CreateLanguageSelectionCommand(UiLanguage language) =>
+        new AsyncCommand((_, _) => ObserveAsync(() => SelectLanguageAsync(language)));
+
+    private async Task SelectLanguageAsync(UiLanguage language)
+    {
+        if (_localization.CurrentLanguage == language)
+            return;
+        await _saveLanguage(language);
+        _localization.SetLanguage(language);
+        OnPropertyChanged(nameof(CurrentLanguage));
+        OnPropertyChanged(nameof(NewText));
+        OnPropertyChanged(nameof(ReportsText));
+        OnPropertyChanged(nameof(HelpText));
+    }
 
     private async Task SelectPeriodAsync(TimelinePeriodKind kind)
     {

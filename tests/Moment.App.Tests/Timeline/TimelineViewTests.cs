@@ -112,6 +112,9 @@ public sealed class TimelineViewTests
             var view = Show(viewModel);
             var button = Assert.IsType<Button>(view.FindName("NewReminderButton"));
             var help = Assert.IsType<Button>(view.FindName("HelpButton"));
+            var chinese = Assert.IsType<Button>(view.FindName("ChineseLanguageButton"));
+            var english = Assert.IsType<Button>(view.FindName("EnglishLanguageButton"));
+            var reports = Assert.IsType<Button>(view.FindName("ReportsButton"));
             var content = Assert.IsType<StackPanel>(button.Content);
             var icon = Assert.IsType<Viewbox>(content.Children[0]);
             var label = Assert.IsType<TextBlock>(content.Children[1]);
@@ -124,6 +127,11 @@ public sealed class TimelineViewTests
             Assert.Equal("使用说明", PeerName(help));
             Assert.Equal("使用说明", help.ToolTip);
             Assert.True(Peer(help).IsKeyboardFocusable());
+            Assert.Equal("中", chinese.Content);
+            Assert.Equal("EN", english.Content);
+            Assert.Equal("打开报告", PeerName(reports));
+            Assert.All(new[] { chinese, english, reports },
+                button => Assert.True(Peer(button).IsKeyboardFocusable()));
 
             var iconCenter = icon.TranslatePoint(
                 new Point(icon.ActualWidth / 2d, icon.ActualHeight / 2d), button).Y;

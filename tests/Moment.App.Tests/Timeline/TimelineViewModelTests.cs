@@ -1,6 +1,7 @@
 using System.Globalization;
 using Moment.App.Commands;
 using Moment.App.Timeline;
+using Moment.App.Localization;
 using Moment.Core.Analytics;
 using Moment.Core.Abstractions;
 using Moment.Core.Domain;
@@ -12,6 +13,32 @@ namespace Moment.App.Tests.Timeline;
 
 public sealed class TimelineViewModelTests
 {
+    [Fact]
+    public async Task Language_switch_updates_UI_labels_persists_choice_and_leaves_period_unchanged()
+    {
+        var saved = new List<UiLanguage>();
+        var localization = new LocalizationService(
+            CultureInfo.GetCultureInfo("zh-CN"), null);
+        var vm = Create(
+            new RecordingPeriodQuery(),
+            culture: CultureInfo.GetCultureInfo("zh-CN"),
+            localization: localization,
+            saveLanguage: language =>
+            {
+                saved.Add(language);
+                return Task.CompletedTask;
+            });
+
+        await vm.SelectWeekPeriodCommand.ExecuteAsync(null);
+        var range = vm.CurrentPeriod.Range;
+        await vm.SelectEnglishLanguageCommand.ExecuteAsync(null);
+
+        Assert.Equal("New", vm.NewText);
+        Assert.Equal("Reports", vm.ReportsText);
+        Assert.Equal(UiLanguage.EnUs, vm.CurrentLanguage);
+        Assert.Equal([UiLanguage.EnUs], saved);
+        Assert.Equal(range, vm.CurrentPeriod.Range);
+    }
     [Fact]
     public async Task Countdown_tick_updates_loaded_rows_without_querying_database()
     {
@@ -652,7 +679,9 @@ public sealed class TimelineViewModelTests
         ITodoService? todos = null,
         CultureInfo? culture = null,
         Action<LocalDateRange>? analyticsNavigation = null,
-        IClock? clock = null)
+        IClock? clock = null,
+        ILocalizationService? localization = null,
+        Func<UiLanguage, Task>? saveLanguage = null)
     {
         var reminderDialogs = dialogs ?? new Dialogs();
         var todoDialogs = reminderDialogs as ITodoDialogService ?? new Dialogs();
@@ -665,7 +694,9 @@ public sealed class TimelineViewModelTests
             todoDialogs,
             TimeZoneInfo.CreateCustomTimeZone("UTC+08-vm", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
             culture,
-            analyticsNavigation);
+            analyticsNavigation,
+            localization: localization,
+            saveLanguage: saveLanguage);
     }
 
     private sealed class MutableClock(DateTimeOffset now) : IClock

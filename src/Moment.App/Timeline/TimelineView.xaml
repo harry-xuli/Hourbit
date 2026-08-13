@@ -221,21 +221,39 @@
                                   StrokeStartLineCap="Round"
                                   StrokeEndLineCap="Round" />
                         </Viewbox>
-                        <TextBlock Text="新建提醒"
+                        <TextBlock Text="{Binding NewText}"
                                    Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"
                                    FontSize="17"
                                    VerticalAlignment="Center" />
                     </StackPanel>
                 </Button>
-                <Button x:Name="HelpButton"
-                        Grid.Column="8"
-                        Command="{Binding OpenHelpCommand}"
-                        automation:AutomationProperties.Name="使用说明"
-                        Content="?"
-                        ToolTip="使用说明"
-                        FontSize="20"
-                        MinWidth="46" MinHeight="46"
-                        Margin="0,0,12,0" />
+                <StackPanel Grid.Column="8" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ReportsButton"
+                            Command="{Binding OpenReportsCommand}"
+                            automation:AutomationProperties.Name="打开报告"
+                            Content="{Binding ReportsText}"
+                            MinWidth="72" MinHeight="42"
+                            Margin="0,0,8,0" />
+                    <Button x:Name="ChineseLanguageButton"
+                            Command="{Binding SelectChineseLanguageCommand}"
+                            automation:AutomationProperties.Name="切换为中文"
+                            Content="中"
+                            MinWidth="38" MinHeight="42" />
+                    <Button x:Name="EnglishLanguageButton"
+                            Command="{Binding SelectEnglishLanguageCommand}"
+                            automation:AutomationProperties.Name="Switch to English"
+                            Content="EN"
+                            MinWidth="46" MinHeight="42"
+                            Margin="4,0,8,0" />
+                    <Button x:Name="HelpButton"
+                            Command="{Binding OpenHelpCommand}"
+                            automation:AutomationProperties.Name="使用说明"
+                            Content="?"
+                            ToolTip="{Binding HelpText}"
+                            FontSize="20"
+                            MinWidth="46" MinHeight="46"
+                            Margin="0,0,12,0" />
+                </StackPanel>
             </Grid>
         </Border>
 

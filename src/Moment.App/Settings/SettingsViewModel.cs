@@ -26,6 +26,7 @@ public sealed class SettingsViewModel : ObservableObject
     private bool _startWithWindows;
     private int _alertVolume = 100;
     private string? _customAlertSoundPath;
+    private string? _uiLanguage;
     private string? _hotkeyError;
     private string? _warningMessage;
     private bool _missingSoundWarningShown;
@@ -92,6 +93,12 @@ public sealed class SettingsViewModel : ObservableObject
         private set => SetProperty(ref _warningMessage, value);
     }
 
+    public string? UiLanguage
+    {
+        get => _uiLanguage;
+        private set => SetProperty(ref _uiLanguage, value);
+    }
+
     public bool HasReleasePage => _releasePage?.Url is not null;
     public string VersionText =>
         (_releasePage?.Metadata ??
@@ -105,6 +112,7 @@ public sealed class SettingsViewModel : ObservableObject
         StartWithWindows = settings.StartWithWindows;
         AlertVolume = settings.AlertVolume;
         CustomAlertSoundPath = settings.CustomAlertSoundPath;
+        UiLanguage = settings.UiLanguage;
         _persisted = settings;
 
         if (ResetInvalidCustomSound())
@@ -143,6 +151,28 @@ public sealed class SettingsViewModel : ObservableObject
         Hotkey = hotkey;
         _persisted = desired;
         HotkeyError = null;
+        return SettingsSaveResult.Success;
+    }
+
+    public async Task<SettingsSaveResult> SaveUiLanguageAsync(
+        string uiLanguage,
+        CancellationToken ct = default)
+    {
+        if (uiLanguage is not ("zh-CN" or "en-US"))
+            return SettingsSaveResult.Failure("不支持的界面语言。");
+
+        var desired = _persisted with { UiLanguage = uiLanguage };
+        try
+        {
+            await _store.SaveAsync(desired, ct);
+        }
+        catch (Exception exception)
+        {
+            return SettingsSaveResult.Failure(exception.Message);
+        }
+
+        UiLanguage = uiLanguage;
+        _persisted = desired;
         return SettingsSaveResult.Success;
     }
 
@@ -245,7 +275,7 @@ public sealed class SettingsViewModel : ObservableObject
     }
 
     private AppSettings CurrentSettings() =>
-        new(Hotkey, StartWithWindows, AlertVolume, CustomAlertSoundPath);
+        new(Hotkey, StartWithWindows, AlertVolume, CustomAlertSoundPath, UiLanguage);
 
     private IBackupService GetBackupService() =>
         _backupService ??

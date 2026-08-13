@@ -7,8 +7,8 @@ public static class LocalizationCatalog
     private static readonly ImmutableDictionary<string, string> Chinese =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Action.New"] = "新建",
-            ["Action.Help"] = "帮助",
+            ["Action.New"] = "新建提醒",
+            ["Action.Help"] = "使用说明",
             ["Action.Report"] = "报告",
             ["Action.Refresh"] = "刷新",
             ["Period.Day"] = "日",

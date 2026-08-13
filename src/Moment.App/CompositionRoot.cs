@@ -1,6 +1,7 @@
 using Moment.App.Alerts;
 using Moment.App.Analytics;
 using Moment.App.Help;
+using Moment.App.Localization;
 using Moment.App.QuickAdd;
 using Moment.App.Settings;
 using Moment.App.Shell;
@@ -160,6 +161,8 @@ public sealed class CompositionRoot : IAsyncDisposable
             backupService,
             ReleasePageService.FromAssembly(Assembly.GetExecutingAssembly()));
         await settings.LoadAsync(ct);
+        var localization = new LocalizationService(
+            CultureInfo.CurrentUICulture, settings.UiLanguage);
         await TryCreateDailyBackupAsync(backupService, settings, ct);
 
         var schedulerSignal = new SchedulerSignalProxy();
@@ -224,7 +227,16 @@ public sealed class CompositionRoot : IAsyncDisposable
             dialogs, dialogs, zone,
             CultureInfo.CurrentCulture,
             range => root?.ShowAnalytics(range),
-            helpWindow.ShowAndFocus);
+            helpWindow.ShowAndFocus,
+            () => root?.ShowAnalytics(),
+            localization,
+            async language =>
+            {
+                var result = await settings.SaveUiLanguageAsync(
+                    language == UiLanguage.EnUs ? "en-US" : "zh-CN");
+                if (!result.Succeeded)
+                    throw new InvalidOperationException(result.ErrorMessage);
+            });
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(
             System.Windows.Application.Current.Dispatcher, timeline);
