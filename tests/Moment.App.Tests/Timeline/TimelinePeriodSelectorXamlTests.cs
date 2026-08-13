@@ -44,9 +44,10 @@ public sealed class TimelinePeriodSelectorXamlTests
         Assert.Contains("x:Key=\"PeriodDayBrush\"", colorsXaml);
         Assert.Contains("x:Key=\"PeriodWeekBrush\"", colorsXaml);
         Assert.Contains("x:Key=\"PeriodMonthBrush\"", colorsXaml);
-        Assert.Contains("#0F5CC0", colorsXaml);
-        Assert.Contains("#7C3AED", colorsXaml);
-        Assert.Contains("#C45F00", colorsXaml);
+        Assert.Contains("#126A67", colorsXaml);
+        Assert.Contains("#6E5AA6", colorsXaml);
+        Assert.Contains("#C76A2A", colorsXaml);
+        Assert.Contains("#FFF9F2", colorsXaml);
 
         Assert.Contains("\"PeriodDayBrush\"", highContrastSource);
         Assert.Contains("\"PeriodWeekBrush\"", highContrastSource);

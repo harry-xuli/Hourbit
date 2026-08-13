@@ -159,7 +159,7 @@
     </UserControl.Resources>
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="116" />
+            <RowDefinition Height="96" />
             <RowDefinition Height="*" />
             <RowDefinition Height="48" />
         </Grid.RowDefinitions>
@@ -180,7 +180,7 @@
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="0"
                            Text="{Binding ProductName}"
-                           FontSize="36"
+                           FontSize="31"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource AccentBrush}"
                            VerticalAlignment="Center" />
@@ -188,7 +188,7 @@
                 <TextBlock Grid.Column="2" Text="{Binding DateText}" FontSize="22" VerticalAlignment="Center" />
                 <Border Grid.Column="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="◷" FontFamily="Segoe UI Symbol" FontSize="23" Margin="0,0,10,0" />
+                    <TextBlock Text="◷" FontFamily="Segoe UI Symbol" FontSize="21" Margin="0,0,8,0" />
                     <TextBlock Text="下一个提醒" VerticalAlignment="Center" Margin="0,0,10,0" />
                     <TextBlock Text="{Binding NextReminderText}" Foreground="{DynamicResource AccentBrush}"
                                FontWeight="SemiBold" VerticalAlignment="Center" />
