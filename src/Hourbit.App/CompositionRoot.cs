@@ -164,6 +164,7 @@ public sealed class CompositionRoot : IAsyncDisposable
         await settings.LoadAsync(ct);
         var localization = new LocalizationService(
             CultureInfo.CurrentUICulture, settings.UiLanguage);
+        LocalizationHub.Use(localization);
         await TryCreateDailyBackupAsync(backupService, settings, ct);
 
         var schedulerSignal = new SchedulerSignalProxy();

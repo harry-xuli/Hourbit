@@ -1,6 +1,7 @@
 <Window x:Class="Hourbit.App.Timeline.EditReminderWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:localization="clr-namespace:Hourbit.App.Localization"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         Title="{Binding EditorTitle}"
         Width="560"
@@ -31,7 +32,7 @@
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="内容" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.Content}" VerticalAlignment="Center" />
             <TextBox Grid.Column="1" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}"
                      automation:AutomationProperties.Name="提醒内容" />
         </Grid>
@@ -43,7 +44,7 @@
                 <ColumnDefinition Width="16" />
                 <ColumnDefinition Width="150" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="日期时间" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.DateTime}" VerticalAlignment="Center" />
             <TextBox x:Name="ReminderDateBox"
                      Grid.Column="1" Text="{Binding DateText, UpdateSourceTrigger=PropertyChanged}"
                      automation:AutomationProperties.Name="日期，格式年-月-日" />
@@ -58,7 +59,7 @@
                 <ColumnDefinition Width="16" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="类型" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.Kind}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" MinHeight="40"
                       ItemsSource="{Binding Kinds}"
                       DisplayMemberPath="Label"
@@ -67,7 +68,7 @@
                       automation:AutomationProperties.Name="提醒类型" />
             <TextBlock Grid.Column="2" />
             <StackPanel Grid.Column="3" Orientation="Horizontal">
-                <TextBlock Text="重要性" Width="66" VerticalAlignment="Center" />
+                <TextBlock Text="{localization:Loc Editor.Importance}" Width="66" VerticalAlignment="Center" />
                 <ComboBox MinWidth="126" MinHeight="40"
                           ItemsSource="{Binding Importances}"
                           DisplayMemberPath="Label"
@@ -82,7 +83,7 @@
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="重复" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.Recurrence}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" MinHeight="40"
                       ItemsSource="{Binding Recurrences}"
                       DisplayMemberPath="Label"
@@ -97,7 +98,7 @@
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="每周日期" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.Weekdays}" VerticalAlignment="Center" />
             <ItemsControl Grid.Column="1"
                           ItemsSource="{Binding Weekdays}"
                           automation:AutomationProperties.Name="每周日期">
@@ -119,7 +120,7 @@
         </Grid>
 
         <TextBlock Grid.Row="6"
-                   Text="清空时间后将转换为待办；日期可留空。"
+                   Text="{localization:Loc Editor.ReminderConversionHint}"
                    Foreground="{DynamicResource SecondaryTextBrush}"
                    Margin="92,0,0,12"
                    Visibility="{Binding ConvertsToTodo, Converter={StaticResource BooleanToVisibility}}" />
@@ -134,7 +135,7 @@
                        Margin="92,0,0,14"
                        TextWrapping="Wrap" />
             <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Style="{StaticResource SecondaryButton}" Content="取消"
+            <Button Style="{StaticResource SecondaryButton}" Content="{localization:Loc Editor.Cancel}"
                         IsCancel="True" Margin="0,0,10,0"
                         IsEnabled="{Binding CanCancel}" />
                 <Button x:Name="SaveReminderButton"

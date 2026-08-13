@@ -1,3 +1,5 @@
+using Hourbit.App.Localization;
+
 namespace Hourbit.App.Shell;
 
 public sealed class TrayMenuItem(
@@ -48,18 +50,18 @@ public sealed class TrayIconController : IDisposable
         _host.Activated += openTimeline;
         _host.SetItems(
         [
-            new("打开今天时间轴", () => InvokeAsync(openTimeline)),
-            new("快速创建", () => InvokeAsync(openQuickAdd)),
-            new("常用倒计时", children:
+            new(LocalizationHub.Translate("Tray.OpenTimeline"), () => InvokeAsync(openTimeline)),
+            new(LocalizationHub.Translate("Tray.QuickCreate"), () => InvokeAsync(openQuickAdd)),
+            new(LocalizationHub.Translate("Tray.Countdowns"), children:
             [
-                new("5 分钟", () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(5)))),
-                new("10 分钟", () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(10)))),
-                new("20 分钟", () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(20))))
+                new(LocalizationHub.Translate("Tray.FiveMinutes"), () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(5)))),
+                new(LocalizationHub.Translate("Tray.TenMinutes"), () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(10)))),
+                new(LocalizationHub.Translate("Tray.TwentyMinutes"), () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(20))))
             ]),
-            new("分析报告", () => InvokeAsync(openAnalytics)),
-            new("使用说明", () => InvokeAsync(openHelp)),
-            new("设置", () => InvokeAsync(openSettings)),
-            new("退出", ExitAsync)
+            new(LocalizationHub.Translate("Tray.Analytics"), () => InvokeAsync(openAnalytics)),
+            new(LocalizationHub.Translate("Tray.Help"), () => InvokeAsync(openHelp)),
+            new(LocalizationHub.Translate("Tray.Settings"), () => InvokeAsync(openSettings)),
+            new(LocalizationHub.Translate("Tray.Exit"), ExitAsync)
         ]);
     }
 

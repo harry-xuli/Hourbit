@@ -1,5 +1,6 @@
 using System.Globalization;
 using Hourbit.App.Commands;
+using Hourbit.App.Localization;
 using Hourbit.Core.Domain;
 using Hourbit.Core.Parsing;
 using Hourbit.Core.Services;
@@ -66,18 +67,20 @@ public sealed class EditTodoViewModel : ObservableObject
     public event EventHandler? CloseRequested;
 
     public Guid TodoId { get; }
-    public string EditorTitle => _createMode ? "新建待办副本" : "编辑待办";
+    public string EditorTitle => LocalizationHub.Translate(
+        _createMode ? "Editor.NewTodoCopy" : "Editor.EditTodo");
     public bool IsCompleted { get; }
     public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
     public bool IsRefreshOnly => _refreshOnlyMessage is not null;
     public bool CanEdit => !IsBusy && !IsRefreshOnly;
     public bool CanCancel => CanEdit;
-    public string PrimaryActionText => IsRefreshOnly ? "重试刷新" : "保存";
+    public string PrimaryActionText => LocalizationHub.Translate(
+        IsRefreshOnly ? "Editor.RetryRefresh" : "Editor.Save");
 
     public IReadOnlyList<EditOption<ReminderImportance>> Importances { get; } =
     [
-        new(ReminderImportance.Normal, "普通"),
-        new(ReminderImportance.Important, "重要")
+        new(ReminderImportance.Normal, LocalizationHub.Translate("Importance.Normal")),
+        new(ReminderImportance.Important, LocalizationHub.Translate("Importance.Important"))
     ];
 
     public IAsyncCommand SaveCommand { get; private set; } = null!;

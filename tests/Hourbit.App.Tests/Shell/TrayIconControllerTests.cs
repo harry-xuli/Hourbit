@@ -1,4 +1,6 @@
 using Hourbit.App.Shell;
+using Hourbit.App.Localization;
+using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
 
@@ -34,12 +36,36 @@ public sealed class TrayIconControllerTests
             () => helpOpens++, () => { }, () => Task.CompletedTask);
 
         Assert.Equal(
-            ["打开今天时间轴", "快速创建", "常用倒计时", "分析报告", "使用说明", "设置", "退出"],
+            ["打开时间轴", "快速创建", "常用倒计时", "分析报告", "使用说明", "设置", "退出"],
             host.Items.Select(item => item.Text));
         await host.Items.Single(item => item.Text == "分析报告").InvokeAsync();
         await host.Items.Single(item => item.Text == "使用说明").InvokeAsync();
         Assert.Equal(1, analyticsOpens);
         Assert.Equal(1, helpOpens);
+    }
+
+    [Fact]
+    public void Menu_uses_the_selected_UI_language()
+    {
+        try
+        {
+            LocalizationHub.Use(new LocalizationService(
+                CultureInfo.GetCultureInfo("en-US"), "en-US"));
+            var host = new TrayHost();
+            using var controller = new TrayIconController(
+                host, () => Task.FromResult(false), new Confirmation(true),
+                () => { }, () => { }, _ => { }, () => { },
+                () => { }, () => { }, () => Task.CompletedTask);
+
+            Assert.Equal(
+                ["Open timeline", "Quick create", "Common countdowns", "Reports", "Help", "Settings", "Exit"],
+                host.Items.Select(item => item.Text));
+        }
+        finally
+        {
+            LocalizationHub.Use(new LocalizationService(
+                CultureInfo.GetCultureInfo("zh-CN"), "zh-CN"));
+        }
     }
 
     [Fact]

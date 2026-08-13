@@ -1,5 +1,6 @@
 using System.Globalization;
 using Hourbit.App.Commands;
+using Hourbit.App.Localization;
 using Hourbit.Core.Abstractions;
 using Hourbit.Core.Domain;
 using Hourbit.Core.Parsing;
@@ -22,13 +23,13 @@ public sealed class EditReminderViewModel : ObservableObject
     private static readonly IReadOnlyDictionary<string, DayOfWeek> DayLabels =
         new Dictionary<string, DayOfWeek>(StringComparer.Ordinal)
         {
-            ["周一"] = DayOfWeek.Monday,
-            ["周二"] = DayOfWeek.Tuesday,
-            ["周三"] = DayOfWeek.Wednesday,
-            ["周四"] = DayOfWeek.Thursday,
-            ["周五"] = DayOfWeek.Friday,
-            ["周六"] = DayOfWeek.Saturday,
-            ["周日"] = DayOfWeek.Sunday
+            ["Weekday.Monday"] = DayOfWeek.Monday,
+            ["Weekday.Tuesday"] = DayOfWeek.Tuesday,
+            ["Weekday.Wednesday"] = DayOfWeek.Wednesday,
+            ["Weekday.Thursday"] = DayOfWeek.Thursday,
+            ["Weekday.Friday"] = DayOfWeek.Friday,
+            ["Weekday.Saturday"] = DayOfWeek.Saturday,
+            ["Weekday.Sunday"] = DayOfWeek.Sunday
         };
 
     private readonly TimeZoneInfo _zone;
@@ -77,7 +78,7 @@ public sealed class EditReminderViewModel : ObservableObject
         Weekdays = DayLabels
             .Select(pair => new WeekdayOptionViewModel(
                 pair.Value,
-                pair.Key,
+                LocalizationHub.Translate(pair.Key),
                 draft.Recurrence?.DaysOfWeek.Contains(pair.Value) == true))
             .ToArray();
         SaveCommand = new AsyncCommand((_, ct) => SaveAsync(ct), _ => !IsBusy);
@@ -125,33 +126,35 @@ public sealed class EditReminderViewModel : ObservableObject
     public event EventHandler? CloseRequested;
 
     public Guid OccurrenceId { get; }
-    public string EditorTitle => _createMode ? "新建提醒副本" : "编辑提醒";
+    public string EditorTitle => LocalizationHub.Translate(
+        _createMode ? "Editor.NewReminderCopy" : "Editor.EditReminder");
     public IAsyncCommand SaveCommand { get; }
     public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
     public bool IsRefreshOnly => _refreshOnlyMessage is not null;
     public bool CanEdit => !IsBusy && !IsRefreshOnly;
     public bool CanCancel => CanEdit;
-    public string PrimaryActionText => IsRefreshOnly ? "重试刷新" : "保存";
+    public string PrimaryActionText => LocalizationHub.Translate(
+        IsRefreshOnly ? "Editor.RetryRefresh" : "Editor.Save");
 
     public IReadOnlyList<EditOption<ReminderKind>> Kinds { get; } =
     [
-        new(ReminderKind.Countdown, "倒计时"),
-        new(ReminderKind.Alarm, "闹钟"),
-        new(ReminderKind.Plan, "计划")
+        new(ReminderKind.Countdown, LocalizationHub.Translate("Kind.Countdown")),
+        new(ReminderKind.Alarm, LocalizationHub.Translate("Kind.Alarm")),
+        new(ReminderKind.Plan, LocalizationHub.Translate("Kind.Plan"))
     ];
 
     public IReadOnlyList<EditOption<ReminderImportance>> Importances { get; } =
     [
-        new(ReminderImportance.Normal, "普通"),
-        new(ReminderImportance.Important, "重要")
+        new(ReminderImportance.Normal, LocalizationHub.Translate("Importance.Normal")),
+        new(ReminderImportance.Important, LocalizationHub.Translate("Importance.Important"))
     ];
 
     public IReadOnlyList<EditOption<EditRecurrenceMode>> Recurrences { get; } =
     [
-        new(EditRecurrenceMode.None, "不重复"),
-        new(EditRecurrenceMode.Daily, "每天"),
-        new(EditRecurrenceMode.Weekdays, "工作日（周一至周五）"),
-        new(EditRecurrenceMode.Weekly, "每周")
+        new(EditRecurrenceMode.None, LocalizationHub.Translate("Recurrence.None")),
+        new(EditRecurrenceMode.Daily, LocalizationHub.Translate("Recurrence.Daily")),
+        new(EditRecurrenceMode.Weekdays, LocalizationHub.Translate("Recurrence.Weekdays")),
+        new(EditRecurrenceMode.Weekly, LocalizationHub.Translate("Recurrence.Weekly"))
     ];
 
     public string Title

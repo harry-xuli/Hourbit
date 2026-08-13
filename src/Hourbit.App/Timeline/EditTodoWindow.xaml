@@ -1,6 +1,7 @@
 <Window x:Class="Hourbit.App.Timeline.EditTodoWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:localization="clr-namespace:Hourbit.App.Localization"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         Title="{Binding EditorTitle}"
         Width="560"
@@ -30,7 +31,7 @@
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="内容" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.Content}" VerticalAlignment="Center" />
             <TextBox Grid.Column="1"
                      Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}"
                      automation:AutomationProperties.Name="待办内容" />
@@ -43,7 +44,7 @@
                 <ColumnDefinition Width="16" />
                 <ColumnDefinition Width="150" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="日期时间" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.DateTime}" VerticalAlignment="Center" />
             <TextBox x:Name="TodoDateBox"
                      Grid.Column="1"
                      Text="{Binding DateText, UpdateSourceTrigger=PropertyChanged}"
@@ -59,7 +60,7 @@
                 <ColumnDefinition Width="92" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <TextBlock Text="重要性" VerticalAlignment="Center" />
+            <TextBlock Text="{localization:Loc Editor.Importance}" VerticalAlignment="Center" />
             <ComboBox Grid.Column="1" MinHeight="40"
                       ItemsSource="{Binding Importances}"
                       DisplayMemberPath="Label"
@@ -69,7 +70,7 @@
         </Grid>
 
         <TextBlock Grid.Row="4"
-                   Text="填写时间将把待办转换为提醒；时间统一使用 HH:mm。"
+                   Text="{localization:Loc Editor.TodoConversionHint}"
                    Foreground="{DynamicResource SecondaryTextBrush}"
                    Margin="92,0,0,12" />
 
@@ -86,18 +87,18 @@
             <Grid Grid.Row="1">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
                     <Button Style="{StaticResource SecondaryButton}"
-                            Content="完成"
+                            Content="{localization:Loc Editor.Complete}"
                             Command="{Binding CompleteCommand}"
                             Margin="0,0,10,0"
                             automation:AutomationProperties.Name="完成待办" />
                     <Button Style="{StaticResource SecondaryButton}"
-                            Content="删除"
+                            Content="{localization:Loc Editor.Delete}"
                             Command="{Binding DeleteCommand}"
                             automation:AutomationProperties.Name="删除待办" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <Button Style="{StaticResource SecondaryButton}"
-                            Content="取消" IsCancel="True" Margin="0,0,10,0"
+                            Content="{localization:Loc Editor.Cancel}" IsCancel="True" Margin="0,0,10,0"
                             IsEnabled="{Binding CanCancel}" />
                     <Button x:Name="SaveTodoButton"
                             Content="{Binding PrimaryActionText}"

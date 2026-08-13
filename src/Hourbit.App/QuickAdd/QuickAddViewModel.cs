@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using Hourbit.App.Commands;
+using Hourbit.App.Localization;
 using Hourbit.App.Timeline;
 using Hourbit.Core.Abstractions;
 using Hourbit.Core.Domain;
@@ -89,8 +90,8 @@ public sealed class QuickAddViewModel : ObservableObject
     public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
     public bool IsRefreshOnly => _refreshOnlyMessage is not null;
     public bool CanEdit => !IsBusy && !IsRefreshOnly;
-    public string GuidanceText => "请选择具体时间";
-    public string FooterText => "Enter 创建 · Tab 更多选项 · Esc 隐藏";
+    public string GuidanceText => LocalizationHub.Translate("QuickAdd.Guidance");
+    public string FooterText => LocalizationHub.Translate("QuickAdd.Footer");
     public string? PreviewText
     {
         get => _previewText;
@@ -275,8 +276,8 @@ public sealed class QuickAddViewModel : ObservableObject
 
     private string FormatPreview(ItemDraft draft) => draft switch
     {
-        TodoDraft { DueDate: null } => "待办 · 无日期",
-        TodoDraft todo => $"待办 · 截止 {todo.DueDate!.Value.ToString(
+        TodoDraft { DueDate: null } => LocalizationHub.Translate("QuickAdd.TodoNoDate"),
+        TodoDraft todo => $"{LocalizationHub.Translate("QuickAdd.TodoDue")} {todo.DueDate!.Value.ToString(
             "yyyy-MM-dd", CultureInfo.InvariantCulture)}",
         ReminderDraft reminder => FormatReminderPreview(reminder),
         _ => throw new ArgumentOutOfRangeException(nameof(draft))
@@ -285,7 +286,7 @@ public sealed class QuickAddViewModel : ObservableObject
     private string FormatReminderPreview(ReminderDraft draft)
     {
         var local = TimeZoneInfo.ConvertTime(draft.DueAt, _zone);
-        return $"提醒 · {local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
+        return $"{LocalizationHub.Translate("QuickAdd.Reminder")} · {local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)}";
     }
 
     private bool TryBeginOperation()
