@@ -203,7 +203,7 @@ public sealed class TimelineViewTests
         });
 
     [Fact]
-    public Task Split_timeline_renders_accessible_reminders_left_of_todos_and_collapses_completed_todos() =>
+    public Task Split_timeline_renders_accessible_reminders_left_of_pending_todos_only() =>
         WpfTestHost.RunAsync(() =>
         {
             var query = new QueryStub(new TimelineSnapshot(
@@ -224,8 +224,7 @@ public sealed class TimelineViewTests
                 view.FindName("TodoSectionHeader"));
             var reminderHeader = Assert.IsType<TextBlock>(
                 view.FindName("ReminderSectionHeader"));
-            var completed = Assert.IsType<Expander>(
-                view.FindName("CompletedTodosExpander"));
+            Assert.Null(view.FindName("CompletedTodosExpander"));
             var completedSummary = Assert.IsType<StackPanel>(
                 view.FindName("CompletedSummary"));
             var pending = Assert.IsType<ListBox>(view.FindName("PendingTodoList"));
@@ -244,7 +243,6 @@ public sealed class TimelineViewTests
                 PeerName(todoRow));
             Assert.True(reminderHeader.TranslatePoint(new Point(), view).X <
                         todoHeader.TranslatePoint(new Point(), view).X);
-            Assert.False(completed.IsExpanded);
             Assert.Equal("待办：1，提醒：0", completedSummary.ToolTip);
             Assert.Contains("!", VisibleText(view));
             Assert.Contains("重要", VisibleText(view));

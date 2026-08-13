@@ -447,7 +447,6 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
-                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
                     <TextBlock x:Name="TodoSectionHeader"
                                Grid.Row="0"
@@ -483,49 +482,6 @@
                             </ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
                     </ListBox>
-                    <Expander x:Name="CompletedTodosExpander"
-                              Grid.Row="2"
-                              Header="已完成"
-                              IsExpanded="False"
-                              Margin="0,4,0,0"
-                              automation:AutomationProperties.Name="已完成待办">
-                        <Expander.Style>
-                            <Style TargetType="Expander">
-                                <Setter Property="Visibility" Value="Visible" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding CompletedTodos.Count}" Value="0">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Expander.Style>
-                        <ListBox x:Name="CompletedTodoList"
-                                 ItemsSource="{Binding CompletedTodos}"
-                                 ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
-                                 SelectionChanged="OnTimelineSelectionChanged"
-                                 BorderThickness="0"
-                                 Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                                 MaxHeight="120"
-                                 ScrollViewer.CanContentScroll="True"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 VirtualizingPanel.IsVirtualizing="True"
-                                 VirtualizingPanel.VirtualizationMode="Recycling"
-                                 automation:AutomationProperties.Name="已完成待办列表">
-                            <ListBox.ItemContainerStyle>
-                                <Style TargetType="{x:Type ListBoxItem}"
-                                       BasedOn="{StaticResource TimelineListItem}">
-                                    <Setter Property="automation:AutomationProperties.Name"
-                                            Value="{Binding AccessibleName}" />
-                                </Style>
-                            </ListBox.ItemContainerStyle>
-                            <ListBox.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <VirtualizingStackPanel />
-                                </ItemsPanelTemplate>
-                            </ListBox.ItemsPanel>
-                        </ListBox>
-                    </Expander>
                     </Grid>
                     </Grid>
 

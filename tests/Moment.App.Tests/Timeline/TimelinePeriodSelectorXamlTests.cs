@@ -73,8 +73,8 @@ public sealed class TimelinePeriodSelectorXamlTests
             timelineXaml);
         Assert.Contains("x:Name=\"ReminderSectionHeader\"", timelineXaml);
         Assert.Contains("x:Name=\"TodoSectionHeader\"", timelineXaml);
-        Assert.Contains("x:Name=\"CompletedTodosExpander\"", timelineXaml);
-        Assert.Contains("IsExpanded=\"False\"", timelineXaml);
+        Assert.DoesNotContain("x:Name=\"CompletedTodosExpander\"", timelineXaml);
+        Assert.DoesNotContain("x:Name=\"CompletedTodoList\"", timelineXaml);
     }
 
     private static string ReadRepositoryFile(params string[] segments)
