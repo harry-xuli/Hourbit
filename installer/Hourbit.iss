@@ -34,7 +34,8 @@ OutputBaseFilename={#AppAssemblyName}-Setup-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-CloseApplications=no
+CloseApplications=yes
+RestartApplications=no
 SetupLogging=yes
 
 [Languages]

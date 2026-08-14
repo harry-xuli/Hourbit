@@ -24,6 +24,16 @@ if ($source.Contains('DefaultDirName={localappdata}\Programs\Moment')) {
 if (-not $source.Contains('UsePreviousAppDir=yes')) {
     throw 'Upgrades must preserve the existing installation directory.'
 }
+if (-not $source.Contains('CloseApplications=yes')) {
+    throw 'Upgrades must close Hourbit through Windows Restart Manager before replacing binaries.'
+}
+if ($source.Contains('CloseApplications=no') -or
+    $source.Contains('CloseApplications=force')) {
+    throw 'Upgrades must neither leave Hourbit running nor force-terminate it.'
+}
+if (-not $source.Contains('RestartApplications=no')) {
+    throw 'Restart Manager must not relaunch Hourbit in addition to the installer post-install action.'
+}
 
 function Get-SectionLines {
     param([Parameter(Mandatory = $true)][string]$Name)
