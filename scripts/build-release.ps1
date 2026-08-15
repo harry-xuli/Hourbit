@@ -2,7 +2,8 @@
 param(
     [string]$InnoCompiler,
     [switch]$ValidateOnly,
-    [string]$ValidationProbePath
+    [string]$ValidationProbePath,
+    [switch]$SkipSign
 )
 
 $ErrorActionPreference = 'Stop'
@@ -220,6 +221,35 @@ function Write-Sha256File {
     Set-Content -LiteralPath ($Path + '.sha256') -Value $line -Encoding Ascii -NoNewline
 }
 
+function Resolve-CodeSigningCertificate {
+    $certificate = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert |
+        Where-Object { $_.HasPrivateKey } |
+        Select-Object -First 1
+    if ($null -eq $certificate) {
+        throw 'No code-signing certificate with a private key was found in the current user certificate store.'
+    }
+    return $certificate
+}
+
+function Invoke-ReleaseSigning {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Path
+    )
+
+    $certificate = Resolve-CodeSigningCertificate
+    foreach ($file in $Path) {
+        $signature = Set-AuthenticodeSignature `
+            -FilePath $file `
+            -Certificate $certificate `
+            -TimestampServer 'http://timestamp.digicert.com' `
+            -HashAlgorithm SHA256
+        if ($signature.Status -ne 'Valid') {
+            throw "Code signing failed for '$file': $($signature.Status) $($signature.StatusMessage)"
+        }
+    }
+}
+
 $publishProbe = if ($ValidateOnly -and
     -not [string]::IsNullOrWhiteSpace($ValidationProbePath)) {
     $ValidationProbePath
@@ -315,6 +345,11 @@ try {
         throw "Release publish contains user data: $($forbiddenPublishFiles.FullName -join ', ')"
     }
 
+    if (-not $SkipSign) {
+        Invoke-ReleaseSigning -Path (
+            Join-Path $publishDirectory ($releaseMetadata.AssemblyName + '.exe'))
+    }
+
     Copy-Item -LiteralPath $publishDirectory -Destination $portableDirectory -Recurse
     New-Item -Path (Join-Path $portableDirectory 'portable.flag') `
         -ItemType File -Force | Out-Null
@@ -339,6 +374,10 @@ try {
     if (-not (Test-Path -LiteralPath $portableArchive -PathType Leaf) -or
         -not (Test-Path -LiteralPath $installerArtifact -PathType Leaf)) {
         throw 'One or more expected release artifacts were not created.'
+    }
+
+    if (-not $SkipSign) {
+        Invoke-ReleaseSigning -Path $installerArtifact
     }
 
     Write-Sha256File -Path $portableArchive
