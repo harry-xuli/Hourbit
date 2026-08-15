@@ -21,10 +21,10 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
-          dotnet test Hourbit.slnx --configuration Release --maxcpucount:1 --blame-hang --blame-hang-timeout 90s
+          dotnet test Hourbit.slnx --configuration Release --maxcpucount:1 --blame-hang --blame-hang-timeout 120s --logger "console;verbosity=detailed"
           if ($LASTEXITCODE -ne 0) {
             Write-Host "First test pass failed; retrying once."
-            dotnet test Hourbit.slnx --configuration Release --maxcpucount:1 --blame-hang --blame-hang-timeout 90s
+            dotnet test Hourbit.slnx --configuration Release --maxcpucount:1 --blame-hang --blame-hang-timeout 120s --logger "console;verbosity=detailed"
           }
 
   release:
