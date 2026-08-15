@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Collections.Immutable;
 using Hourbit.App.Commands;
+using Hourbit.App.Localization;
 using Hourbit.Core.Analytics;
 
 namespace Hourbit.App.Analytics;
@@ -28,7 +29,8 @@ public sealed record AnalyticsLegendItem(
     int Value,
     string Percentage,
     string ColorKey,
-    string AccessibleName);
+    string AccessibleName,
+    string MarkerAccessibleName);
 
 public sealed class AnalyticsViewModel : ObservableObject, IDisposable
 {
@@ -36,6 +38,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     private readonly TimeProvider _timeProvider;
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
+    private readonly ILocalizationService _localization;
     private CancellationTokenSource? _loadCancellation;
     private long _generation;
     private AnalyticsSnapshot? _snapshot;
@@ -61,12 +64,17 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
         Func<LocalDateRange, CancellationToken, Task<AnalyticsSnapshot>> loadSnapshot,
         TimeProvider? timeProvider = null,
         TimeZoneInfo? zone = null,
-        CultureInfo? culture = null)
+        CultureInfo? culture = null,
+        ILocalizationService? localization = null)
     {
         _loadSnapshot = loadSnapshot ?? throw new ArgumentNullException(nameof(loadSnapshot));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _zone = zone ?? TimeZoneInfo.Local;
         _culture = culture ?? CultureInfo.CurrentCulture;
+        _localization = localization ?? new LocalizationService(_culture, null);
+        _localization.LanguageChanged += OnLanguageChanged;
+        _donutSummary = Translate("Analytics.NoDistribution");
+        _trendSummary = Translate("Analytics.NoTrend");
         var today = LocalToday;
         _selectedYear = today.Year;
         _customStart = today.AddDays(-6);
@@ -75,21 +83,41 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
         ApplyCustomRangeCommand = new AsyncCommand((_, _) => ApplyCustomRangeAsync());
     }
 
-    public IReadOnlyList<AnalyticsRangeOption> RangeOptions { get; } =
+    public IReadOnlyList<AnalyticsRangeOption> RangeOptions =>
     [
-        new(AnalyticsRangeKind.Recent7Days, "最近 7 天"),
-        new(AnalyticsRangeKind.Recent30Days, "最近 30 天"),
-        new(AnalyticsRangeKind.CurrentMonth, "本月"),
-        new(AnalyticsRangeKind.CalendarYear, "年份"),
-        new(AnalyticsRangeKind.Custom, "自定义")
+        new(AnalyticsRangeKind.Recent7Days, Translate("Analytics.Range.Recent7Days")),
+        new(AnalyticsRangeKind.Recent30Days, Translate("Analytics.Range.Recent30Days")),
+        new(AnalyticsRangeKind.CurrentMonth, Translate("Analytics.Range.CurrentMonth")),
+        new(AnalyticsRangeKind.CalendarYear, Translate("Analytics.Range.CalendarYear")),
+        new(AnalyticsRangeKind.Custom, Translate("Analytics.Range.Custom"))
     ];
 
-    public IReadOnlyList<DonutDimensionOption> DimensionOptions { get; } =
+    public IReadOnlyList<DonutDimensionOption> DimensionOptions =>
     [
-        new(DonutDimension.Status, "状态"),
-        new(DonutDimension.ItemType, "待办 / 提醒"),
-        new(DonutDimension.Importance, "重要性")
+        new(DonutDimension.Status, Translate("Analytics.Dimension.Status")),
+        new(DonutDimension.ItemType, Translate("Analytics.Dimension.ItemType")),
+        new(DonutDimension.Importance, Translate("Analytics.Dimension.Importance"))
     ];
+
+    public string WindowTitle => Translate("Analytics.WindowTitle");
+    public string TitleText => Translate("Analytics.Title");
+    public string RangeText => Translate("Analytics.Range");
+    public string YearText => Translate("Analytics.Year");
+    public string FromText => Translate("Analytics.From");
+    public string ToText => Translate("Analytics.To");
+    public string ApplyText => Translate("Analytics.Apply");
+    public string UiLanguageTag => _localization.LanguageTag;
+    public string LoadingText => Translate("Analytics.Loading");
+    public string CompletedText => Translate("Analytics.Completed");
+    public string FuturePlannedText => Translate("Analytics.Future");
+    public string OverdueText => Translate("Analytics.Overdue");
+    public string DistributionText => Translate("Analytics.Distribution");
+    public string TrendText => Translate("Analytics.Trend");
+    public string DimensionText => Translate("Analytics.Dimension");
+    public string LegendText => Translate("Analytics.Legend");
+    public string CompletedAccessibleName => $"{CompletedText} {Completed}";
+    public string FutureAccessibleName => $"{FuturePlannedText} {FuturePlanned}";
+    public string OverdueAccessibleName => $"{OverdueText} {Overdue}";
 
     public IAsyncCommand RefreshCommand { get; }
     public IAsyncCommand ApplyCustomRangeCommand { get; }
@@ -98,7 +126,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     public bool HasSnapshot => _snapshot is not null;
     public bool HasNoData => _snapshot is not null && _snapshot.Totals.Active == 0;
     public string EmptyStateMessage => HasNoData
-        ? "这个日期范围内还没有可分析的记录。"
+        ? Translate("Analytics.Empty")
         : string.Empty;
 
     public AnalyticsRangeKind SelectedRangeKind
@@ -172,19 +200,31 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     public int Completed
     {
         get => _completed;
-        private set => SetProperty(ref _completed, value);
+        private set
+        {
+            if (SetProperty(ref _completed, value))
+                OnPropertyChanged(nameof(CompletedAccessibleName));
+        }
     }
 
     public int FuturePlanned
     {
         get => _futurePlanned;
-        private set => SetProperty(ref _futurePlanned, value);
+        private set
+        {
+            if (SetProperty(ref _futurePlanned, value))
+                OnPropertyChanged(nameof(FutureAccessibleName));
+        }
     }
 
     public int Overdue
     {
         get => _overdue;
-        private set => SetProperty(ref _overdue, value);
+        private set
+        {
+            if (SetProperty(ref _overdue, value))
+                OnPropertyChanged(nameof(OverdueAccessibleName));
+        }
     }
 
     public string RangeLabel
@@ -258,6 +298,8 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
             RejectRange(exception.Message);
             return Task.CompletedTask;
         }
+        CustomStart = range.Start;
+        CustomEnd = range.End;
         return LoadCoreAsync(range);
     }
 
@@ -267,7 +309,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
         SelectedRangeKind = AnalyticsRangeKind.Custom;
         if (CustomStart > CustomEnd)
         {
-            RejectRange("开始日期不能晚于结束日期。");
+            RejectRange(Translate("Analytics.InvalidRange"));
             return Task.CompletedTask;
         }
         return LoadCoreAsync(new LocalDateRange(CustomStart, CustomEnd));
@@ -299,6 +341,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
+        _localization.LanguageChanged -= OnLanguageChanged;
         CancelActiveLoad();
     }
 
@@ -328,7 +371,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
         ThrowIfDisposed();
         if (range.Start > range.End)
         {
-            RejectRange("开始日期不能晚于结束日期。");
+            RejectRange(Translate("Analytics.InvalidRange"));
             return;
         }
 
@@ -383,10 +426,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
         Overdue = snapshot.Totals.Overdue;
         RangeLabel = $"{FormatDate(snapshot.Range.Start)} — {FormatDate(snapshot.Range.End)}";
         TrendGeometry = ChartGeometryBuilder.CreateTrend(snapshot.Trend);
-        TrendSummary = snapshot.Trend.IsEmpty
-            ? "暂无完成趋势数据。"
-            : $"完成趋势：共完成 {snapshot.Trend.Sum(static bucket => bucket.Completed)}，" +
-              $"最高 {snapshot.Trend.Max(static bucket => bucket.Completed)}。";
+        UpdateTrendSummary();
         DeriveDonut();
     }
 
@@ -396,28 +436,88 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
             return;
         var (label, slices) = SelectedDimension switch
         {
-            DonutDimension.Status => ("状态", _snapshot.Status),
-            DonutDimension.ItemType => ("类型", _snapshot.ItemTypes),
-            DonutDimension.Importance => ("重要性", _snapshot.Importance),
+            DonutDimension.Status => (Translate("Analytics.Dimension.Status"), _snapshot.Status),
+            DonutDimension.ItemType => (Translate("Analytics.Dimension.ItemType"), _snapshot.ItemTypes),
+            DonutDimension.Importance => (Translate("Analytics.Dimension.Importance"), _snapshot.Importance),
             _ => throw new ArgumentOutOfRangeException()
         };
-        DonutGeometry = ChartGeometryBuilder.CreateDonut(slices);
+        var localizedSlices = slices.Select(slice => new DistributionSlice(
+            slice.Key,
+            Translate($"Analytics.Slice.{slice.Key}"),
+            slice.Count)).ToImmutableArray();
+        DonutGeometry = ChartGeometryBuilder.CreateDonut(localizedSlices);
         LegendItems = DonutGeometry.Sectors.Select(sector =>
         {
             var percentage = DonutGeometry.Total == 0
                 ? 0d
                 : (double)sector.Value / DonutGeometry.Total;
-            var percentageText = percentage.ToString("P0", _culture);
+            var percentageText = percentage.ToString("P0", CurrentUiCulture);
             return new AnalyticsLegendItem(
                 sector.Label,
                 sector.Value,
                 percentageText,
                 sector.ColorKey,
-                $"{sector.Label} {sector.Value}，占 {percentageText}");
+                IsEnglish
+                    ? $"{sector.Label} {sector.Value}, {percentageText}"
+                    : $"{sector.Label} {sector.Value}，占 {percentageText}",
+                $"{Translate("Analytics.LegendMarker")} {sector.Label}");
         }).ToImmutableArray();
-        DonutSummary = slices.IsEmpty
-            ? $"{label}分布：暂无数据。"
-            : $"{label}分布：{string.Join("，", slices.Select(static slice => $"{slice.Label} {slice.Count}"))}。";
+        DonutSummary = localizedSlices.IsEmpty
+            ? IsEnglish
+                ? $"{label} distribution: {Translate("Analytics.NoDistribution")}"
+                : $"{label}分布：{Translate("Analytics.NoDistribution")}"
+            : IsEnglish
+                ? $"{label} distribution: {string.Join(", ", localizedSlices.Select(static slice => $"{slice.Label} {slice.Count}"))}."
+                : $"{label}分布：{string.Join("，", localizedSlices.Select(static slice => $"{slice.Label} {slice.Count}"))}。";
+    }
+
+    private void UpdateTrendSummary()
+    {
+        if (_snapshot is null || _snapshot.Trend.IsEmpty)
+        {
+            TrendSummary = Translate("Analytics.NoTrend");
+            return;
+        }
+
+        var completed = _snapshot.Trend.Sum(static bucket => bucket.Completed);
+        var peak = _snapshot.Trend.Max(static bucket => bucket.Completed);
+        TrendSummary = IsEnglish
+            ? $"Completion trend: {completed} completed, peak {peak}."
+            : $"完成趋势：共完成 {completed}，最高 {peak}。";
+    }
+
+    private void OnLanguageChanged(object? sender, EventArgs args)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
+        foreach (var propertyName in new[]
+                 {
+                     nameof(WindowTitle), nameof(TitleText), nameof(RangeText),
+                     nameof(YearText), nameof(FromText), nameof(ToText),
+                     nameof(ApplyText), nameof(UiLanguageTag), nameof(LoadingText),
+                     nameof(CompletedText),
+                     nameof(FuturePlannedText), nameof(OverdueText),
+                     nameof(DistributionText), nameof(TrendText), nameof(DimensionText),
+                     nameof(LegendText),
+                     nameof(CompletedAccessibleName), nameof(FutureAccessibleName),
+                     nameof(OverdueAccessibleName),
+                     nameof(RangeOptions), nameof(DimensionOptions), nameof(EmptyStateMessage)
+                 })
+        {
+            OnPropertyChanged(propertyName);
+        }
+
+        if (_snapshot is null)
+        {
+            DonutSummary = Translate("Analytics.NoDistribution");
+            TrendSummary = Translate("Analytics.NoTrend");
+            return;
+        }
+
+        RangeLabel = $"{FormatDate(_snapshot.Range.Start)} — {FormatDate(_snapshot.Range.End)}";
+        UpdateTrendSummary();
+        DeriveDonut();
     }
 
     private void RejectRange(string message)
@@ -431,7 +531,13 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     }
 
     private string FormatDate(DateOnly value) =>
-        value.ToString("yyyy-MM-dd", _culture);
+        value.ToString("yyyy-MM-dd", CurrentUiCulture);
+
+    private bool IsEnglish => _localization.CurrentLanguage == UiLanguage.EnUs;
+
+    private CultureInfo CurrentUiCulture => _localization.CurrentCulture;
+
+    private string Translate(string key) => _localization.Translate(key);
 
     private void ThrowIfDisposed() =>
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);

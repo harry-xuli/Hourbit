@@ -28,6 +28,13 @@ public sealed class TrayIconController : IDisposable
     private readonly ITrayMenuHost _host;
     private readonly Func<Task<bool>> _hasScheduled;
     private readonly IExitConfirmationService _confirmation;
+    private readonly ILocalizationService _localization;
+    private readonly Action _openTimeline;
+    private readonly Action _openQuickAdd;
+    private readonly Action<TimeSpan> _createCountdown;
+    private readonly Action _openAnalytics;
+    private readonly Action _openHelp;
+    private readonly Action _openSettings;
     private readonly Func<Task> _exit;
     private int _disposed;
 
@@ -35,6 +42,7 @@ public sealed class TrayIconController : IDisposable
         ITrayMenuHost host,
         Func<Task<bool>> hasScheduled,
         IExitConfirmationService confirmation,
+        ILocalizationService localization,
         Action openTimeline,
         Action openQuickAdd,
         Action<TimeSpan> createCountdown,
@@ -46,29 +54,24 @@ public sealed class TrayIconController : IDisposable
         _host = host;
         _hasScheduled = hasScheduled;
         _confirmation = confirmation;
+        _localization = localization ?? throw new ArgumentNullException(nameof(localization));
+        _openTimeline = openTimeline;
+        _openQuickAdd = openQuickAdd;
+        _createCountdown = createCountdown;
+        _openAnalytics = openAnalytics;
+        _openHelp = openHelp;
+        _openSettings = openSettings;
         _exit = exit;
         _host.Activated += openTimeline;
-        _host.SetItems(
-        [
-            new(LocalizationHub.Translate("Tray.OpenTimeline"), () => InvokeAsync(openTimeline)),
-            new(LocalizationHub.Translate("Tray.QuickCreate"), () => InvokeAsync(openQuickAdd)),
-            new(LocalizationHub.Translate("Tray.Countdowns"), children:
-            [
-                new(LocalizationHub.Translate("Tray.FiveMinutes"), () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(5)))),
-                new(LocalizationHub.Translate("Tray.TenMinutes"), () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(10)))),
-                new(LocalizationHub.Translate("Tray.TwentyMinutes"), () => InvokeAsync(() => createCountdown(TimeSpan.FromMinutes(20))))
-            ]),
-            new(LocalizationHub.Translate("Tray.Analytics"), () => InvokeAsync(openAnalytics)),
-            new(LocalizationHub.Translate("Tray.Help"), () => InvokeAsync(openHelp)),
-            new(LocalizationHub.Translate("Tray.Settings"), () => InvokeAsync(openSettings)),
-            new(LocalizationHub.Translate("Tray.Exit"), ExitAsync)
-        ]);
+        _localization.LanguageChanged += OnLanguageChanged;
+        RebuildMenu();
     }
 
     public event Action<Exception>? ErrorOccurred;
 
     public static TrayIconController CreateWindows(
         Func<Task<bool>> hasScheduled,
+        ILocalizationService localization,
         Action openTimeline,
         Action openQuickAdd,
         Action<TimeSpan> createCountdown,
@@ -77,14 +80,41 @@ public sealed class TrayIconController : IDisposable
         Action openSettings,
         Func<Task> exit) =>
         new(new WindowsFormsTrayMenuHost(), hasScheduled,
-            new MessageBoxExitConfirmationService(), openTimeline, openQuickAdd,
-            createCountdown, openAnalytics, openHelp, openSettings, exit);
+            new MessageBoxExitConfirmationService(localization), localization,
+            openTimeline, openQuickAdd, createCountdown, openAnalytics, openHelp,
+            openSettings, exit);
 
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _localization.LanguageChanged -= OnLanguageChanged;
             _host.Dispose();
+        }
     }
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+        RebuildMenu();
+    }
+
+    private void RebuildMenu() => _host.SetItems(
+    [
+        new(_localization.Translate("Tray.OpenTimeline"), () => InvokeAsync(_openTimeline)),
+        new(_localization.Translate("Tray.QuickCreate"), () => InvokeAsync(_openQuickAdd)),
+        new(_localization.Translate("Tray.Countdowns"), children:
+        [
+            new(_localization.Translate("Tray.FiveMinutes"), () => InvokeAsync(() => _createCountdown(TimeSpan.FromMinutes(5)))),
+            new(_localization.Translate("Tray.TenMinutes"), () => InvokeAsync(() => _createCountdown(TimeSpan.FromMinutes(10)))),
+            new(_localization.Translate("Tray.TwentyMinutes"), () => InvokeAsync(() => _createCountdown(TimeSpan.FromMinutes(20))))
+        ]),
+        new(_localization.Translate("Tray.Analytics"), () => InvokeAsync(_openAnalytics)),
+        new(_localization.Translate("Tray.Help"), () => InvokeAsync(_openHelp)),
+        new(_localization.Translate("Tray.Settings"), () => InvokeAsync(_openSettings)),
+        new(_localization.Translate("Tray.Exit"), ExitAsync)
+    ]);
 
     private async Task ExitAsync()
     {
@@ -115,14 +145,14 @@ public sealed class TrayIconController : IDisposable
     }
 }
 
-public sealed class MessageBoxExitConfirmationService : IExitConfirmationService
+public sealed class MessageBoxExitConfirmationService(ILocalizationService localization) : IExitConfirmationService
 {
     public Task<bool> ConfirmExitAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var result = System.Windows.MessageBox.Show(
-            "退出后，尚未到期的提醒将不会触发。确定退出吗？",
-            "退出 Hourbit 日程",
+            localization.Translate("Exit.Warning"),
+            localization.Translate("Exit.Title"),
             System.Windows.MessageBoxButton.YesNo,
             System.Windows.MessageBoxImage.Warning,
             System.Windows.MessageBoxResult.No);

@@ -32,6 +32,7 @@ public sealed class TrayIconControllerTests
         var helpOpens = 0;
         using var controller = new TrayIconController(
             host, () => Task.FromResult(false), new Confirmation(true),
+            new LocalizationService(CultureInfo.GetCultureInfo("zh-CN"), null),
             () => { }, () => { }, _ => { }, () => analyticsOpens++,
             () => helpOpens++, () => { }, () => Task.CompletedTask);
 
@@ -47,25 +48,16 @@ public sealed class TrayIconControllerTests
     [Fact]
     public void Menu_uses_the_selected_UI_language()
     {
-        try
-        {
-            LocalizationHub.Use(new LocalizationService(
-                CultureInfo.GetCultureInfo("en-US"), "en-US"));
-            var host = new TrayHost();
-            using var controller = new TrayIconController(
-                host, () => Task.FromResult(false), new Confirmation(true),
-                () => { }, () => { }, _ => { }, () => { },
-                () => { }, () => { }, () => Task.CompletedTask);
+        var host = new TrayHost();
+        using var controller = new TrayIconController(
+            host, () => Task.FromResult(false), new Confirmation(true),
+            new LocalizationService(CultureInfo.GetCultureInfo("en-US"), "en-US"),
+            () => { }, () => { }, _ => { }, () => { },
+            () => { }, () => { }, () => Task.CompletedTask);
 
-            Assert.Equal(
-                ["Open timeline", "Quick create", "Common countdowns", "Reports", "Help", "Settings", "Exit"],
-                host.Items.Select(item => item.Text));
-        }
-        finally
-        {
-            LocalizationHub.Use(new LocalizationService(
-                CultureInfo.GetCultureInfo("zh-CN"), "zh-CN"));
-        }
+        Assert.Equal(
+            ["Open timeline", "Quick create", "Common countdowns", "Reports", "Help", "Settings", "Exit"],
+            host.Items.Select(item => item.Text));
     }
 
     [Fact]
@@ -75,6 +67,7 @@ public sealed class TrayIconControllerTests
         var opens = 0;
         using var controller = new TrayIconController(
             host, () => Task.FromResult(false), new Confirmation(true),
+            new LocalizationService(CultureInfo.GetCultureInfo("zh-CN"), null),
             () => opens++, () => { }, _ => { }, () => { },
             () => { }, () => { }, () => Task.CompletedTask);
 
@@ -93,6 +86,7 @@ public sealed class TrayIconControllerTests
         var exits = 0;
         using var controller = new TrayIconController(
             host, () => Task.FromResult(true), confirmation,
+            new LocalizationService(CultureInfo.GetCultureInfo("zh-CN"), null),
             () => { }, () => { }, _ => { }, () => { }, () => { }, () => { },
             () => { exits++; return Task.CompletedTask; });
 
@@ -102,6 +96,46 @@ public sealed class TrayIconControllerTests
         Assert.Equal(0, exits);
     }
 
+    [Fact]
+    public void Tray_menu_rebuilds_immediately_when_language_changes()
+    {
+        var localization = new LocalizationService(
+            CultureInfo.GetCultureInfo("zh-CN"), null);
+        var host = new RecordingTrayHost();
+        using var controller = new TrayIconController(
+            host, () => Task.FromResult(false), new Confirmation(true),
+            localization,
+            () => { }, () => { }, _ => { }, () => { }, () => { }, () => { },
+            () => Task.CompletedTask);
+
+        Assert.Equal("打开时间轴", host.Items[0].Text);
+
+        localization.SetLanguage(UiLanguage.EnUs);
+
+        Assert.Equal("Open timeline", host.Items[0].Text);
+        Assert.Equal("Common countdowns", host.Items[2].Text);
+        Assert.Equal("Exit", host.Items[^1].Text);
+        Assert.Equal(2, host.SetItemsCalls);
+    }
+
+    [Fact]
+    public void Dispose_stops_rebuilding_the_menu_on_language_change()
+    {
+        var localization = new LocalizationService(
+            CultureInfo.GetCultureInfo("zh-CN"), null);
+        var host = new RecordingTrayHost();
+        var controller = new TrayIconController(
+            host, () => Task.FromResult(false), new Confirmation(true),
+            localization,
+            () => { }, () => { }, _ => { }, () => { }, () => { }, () => { },
+            () => Task.CompletedTask);
+
+        controller.Dispose();
+        localization.SetLanguage(UiLanguage.EnUs);
+
+        Assert.Equal(1, host.SetItemsCalls);
+    }
+
     private sealed class TrayHost : ITrayMenuHost
     {
         public event Action? Activated;
@@ -109,6 +143,19 @@ public sealed class TrayIconControllerTests
         public void SetItems(IReadOnlyList<TrayMenuItem> items) => Items = items;
         public void RaiseActivated() => Activated?.Invoke();
         public void RaiseSingleClick() { }
+        public void Dispose() { }
+    }
+
+    private sealed class RecordingTrayHost : ITrayMenuHost
+    {
+        public int SetItemsCalls { get; private set; }
+        public IReadOnlyList<TrayMenuItem> Items { get; private set; } = [];
+        public event Action? Activated;
+        public void SetItems(IReadOnlyList<TrayMenuItem> items)
+        {
+            Items = items;
+            SetItemsCalls++;
+        }
         public void Dispose() { }
     }
 

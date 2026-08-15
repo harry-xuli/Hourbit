@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Hourbit.App.Analytics;
+using Hourbit.App.Localization;
 using Hourbit.App.Styles;
 using Hourbit.Core.Analytics;
 
@@ -16,6 +17,43 @@ public sealed class AnalyticsWindowTests
 {
     private static readonly LocalDateRange Range = new(
         new DateOnly(2026, 8, 3), new DateOnly(2026, 8, 9));
+
+    [Fact]
+    public Task Report_window_follows_shared_language_and_gives_dates_room_below_the_title() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var localization = new LocalizationService(
+                CultureInfo.GetCultureInfo("zh-CN"), null);
+            var vm = new AnalyticsViewModel(
+                (range, ct) => Task.FromResult(Snapshot()),
+                new FixedTimeProvider(
+                    new DateTimeOffset(2026, 8, 9, 2, 0, 0, TimeSpan.Zero)),
+                TimeZoneInfo.CreateCustomTimeZone(
+                    "UTC+08-window-language", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
+                CultureInfo.GetCultureInfo("zh-CN"),
+                localization);
+            var window = await ShowAsync(vm);
+
+            localization.SetLanguage(UiLanguage.EnUs);
+            window.UpdateLayout();
+
+            Assert.Equal("Analytics report - Hourbit", window.Title);
+            Assert.Equal("Analytics report", Assert.IsType<TextBlock>(
+                window.FindName("AnalyticsTitle")).Text);
+            Assert.Equal("Completed", Assert.IsType<TextBlock>(
+                window.FindName("CompletedLabel")).Text);
+            Assert.Equal("Apply", Assert.IsType<Button>(
+                window.FindName("ApplyRangeButton")).Content);
+            var header = Assert.IsType<TextBlock>(window.FindName("AnalyticsTitle"));
+            var start = Assert.IsType<DatePicker>(window.FindName("StartDatePicker"));
+            var end = Assert.IsType<DatePicker>(window.FindName("EndDatePicker"));
+            Assert.Equal("en-US", start.Language.IetfLanguageTag);
+            Assert.Equal("en-US", end.Language.IetfLanguageTag);
+            Assert.True(start.TranslatePoint(new Point(), window).Y >
+                        header.TranslatePoint(new Point(), window).Y);
+            Assert.True(start.ActualWidth >= 190d);
+            Assert.True(end.ActualWidth >= 190d);
+        });
 
     [Fact]
     public Task Dashboard_exposes_kpis_range_picker_charts_and_text_summaries_to_uia() =>

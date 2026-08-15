@@ -18,6 +18,11 @@ public sealed class LocalizationService : ILocalizationService
 
     public string PersistedCode => CurrentLanguage == UiLanguage.EnUs ? "en-US" : "zh-CN";
 
+    public CultureInfo CurrentCulture => CultureInfo.GetCultureInfo(
+        CurrentLanguage == UiLanguage.EnUs ? "en-US" : "zh-CN");
+
+    public string LanguageTag => CurrentCulture.Name;
+
     public string Translate(string key) => LocalizationCatalog.Translate(CurrentLanguage, key);
 
     public void SetLanguage(UiLanguage language)

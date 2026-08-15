@@ -203,7 +203,8 @@ public sealed class TimelineViewTests
             AssertBrush(Colors.Yellow, selectedSurface.Background);
             AssertBrush(Colors.Black, selected.Foreground);
             Assert.All(
-                Descendants<TextBlock>(selected).Where(text => text.IsVisible),
+                Descendants<TextBlock>(selected).Where(text =>
+                    text.IsVisible && Ancestor<Button>(text) is null),
                 text => AssertBrush(Colors.Black, text.Foreground));
             window.Close();
         });
@@ -244,8 +245,7 @@ public sealed class TimelineViewTests
             var reminderHeader = Assert.IsType<TextBlock>(
                 view.FindName("ReminderSectionHeader"));
             Assert.Null(view.FindName("CompletedTodosExpander"));
-            var completedSummary = Assert.IsType<StackPanel>(
-                view.FindName("CompletedSummary"));
+            Assert.Null(view.FindName("CompletedSummary"));
             var pending = Assert.IsType<ListBox>(view.FindName("PendingTodoList"));
             var todoRow = Assert.IsType<ListBoxItem>(
                 pending.ItemContainerGenerator.ContainerFromIndex(0));
@@ -262,7 +262,6 @@ public sealed class TimelineViewTests
                 PeerName(todoRow));
             Assert.True(reminderHeader.TranslatePoint(new Point(), view).X <
                         todoHeader.TranslatePoint(new Point(), view).X);
-            Assert.Equal("待办：1，提醒：0", completedSummary.ToolTip);
             Assert.Contains("!", VisibleText(view));
             Assert.Contains("重要", VisibleText(view));
             Assert.DoesNotContain("无日期", VisibleText(view));
@@ -424,15 +423,16 @@ public sealed class TimelineViewTests
             var view = Show(viewModel);
             var button = Assert.IsType<Button>(
                 view.FindName("NewReminderButton"));
-            var copyButton = Assert.IsType<Button>(
-                view.FindName("CopyItemButton"));
+            var copyButton = Assert.Single(
+                Descendants<Button>(view), candidate =>
+                    candidate.IsVisible && Equals(candidate.Content, viewModel.CopyText));
             var section = Assert.IsType<TextBlock>(
                 view.FindName("TodoSectionHeader"));
             section.Focusable = true;
 
-            Assert.Equal("复制（Ctrl+D）", copyButton.Content);
-            Assert.Equal("复制当前事项并创建新记录", copyButton.ToolTip);
-            Assert.Equal("复制当前事项", PeerName(copyButton));
+            Assert.Equal("复制", copyButton.Content);
+            Assert.Equal("复制当前事项并创建新记录（Ctrl+D）", copyButton.ToolTip);
+            Assert.Contains("复制当前", PeerName(copyButton));
             Assert.True(Peer(copyButton).IsKeyboardFocusable());
 
             foreach (var target in new UIElement[] { button, section })

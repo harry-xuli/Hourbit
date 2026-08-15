@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Hourbit.App.Localization;
 
 public interface ILocalizationService
@@ -7,6 +9,10 @@ public interface ILocalizationService
     UiLanguage CurrentLanguage { get; }
 
     string PersistedCode { get; }
+
+    CultureInfo CurrentCulture { get; }
+
+    string LanguageTag { get; }
 
     string Translate(string key);
 

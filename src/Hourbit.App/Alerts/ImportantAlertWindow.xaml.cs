@@ -1,7 +1,9 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using Hourbit.App.Localization;
 using Hourbit.App.Shell;
 using Hourbit.Core.Domain;
 using Hourbit.Windows.Alerts;
@@ -32,7 +34,9 @@ public partial class ImportantAlertWindow : Window
         _placement = placement ?? throw new ArgumentNullException(nameof(placement));
         InitializeComponent();
         ReminderTitle.Text = alert.Title;
-        DueTime.Text = $"计划时间：{alert.DueAt:yyyy-MM-dd HH:mm}";
+        DueTime.Text = string.Format(
+            LocalizationHub.Translate("Alert.DueTime"),
+            alert.DueAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture));
         ContentRendered += OnShown;
         _cancellationRegistration = ct.Register(() =>
             Dispatcher.BeginInvoke(
@@ -57,7 +61,8 @@ public partial class ImportantAlertWindow : Window
         }
         catch (Exception exception)
         {
-            AudioWarningText.Text = "提醒声音无法播放：" + exception.Message;
+            AudioWarningText.Text = string.Format(
+                LocalizationHub.Translate("Alert.AudioError"), exception.Message);
             AudioWarningPanel.Visibility = Visibility.Visible;
         }
         if (Volatile.Read(ref _finishing) == 0)

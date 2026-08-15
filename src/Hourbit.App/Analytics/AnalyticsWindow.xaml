@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:analytics="clr-namespace:Hourbit.App.Analytics"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
-        Title="分析报告 - Hourbit 日程"
+        Title="{Binding WindowTitle}"
         Width="1040"
         Height="760"
         MinWidth="820"
@@ -29,55 +29,61 @@
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="0" Margin="0,0,0,18">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="180" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="100" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="150" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="150" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="分析报告"
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="AnalyticsTitle"
+                           Text="{Binding TitleText}"
                            FontSize="28"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource AccentBrush}"
-                           Margin="0,0,24,0"
-                           VerticalAlignment="Center" />
-                <ComboBox x:Name="RangePicker"
-                          Grid.Column="1"
-                          ItemsSource="{Binding RangeOptions}"
-                          DisplayMemberPath="Label"
-                          SelectedValuePath="Kind"
-                          SelectedValue="{Binding SelectedRangeKind, Mode=TwoWay}"
-                          automation:AutomationProperties.Name="日期范围"
-                          MinHeight="34"
-                          VerticalContentAlignment="Center" />
-                <TextBlock Grid.Column="2" Text="年份" Margin="14,0,6,0"
-                           VerticalAlignment="Center" />
-                <TextBox Grid.Column="3"
-                         Text="{Binding SelectedYear, UpdateSourceTrigger=PropertyChanged}"
-                         automation:AutomationProperties.Name="分析年份"
-                         MinHeight="34"
-                         VerticalContentAlignment="Center" />
-                <TextBlock Grid.Column="4" Text="从" Margin="14,0,6,0"
-                           VerticalAlignment="Center" />
-                <DatePicker Grid.Column="5"
-                            SelectedDate="{Binding CustomStartDate, Mode=TwoWay}"
-                            automation:AutomationProperties.Name="自定义开始日期" />
-                <TextBlock Grid.Column="6" Text="到" Margin="10,0,6,0"
-                           VerticalAlignment="Center" />
-                <DatePicker Grid.Column="7"
-                            SelectedDate="{Binding CustomEndDate, Mode=TwoWay}"
-                            automation:AutomationProperties.Name="自定义结束日期" />
-                <Button Grid.Column="8"
-                        Content="应用"
-                        Command="{Binding RefreshCommand}"
-                        automation:AutomationProperties.Name="应用日期范围"
-                        MinWidth="72"
-                        Margin="12,0,0,0" />
+                           Margin="0,0,0,14" />
+                <Grid x:Name="FilterBar" Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="80" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox x:Name="RangePicker"
+                              ItemsSource="{Binding RangeOptions}"
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Kind"
+                              SelectedValue="{Binding SelectedRangeKind, Mode=TwoWay}"
+                              automation:AutomationProperties.Name="{Binding RangeText}"
+                              MinHeight="38"
+                              VerticalContentAlignment="Center" />
+                    <TextBlock x:Name="YearLabel" Grid.Column="1" Text="{Binding YearText}"
+                               Margin="16,0,7,0" VerticalAlignment="Center" />
+                    <TextBox Grid.Column="2"
+                             Text="{Binding SelectedYear, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="{Binding YearText}"
+                             MinHeight="38" VerticalContentAlignment="Center" />
+                    <TextBlock x:Name="FromLabel" Grid.Column="3" Text="{Binding FromText}"
+                               Margin="16,0,7,0" VerticalAlignment="Center" />
+                    <DatePicker x:Name="StartDatePicker" Grid.Column="4"
+                                SelectedDate="{Binding CustomStartDate, Mode=TwoWay}"
+                                Language="{Binding UiLanguageTag}"
+                                automation:AutomationProperties.Name="{Binding FromText}"
+                                MinWidth="190" MinHeight="38" />
+                    <TextBlock x:Name="ToLabel" Grid.Column="5" Text="{Binding ToText}"
+                               Margin="12,0,7,0" VerticalAlignment="Center" />
+                    <DatePicker x:Name="EndDatePicker" Grid.Column="6"
+                                SelectedDate="{Binding CustomEndDate, Mode=TwoWay}"
+                                Language="{Binding UiLanguageTag}"
+                                automation:AutomationProperties.Name="{Binding ToText}"
+                                MinWidth="190" MinHeight="38" />
+                    <Button x:Name="ApplyRangeButton" Grid.Column="7"
+                            Content="{Binding ApplyText}"
+                            Command="{Binding RefreshCommand}"
+                            automation:AutomationProperties.Name="{Binding ApplyText}"
+                            MinWidth="82" Margin="14,0,0,0" />
+                </Grid>
             </Grid>
 
             <Grid Grid.Row="1" Margin="0,0,0,16">
@@ -89,9 +95,9 @@
                            FontSize="16"
                            FontWeight="SemiBold"
                            VerticalAlignment="Center"
-                           automation:AutomationProperties.Name="{Binding RangeLabel, StringFormat='当前分析范围 {0}'}" />
+                           automation:AutomationProperties.Name="{Binding RangeLabel}" />
                 <TextBlock Grid.Column="1"
-                           Text="正在加载…"
+                           Text="{Binding LoadingText}"
                            Foreground="{DynamicResource SecondaryTextBrush}"
                            Visibility="{Binding IsLoading, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </Grid>
@@ -118,9 +124,9 @@
                         CornerRadius="8"
                         Padding="18"
                         Margin="0,0,8,0"
-                        automation:AutomationProperties.Name="{Binding Completed, StringFormat='已完成 {0}'}">
+                        automation:AutomationProperties.Name="{Binding CompletedAccessibleName}">
                     <StackPanel>
-                        <TextBlock Text="已完成" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock x:Name="CompletedLabel" Text="{Binding CompletedText}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding Completed}" FontSize="30" FontWeight="SemiBold"
                                    Foreground="{DynamicResource ChartCompletedBrush}" />
                     </StackPanel>
@@ -132,9 +138,9 @@
                         CornerRadius="8"
                         Padding="18"
                         Margin="4,0"
-                        automation:AutomationProperties.Name="{Binding FuturePlanned, StringFormat='未来计划 {0}'}">
+                        automation:AutomationProperties.Name="{Binding FutureAccessibleName}">
                     <StackPanel>
-                        <TextBlock Text="未来计划" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock x:Name="FutureLabel" Text="{Binding FuturePlannedText}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding FuturePlanned}" FontSize="30" FontWeight="SemiBold"
                                    Foreground="{DynamicResource AccentBrush}" />
                     </StackPanel>
@@ -146,9 +152,9 @@
                         CornerRadius="8"
                         Padding="18"
                         Margin="8,0,0,0"
-                        automation:AutomationProperties.Name="{Binding Overdue, StringFormat='已逾期 {0}'}">
+                        automation:AutomationProperties.Name="{Binding OverdueAccessibleName}">
                     <StackPanel>
-                        <TextBlock Text="已逾期" Foreground="{DynamicResource SecondaryTextBrush}" />
+                        <TextBlock x:Name="OverdueLabel" Text="{Binding OverdueText}" Foreground="{DynamicResource SecondaryTextBrush}" />
                         <TextBlock Text="{Binding Overdue}" FontSize="30" FontWeight="SemiBold"
                                    Foreground="{DynamicResource ChartOverdueBrush}" />
                     </StackPanel>
@@ -188,7 +194,7 @@
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="160" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="分布" FontSize="20" FontWeight="SemiBold"
+                            <TextBlock x:Name="DistributionLabel" Text="{Binding DistributionText}" FontSize="20" FontWeight="SemiBold"
                                        VerticalAlignment="Center" />
                             <ComboBox x:Name="DimensionPicker"
                                       Grid.Column="1"
@@ -196,7 +202,7 @@
                                       DisplayMemberPath="Label"
                                       SelectedValuePath="Dimension"
                                       SelectedValue="{Binding SelectedDimension, Mode=TwoWay}"
-                                      automation:AutomationProperties.Name="图表维度"
+                                      automation:AutomationProperties.Name="{Binding DimensionText}"
                                       MinHeight="34" />
                         </Grid>
                         <analytics:DonutChartControl x:Name="DonutChart"
@@ -209,7 +215,7 @@
                                       Grid.Row="2"
                                       ItemsSource="{Binding LegendItems}"
                                       Margin="4,4,4,8"
-                                      automation:AutomationProperties.Name="分布图例">
+                                      automation:AutomationProperties.Name="{Binding LegendText}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Margin="0,2"
@@ -223,7 +229,7 @@
                                         <analytics:LegendSwatchControl Width="18"
                                                                        Height="18"
                                                                        ColorKey="{Binding ColorKey}"
-                                                                       automation:AutomationProperties.Name="{Binding Label, StringFormat='图例标记 {0}'}" />
+                                                                       automation:AutomationProperties.Name="{Binding MarkerAccessibleName}" />
                                         <TextBlock Grid.Column="1"
                                                    Text="{Binding Label}"
                                                    Margin="6,0"
@@ -261,7 +267,7 @@
                             <RowDefinition Height="240" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <TextBlock Text="完成趋势" FontSize="20" FontWeight="SemiBold"
+                        <TextBlock x:Name="TrendLabel" Text="{Binding TrendText}" FontSize="20" FontWeight="SemiBold"
                                    Margin="0,0,0,8" />
                         <analytics:TrendChartControl x:Name="TrendChart"
                                                      Grid.Row="1"

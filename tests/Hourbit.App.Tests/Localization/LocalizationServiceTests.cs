@@ -39,4 +39,19 @@ public sealed class LocalizationServiceTests
         Assert.Equal("New", service.Translate("Action.New"));
         Assert.Equal("en-US", service.PersistedCode);
     }
+
+    [Fact]
+    public void Language_switch_updates_the_shared_culture_and_language_tag()
+    {
+        var service = new LocalizationService(
+            CultureInfo.GetCultureInfo("zh-CN"), null);
+
+        Assert.Equal("zh-CN", service.CurrentCulture.Name);
+        Assert.Equal("zh-CN", service.LanguageTag);
+
+        service.SetLanguage(UiLanguage.EnUs);
+
+        Assert.Equal("en-US", service.CurrentCulture.Name);
+        Assert.Equal("en-US", service.LanguageTag);
+    }
 }

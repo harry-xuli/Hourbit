@@ -221,13 +221,14 @@ public sealed class CompositionRoot : IAsyncDisposable
             new SqliteAnalyticsQuery(databasePath),
             TimeProvider.System,
             zone,
-            CultureInfo.CurrentCulture);
+            CultureInfo.CurrentCulture,
+            localization);
         CompositionRoot? root = null;
         var helpWindow = new HelpWindowController(() => new HelpWindow
         {
             DataContext = new HelpContentViewModel(localization)
         });
-        var datePicker = new WpfDatePicker(() => root?.MainWindow);
+        var datePicker = new WpfDatePicker(() => root?.MainWindow, localization);
         TimelineViewModel? timelineForSearch = null;
         var search = new SearchViewModel(
             new SqliteItemSearchQuery(databasePath),
@@ -288,6 +289,7 @@ public sealed class CompositionRoot : IAsyncDisposable
 
         var tray = TrayIconController.CreateWindows(
             async () => (await repository.GetScheduledAsync(CancellationToken.None)).Count > 0,
+            localization,
             mainWindow.ShowAndActivate,
             quickWindow.ShowAndFocus,
             delay =>
@@ -338,7 +340,8 @@ public sealed class CompositionRoot : IAsyncDisposable
         IAnalyticsQuery query,
         TimeProvider timeProvider,
         TimeZoneInfo zone,
-        CultureInfo culture)
+        CultureInfo culture,
+        ILocalizationService? localization = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(timeProvider);
@@ -349,7 +352,8 @@ public sealed class CompositionRoot : IAsyncDisposable
             (range, ct) => service.CreateSnapshotAsync(range, zone, ct),
             timeProvider,
             zone,
-            culture);
+            culture,
+            localization);
     }
 
     internal static async Task TryCreateDailyBackupAsync(

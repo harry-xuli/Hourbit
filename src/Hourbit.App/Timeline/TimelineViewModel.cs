@@ -91,7 +91,7 @@ public sealed class TimelineViewModel : ObservableObject
         _selectedDate = LocalToday;
         _selectedPeriodKind = TimelinePeriodKind.Day;
         _currentPeriod = TimelinePeriod.Create(
-            _selectedDate, _selectedPeriodKind, _culture);
+            _selectedDate, _selectedPeriodKind, CurrentUiCulture);
         Groups = new[] { "已错过", "接下来", "已完成" }
             .Select(static name => new TimelineGroupViewModel(name)).ToArray();
         LoadCommand = new AsyncCommand((_, _) => LoadAsync());
@@ -128,6 +128,8 @@ public sealed class TimelineViewModel : ObservableObject
             (_, _) => ObserveAsync(() => MovePeriodAsync(-1)));
         NextPeriodCommand = new AsyncCommand(
             (_, _) => ObserveAsync(() => MovePeriodAsync(1)));
+        TodayPeriodCommand = new AsyncCommand(
+            (_, _) => ObserveAsync(ReturnToTodayAsync));
         ChooseDateCommand = new AsyncCommand(
             (_, ct) => ObserveAsync(() => ChooseDateAsync(ct)));
         OpenPastSevenDaysAnalyticsCommand = new AsyncCommand(
@@ -158,36 +160,53 @@ public sealed class TimelineViewModel : ObservableObject
     public IAsyncCommand SelectMonthPeriodCommand { get; }
     public IAsyncCommand PreviousPeriodCommand { get; }
     public IAsyncCommand NextPeriodCommand { get; }
+    public IAsyncCommand TodayPeriodCommand { get; }
     public IAsyncCommand ChooseDateCommand { get; }
     public IAsyncCommand OpenPastSevenDaysAnalyticsCommand { get; }
     public IAsyncCommand OpenNextFourteenDaysAnalyticsCommand { get; }
     public string ProductName => "Hourbit 日程";
     public UiLanguage CurrentLanguage => _localization.CurrentLanguage;
+    public bool IsChineseLanguageSelected => CurrentLanguage == UiLanguage.ZhCn;
+    public bool IsEnglishLanguageSelected => CurrentLanguage == UiLanguage.EnUs;
     public string NewText => _localization.Translate("Action.New");
     public string ReportsText => _localization.Translate("Action.Report");
     public string HelpText => _localization.Translate("Action.Help");
     public string SearchText => _localization.Translate("Action.Search");
+    public string SearchPlaceholderText => _localization.Translate("Search.Placeholder");
     public string ChooseDateText => _localization.Translate("Action.ChooseDate");
+    public string TodayText => _localization.Translate("Action.Today");
+    public string EditText => _localization.Translate("Action.Edit");
+    public string CopyText => _localization.Translate("Action.Copy");
+    public string CompleteText => _localization.Translate("Action.Complete");
+    public string DeleteText => _localization.Translate("Action.Delete");
+    public string EmptyTimelineText => _localization.Translate("Timeline.Empty");
+    public string EmptyRemindersText => _localization.Translate("Timeline.EmptyReminders");
+    public string EmptyTodosText => _localization.Translate("Timeline.EmptyTodos");
     public string RemindersText => _localization.Translate("Section.Reminders");
     public string TodosText => _localization.Translate("Section.Todos");
     public string DayTextLabel => _localization.Translate("Period.Day");
     public string WeekTextLabel => _localization.Translate("Period.Week");
     public string MonthTextLabel => _localization.Translate("Period.Month");
-    public string ShortcutFooter => ShortcutCatalog.Footer(CurrentLanguage);
-    public string DateText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString(
-        "yyyy年M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
-    public string MonthText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString("M月",
-        System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
+    public string PastSevenDaysText => _localization.Translate("Timeline.PastSevenDaysCompleted");
+    public string NextFourteenDaysText => _localization.Translate("Timeline.NextFourteenDaysPlanned");
+    public string ShortcutFooter => _localization.Translate("Timeline.ShortcutPrefix") +
+        ShortcutCatalog.Footer(CurrentLanguage);
+    public string DateText => DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTime(_clock.Now, _zone).DateTime).ToString("D", CurrentUiCulture);
+    public string MonthText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString("Y",
+        CurrentUiCulture);
     public string DayText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).Day.ToString(
         System.Globalization.CultureInfo.InvariantCulture);
     public string WeekdayText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString("dddd",
-        System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
+        CurrentUiCulture);
     public string NextReminderText => Items.FirstOrDefault(item => item.GroupName == "接下来") is { } next
         ? $"{next.TimeText} {next.Title}"
-        : "无";
+        : _localization.Translate("Timeline.NextReminderNone");
     public int CompletedCount => _todosCompletedToday + _remindersCompletedToday;
-    public string CompletedTooltipText =>
-        $"待办：{_todosCompletedToday}，提醒：{_remindersCompletedToday}";
+    public string CompletedTooltipText => string.Format(
+        _localization.Translate("Timeline.CompletedTooltip"),
+        _todosCompletedToday,
+        _remindersCompletedToday);
     public TimelinePeriodKind SelectedPeriodKind => _selectedPeriodKind;
     public bool IsDayPeriodSelected =>
         _selectedPeriodKind == TimelinePeriodKind.Day;
@@ -200,6 +219,17 @@ public sealed class TimelineViewModel : ObservableObject
     public DateOnly SelectedDate => _selectedDate;
     public int PastSevenDaysCompleted => _pastSevenDaysCompleted;
     public int NextFourteenDaysPlanned => _nextFourteenDaysPlanned;
+    public string PastSevenDaysAccessibleName =>
+        $"{PastSevenDaysText}：{_pastSevenDaysCompleted}，" +
+        $"{_localization.Translate("Timeline.OpenAnalyticsAccessible")}";
+    public string NextFourteenDaysAccessibleName =>
+        $"{NextFourteenDaysText}：{_nextFourteenDaysPlanned}，" +
+        $"{_localization.Translate("Timeline.OpenAnalyticsAccessible")}";
+    public bool IsTimelineEmpty => Items.Count == 0 && PendingTodos.Count == 0;
+    public bool IsReminderEmpty => Items.Count == 0;
+    public bool IsTodoEmpty => PendingTodos.Count == 0;
+
+    private CultureInfo CurrentUiCulture => _localization.CurrentCulture;
 
     private DateOnly LocalToday => DateOnly.FromDateTime(
         TimeZoneInfo.ConvertTime(_clock.Now, _zone).DateTime);
@@ -319,6 +349,11 @@ public sealed class TimelineViewModel : ObservableObject
             OnPropertyChanged(nameof(CompletedTooltipText));
             OnPropertyChanged(nameof(PastSevenDaysCompleted));
             OnPropertyChanged(nameof(NextFourteenDaysPlanned));
+            OnPropertyChanged(nameof(PastSevenDaysAccessibleName));
+            OnPropertyChanged(nameof(NextFourteenDaysAccessibleName));
+            OnPropertyChanged(nameof(IsTimelineEmpty));
+            OnPropertyChanged(nameof(IsReminderEmpty));
+            OnPropertyChanged(nameof(IsTodoEmpty));
             OpenPastSevenDaysAnalyticsCommand.RaiseCanExecuteChanged();
             OpenNextFourteenDaysAnalyticsCommand.RaiseCanExecuteChanged();
         }
@@ -350,17 +385,41 @@ public sealed class TimelineViewModel : ObservableObject
         await _saveLanguage(language);
         _localization.SetLanguage(language);
         OnPropertyChanged(nameof(CurrentLanguage));
+        OnPropertyChanged(nameof(IsChineseLanguageSelected));
+        OnPropertyChanged(nameof(IsEnglishLanguageSelected));
         OnPropertyChanged(nameof(NewText));
         OnPropertyChanged(nameof(ReportsText));
         OnPropertyChanged(nameof(HelpText));
         OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(SearchPlaceholderText));
         OnPropertyChanged(nameof(ChooseDateText));
+        OnPropertyChanged(nameof(TodayText));
+        OnPropertyChanged(nameof(EditText));
+        OnPropertyChanged(nameof(CopyText));
+        OnPropertyChanged(nameof(CompleteText));
+        OnPropertyChanged(nameof(DeleteText));
+        OnPropertyChanged(nameof(EmptyTimelineText));
+        OnPropertyChanged(nameof(EmptyRemindersText));
+        OnPropertyChanged(nameof(EmptyTodosText));
         OnPropertyChanged(nameof(RemindersText));
         OnPropertyChanged(nameof(TodosText));
         OnPropertyChanged(nameof(DayTextLabel));
         OnPropertyChanged(nameof(WeekTextLabel));
         OnPropertyChanged(nameof(MonthTextLabel));
+        OnPropertyChanged(nameof(PastSevenDaysText));
+        OnPropertyChanged(nameof(NextFourteenDaysText));
+        OnPropertyChanged(nameof(PastSevenDaysAccessibleName));
+        OnPropertyChanged(nameof(NextFourteenDaysAccessibleName));
+        OnPropertyChanged(nameof(NextReminderText));
+        OnPropertyChanged(nameof(CompletedTooltipText));
         OnPropertyChanged(nameof(ShortcutFooter));
+        _currentPeriod = TimelinePeriod.Create(
+            _selectedDate, _selectedPeriodKind, CurrentUiCulture);
+        OnPropertyChanged(nameof(CurrentPeriod));
+        OnPropertyChanged(nameof(PeriodLabel));
+        OnPropertyChanged(nameof(DateText));
+        OnPropertyChanged(nameof(MonthText));
+        OnPropertyChanged(nameof(WeekdayText));
     }
 
     private async Task SelectPeriodAsync(TimelinePeriodKind kind)
@@ -386,7 +445,7 @@ public sealed class TimelineViewModel : ObservableObject
     {
         _selectedDate = selectedDate;
         _selectedPeriodKind = kind;
-        _currentPeriod = TimelinePeriod.Create(selectedDate, kind, _culture);
+        _currentPeriod = TimelinePeriod.Create(selectedDate, kind, CurrentUiCulture);
         PublishPeriodChanged();
     }
 
@@ -472,6 +531,12 @@ public sealed class TimelineViewModel : ObservableObject
         if (item is null)
             return;
         await _actions.CompleteAsync(item.OccurrenceId, ct);
+        await LoadAsync();
+    }
+
+    private async Task ReturnToTodayAsync()
+    {
+        SetPeriod(_selectedPeriodKind, LocalToday);
         await LoadAsync();
     }
 

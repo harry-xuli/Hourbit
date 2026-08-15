@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         xmlns:domain="clr-namespace:Hourbit.Core.Domain;assembly=Hourbit.Core"
-        Title="重要提醒"
+        xmlns:loc="clr-namespace:Hourbit.App.Localization"
+        Title="{loc:Alert.Title}"
         Width="720"
         SizeToContent="Height"
         MinWidth="520"
@@ -13,7 +14,7 @@
         ShowInTaskbar="True"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
-        automation:AutomationProperties.Name="重要提醒窗口"
+        automation:AutomationProperties.Name="{loc:Alert.WindowAccessibleName}"
         Closing="OnClosing"
         PreviewKeyDown="OnPreviewKeyDown">
     <ScrollViewer x:Name="AlertScrollViewer"
@@ -33,7 +34,7 @@
                 <TextBlock Text="⚠" FontFamily="Segoe UI Symbol"
                            FontSize="28" Margin="0,0,12,0"
                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                <TextBlock Text="重要提醒" FontSize="25" FontWeight="SemiBold"
+                <TextBlock Text="{loc:Alert.Title}" FontSize="25" FontWeight="SemiBold"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
             </StackPanel>
@@ -63,7 +64,7 @@
             </Border>
 
             <StackPanel Grid.Row="3">
-                <TextBlock Text="稍后提醒"
+                <TextBlock Text="{loc:Alert.SnoozeLabel}"
                            FontWeight="SemiBold"
                            Margin="0,0,0,10"
                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
@@ -73,10 +74,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze5}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="5 分钟后提醒">
+                            automation:AutomationProperties.Name="{loc:Alert.Snooze5AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="5 分钟" />
+                            <TextBlock Text="{loc:Alert.FiveMinutes}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="Snooze10Button"
@@ -84,10 +85,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze10}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="10 分钟后提醒">
+                            automation:AutomationProperties.Name="{loc:Alert.Snooze10AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="10 分钟" />
+                            <TextBlock Text="{loc:Alert.TenMinutes}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="Snooze30Button"
@@ -95,10 +96,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze30}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="30 分钟后提醒">
+                            automation:AutomationProperties.Name="{loc:Alert.Snooze30AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="30 分钟" />
+                            <TextBlock Text="{loc:Alert.ThirtyMinutes}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="Snooze60Button"
@@ -106,10 +107,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze60}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="60 分钟后提醒">
+                            automation:AutomationProperties.Name="{loc:Alert.Snooze60AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="60 分钟" />
+                            <TextBlock Text="{loc:Alert.SixtyMinutes}" />
                         </StackPanel>
                     </Button>
                 </UniformGrid>
@@ -126,10 +127,10 @@
                         Style="{StaticResource SecondaryButton}"
                         Tag="{x:Static domain:ImportantAlertAction.Ignore}"
                         Click="OnActionClick"
-                        automation:AutomationProperties.Name="忽略提醒">
+                        automation:AutomationProperties.Name="{loc:Alert.IgnoreAccessibleName}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="⊘" Margin="0,0,8,0" />
-                        <TextBlock Text="忽略" />
+                        <TextBlock Text="{loc:Alert.Ignore}" />
                     </StackPanel>
                 </Button>
                 <Button x:Name="CompleteButton"
@@ -140,11 +141,11 @@
                         Click="OnActionClick"
                         Background="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
                         BorderBrush="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
-                        automation:AutomationProperties.Name="完成提醒">
+                        automation:AutomationProperties.Name="{loc:Alert.CompleteAccessibleName}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="✓" Margin="0,0,8,0"
                                    Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
-                        <TextBlock Text="完成"
+                        <TextBlock Text="{loc:Alert.Complete}"
                                    Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
                     </StackPanel>
                 </Button>

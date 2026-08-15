@@ -47,13 +47,37 @@ public sealed record TimelinePeriod(LocalDateRange Range, string Label)
     private static string FormatLabel(
         LocalDateRange range,
         TimelinePeriodKind kind,
-        CultureInfo culture) => kind switch
+        CultureInfo culture)
+    {
+        if (culture.TwoLetterISOLanguageName.Equals(
+                "zh", StringComparison.OrdinalIgnoreCase))
         {
-            TimelinePeriodKind.Day => range.Start.ToString(
-                "yyyy年M月d日 dddd", culture),
-            TimelinePeriodKind.Week =>
-                $"{range.Start:yyyy年M月d日} – {range.End:yyyy年M月d日}",
-            TimelinePeriodKind.Month => $"{range.Start:yyyy年M月}",
+            return kind switch
+            {
+                TimelinePeriodKind.Day => range.Start.ToString(
+                    "yyyy年M月d日 dddd", culture),
+                TimelinePeriodKind.Week =>
+                    $"{range.Start.ToString("yyyy年M月d日", culture)} – " +
+                    range.End.ToString("yyyy年M月d日", culture),
+                TimelinePeriodKind.Month => range.Start.ToString("yyyy年M月", culture),
+                _ => throw new ArgumentOutOfRangeException(nameof(kind))
+            };
+        }
+
+        return kind switch
+        {
+            TimelinePeriodKind.Day => range.Start.ToString("D", culture),
+            TimelinePeriodKind.Week => FormatEnglishWeek(range, culture),
+            TimelinePeriodKind.Month => range.Start.ToString("Y", culture),
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
+    }
+
+    private static string FormatEnglishWeek(LocalDateRange range, CultureInfo culture)
+    {
+        var start = range.Start.Year == range.End.Year
+            ? range.Start.ToString("MMMM d", culture)
+            : range.Start.ToString("MMMM d, yyyy", culture);
+        return $"{start} – {range.End.ToString("MMMM d, yyyy", culture)}";
+    }
 }

@@ -2,34 +2,69 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
-             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-             Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
+             Background="{DynamicResource WindowBackgroundBrush}"
+             Foreground="{DynamicResource PrimaryTextBrush}"
              FontFamily="Segoe UI, Microsoft YaHei UI">
     <UserControl.Resources>
-        <Style x:Key="PeriodSegmentRadioButtonStyle"
-               TargetType="RadioButton">
-            <Setter Property="Width" Value="78" />
-            <Setter Property="Height" Value="42" />
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+
+        <Style x:Key="ToolbarSecondaryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="MinHeight" Value="46" />
+            <Setter Property="Padding" Value="15,7" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        </Style>
+
+        <Style x:Key="MetricCardButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="MinHeight" Value="68" />
+            <Setter Property="Padding" Value="20,10" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+
+        <Style x:Key="PanelSurfaceStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="14" />
+        </Style>
+
+        <Style x:Key="InlineActionButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+        </Style>
+
+        <Style x:Key="PeriodSegmentRadioButtonStyle" TargetType="RadioButton">
+            <Setter Property="Width" Value="104" />
+            <Setter Property="Height" Value="56" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
                         <Border x:Name="SegmentBorder"
-                                Background="{DynamicResource SubtleBackgroundBrush}"
-                                BorderBrush="{DynamicResource BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="6">
-                            <Grid HorizontalAlignment="Center"
-                                  VerticalAlignment="Center">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Viewbox Width="17" Height="17"
-                                         HorizontalAlignment="Center"
-                                         VerticalAlignment="Center">
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="0,0,0,3">
+                            <StackPanel HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal">
+                                <Viewbox Width="20" Height="20" Margin="0,0,10,0">
                                     <Path x:Name="PeriodIcon"
                                           Data="{TemplateBinding Tag}"
                                           Fill="Transparent"
@@ -40,43 +75,29 @@
                                           StrokeLineJoin="Round" />
                                 </Viewbox>
                                 <TextBlock x:Name="PeriodText"
-                                           Grid.Column="2"
                                            Text="{TemplateBinding Content}"
                                            Foreground="{DynamicResource PrimaryTextBrush}"
-                                           FontSize="16"
+                                           FontSize="17"
                                            VerticalAlignment="Center" />
-                            </Grid>
+                            </StackPanel>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="SegmentBorder"
-                                        Property="BorderBrush"
-                                        Value="{Binding BorderBrush, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <Setter TargetName="SegmentBorder" Property="Background"
+                                        Value="{DynamicResource SubtleBackgroundBrush}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="SegmentBorder"
-                                        Property="Background"
-                                        Value="{Binding Background, RelativeSource={RelativeSource TemplatedParent}}" />
-                                <Setter TargetName="SegmentBorder"
-                                        Property="BorderBrush"
+                                <Setter TargetName="SegmentBorder" Property="BorderBrush"
                                         Value="{Binding BorderBrush, RelativeSource={RelativeSource TemplatedParent}}" />
-                                <Setter TargetName="PeriodIcon"
-                                        Property="Stroke"
+                                <Setter TargetName="PeriodIcon" Property="Stroke"
                                         Value="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
-                                <Setter TargetName="PeriodText"
-                                        Property="Foreground"
-                                        Value="{DynamicResource SelectionTextBrush}" />
+                                <Setter TargetName="PeriodText" Property="Foreground"
+                                        Value="{Binding Foreground, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <Setter TargetName="PeriodText" Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True">
-                                <Setter TargetName="SegmentBorder"
-                                        Property="BorderBrush"
-                                        Value="{DynamicResource FocusBrush}" />
-                                <Setter TargetName="SegmentBorder"
-                                        Property="BorderThickness"
-                                        Value="2" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="SegmentBorder" Property="Opacity" Value="0.55" />
+                                <Setter TargetName="SegmentBorder" Property="Background"
+                                        Value="{DynamicResource SelectionBackgroundBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -84,127 +105,143 @@
             </Setter>
         </Style>
 
+        <Style x:Key="LanguageButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource ToolbarSecondaryButtonStyle}">
+            <Setter Property="MinWidth" Value="44" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+
         <DataTemplate x:Key="TodoTimelineItemTemplate">
-            <Border BorderBrush="{DynamicResource BorderBrush}"
-                    BorderThickness="0,0,0,1"
-                    MinHeight="58"
-                    Padding="16,0,8,0"
+            <Border x:Name="TodoRowSurface"
+                    Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7"
+                    Margin="0,0,0,8"
+                    Padding="12,10"
                     automation:AutomationProperties.Name="{Binding AccessibleName}">
                 <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="TodoStatusSymbol"
-                               Grid.Column="0"
-                               Text="{Binding StatusSymbol}"
-                               FontFamily="Segoe UI Symbol"
-                               Foreground="{DynamicResource AccentBrush}"
-                               FontSize="17"
-                               Margin="0,0,12,0"
-                               VerticalAlignment="Center" />
-                    <TextBlock x:Name="TodoTitle"
-                               Grid.Column="1"
-                               Text="{Binding Title}"
-                               FontSize="17"
-                               FontWeight="SemiBold"
-                               MinWidth="40"
-                               TextTrimming="CharacterEllipsis"
-                               VerticalAlignment="Center" />
-                    <StackPanel Grid.Column="2"
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="20" Height="20" CornerRadius="4"
+                                BorderBrush="{DynamicResource SecondaryTextBrush}"
+                                BorderThickness="1.5"
+                                VerticalAlignment="Center">
+                            <TextBlock x:Name="TodoStatusSymbol"
+                                       Text="{Binding StatusSymbol}"
+                                       FontFamily="Segoe UI Symbol"
+                                       Foreground="{DynamicResource AccentBrush}"
+                                       FontSize="13"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock x:Name="TodoTitle"
+                                   Grid.Column="1"
+                                   Text="{Binding Title}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   MinWidth="40"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="2"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Margin="12,0,0,0">
+                            <TextBlock x:Name="TodoImportanceSymbol"
+                                       Text="{Binding ImportanceSymbol}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}"
+                                       FontWeight="Bold"
+                                       Margin="0,0,6,0" />
+                            <TextBlock x:Name="TodoImportance"
+                                       Text="{Binding ImportanceText}"
+                                       Foreground="{DynamicResource SecondaryTextBrush}" />
+                        </StackPanel>
+                    </Grid>
+                    <StackPanel x:Name="TodoActions"
+                                Grid.Row="1"
                                 Orientation="Horizontal"
-                                VerticalAlignment="Center"
-                                Margin="12,0,0,0">
-                        <TextBlock x:Name="TodoImportanceSymbol"
-                                   Text="{Binding ImportanceSymbol}"
-                                   Foreground="{DynamicResource SecondaryTextBrush}"
-                                   FontWeight="Bold"
-                                   Margin="0,0,8,0" />
-                        <TextBlock x:Name="TodoImportance"
-                                   Text="{Binding ImportanceText}" />
+                                HorizontalAlignment="Right"
+                                Margin="28,10,0,0"
+                                Visibility="Collapsed">
+                        <Button Style="{StaticResource InlineActionButtonStyle}"
+                                Command="{Binding DataContext.EditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Content="{Binding DataContext.EditText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                automation:AutomationProperties.Name="编辑当前待办" />
+                        <Button Style="{StaticResource InlineActionButtonStyle}"
+                                Command="{Binding DataContext.CopyCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Content="{Binding DataContext.CopyText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                ToolTip="复制当前事项并创建新记录（Ctrl+D）"
+                                automation:AutomationProperties.Name="复制当前待办" />
+                        <Button Style="{StaticResource InlineActionButtonStyle}"
+                                Command="{Binding DataContext.CompleteCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Content="{Binding DataContext.CompleteText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                automation:AutomationProperties.Name="完成当前待办" />
+                        <Button Style="{StaticResource InlineActionButtonStyle}"
+                                Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Content="{Binding DataContext.DeleteText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                Foreground="{DynamicResource MissedBrush}"
+                                automation:AutomationProperties.Name="删除当前待办" />
                     </StackPanel>
                 </Grid>
             </Border>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding ImportanceText}" Value="重要">
-                    <Setter TargetName="TodoImportanceSymbol" Property="Foreground"
-                            Value="{DynamicResource ImportantBrush}" />
-                    <Setter TargetName="TodoImportance" Property="Foreground"
-                            Value="{DynamicResource ImportantBrush}" />
-                    <Setter TargetName="TodoImportance" Property="FontWeight"
-                            Value="SemiBold" />
+                    <Setter TargetName="TodoImportanceSymbol" Property="Foreground" Value="{DynamicResource ImportantBrush}" />
+                    <Setter TargetName="TodoImportance" Property="Foreground" Value="{DynamicResource ImportantBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsOverdue}" Value="True">
-                    <Setter TargetName="TodoStatusSymbol" Property="Foreground"
-                            Value="{DynamicResource MissedBrush}" />
-                </DataTrigger>
-                <DataTrigger Binding="{Binding IsCompleted}" Value="True">
-                    <Setter TargetName="TodoStatusSymbol" Property="Foreground"
-                            Value="{DynamicResource CompletedBrush}" />
+                    <Setter TargetName="TodoStatusSymbol" Property="Foreground" Value="{DynamicResource MissedBrush}" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
                              Value="True">
-                    <Setter TargetName="TodoTitle" Property="Foreground"
-                            Value="{DynamicResource SelectionTextBrush}" />
-                    <Setter TargetName="TodoImportanceSymbol" Property="Foreground"
-                            Value="{DynamicResource SelectionTextBrush}" />
-                    <Setter TargetName="TodoImportance" Property="Foreground"
-                            Value="{DynamicResource SelectionTextBrush}" />
-                    <Setter TargetName="TodoStatusSymbol" Property="Foreground"
-                            Value="{DynamicResource SelectionTextBrush}" />
+                    <Setter TargetName="TodoRowSurface" Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+                    <Setter TargetName="TodoRowSurface" Property="BorderThickness" Value="2" />
+                    <Setter TargetName="TodoActions" Property="Visibility" Value="Visible" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
     </UserControl.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="96" />
+            <RowDefinition Height="82" />
+            <RowDefinition Height="74" />
+            <RowDefinition Height="88" />
             <RowDefinition Height="*" />
             <RowDefinition Height="48" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-            <Grid Margin="30,0">
+        <Border x:Name="TopCommandBar"
+                Grid.Row="0"
+                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="24,14">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="36" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="42" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="42" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="22" />
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="22" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0"
-                           Text="{Binding ProductName}"
-                           FontSize="31"
+                <TextBlock Text="{Binding ProductName}"
+                           FontSize="27"
                            FontWeight="SemiBold"
-                           Foreground="{DynamicResource AccentBrush}"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
                            VerticalAlignment="Center" />
-                <Border Grid.Column="1" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="17,24" />
-                <TextBlock Grid.Column="2" Text="{Binding DateText}" FontSize="22" VerticalAlignment="Center" />
-                <Border Grid.Column="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
-                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="◷" FontFamily="Segoe UI Symbol" FontSize="21" Margin="0,0,8,0" />
-                    <TextBlock Text="下一个提醒" VerticalAlignment="Center" Margin="0,0,10,0" />
-                    <TextBlock Text="{Binding NextReminderText}" Foreground="{DynamicResource AccentBrush}"
-                               FontWeight="SemiBold" VerticalAlignment="Center" />
-                </StackPanel>
-                <Border Grid.Column="5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Margin="20,24" />
-                <StackPanel x:Name="CompletedSummary"
-                            Grid.Column="6"
-                            Orientation="Horizontal"
-                            VerticalAlignment="Center"
-                            ToolTip="{Binding CompletedTooltipText}">
-                    <TextBlock Text="✓" FontFamily="Segoe UI Symbol" FontSize="22" Margin="0,0,10,0" />
-                    <TextBlock Text="今日完成" VerticalAlignment="Center" Margin="0,0,10,0" />
-                    <TextBlock Text="{Binding CompletedCount}" Foreground="{DynamicResource AccentBrush}"
-                               FontWeight="SemiBold" VerticalAlignment="Center" />
-                </StackPanel>
-                <Grid Grid.Column="7" Margin="18,0" VerticalAlignment="Center">
+
+                <Grid Grid.Column="2" MaxWidth="620" MinWidth="220" HorizontalAlignment="Stretch">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -212,27 +249,56 @@
                     <TextBox x:Name="GlobalSearchBox"
                              Text="{Binding Search.QueryText, UpdateSourceTrigger=PropertyChanged}"
                              automation:AutomationProperties.Name="全局搜索"
-                             ToolTip="搜索提醒和待办（Ctrl+F）"
-                             MinWidth="160" Height="40"
+                             ToolTip="Ctrl+F"
+                             Height="48"
                              VerticalContentAlignment="Center"
-                             Padding="10,0" />
+                             Padding="42,0,12,0" />
+                    <TextBlock Text="⌕"
+                               FontFamily="Segoe UI Symbol"
+                               FontSize="24"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               Margin="14,0,0,0"
+                               HorizontalAlignment="Left"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False" />
+                    <TextBlock x:Name="SearchWatermark"
+                               Text="{Binding SearchPlaceholderText, StringFormat={}{0}…  Ctrl+F}"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               Margin="44,0,0,0"
+                               VerticalAlignment="Center"
+                               IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Search.QueryText}" Value="">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Search.QueryText}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                     <Button x:Name="GlobalSearchButton"
                             Grid.Column="1"
                             Command="{Binding Search.SearchCommand}"
                             automation:AutomationProperties.Name="搜索"
                             Content="{Binding SearchText}"
-                            MinWidth="62" Height="40"
-                            Margin="6,0,0,0" />
+                            MinWidth="64"
+                            Height="48"
+                            Margin="8,0,0,0" />
                     <Popup x:Name="GlobalSearchPopup"
                            IsOpen="{Binding Search.IsOpen, Mode=OneWay}"
                            PlacementTarget="{Binding ElementName=GlobalSearchBox}"
                            Placement="Bottom"
                            StaysOpen="False"
                            AllowsTransparency="True">
-                        <Border Background="{DynamicResource WindowBackgroundBrush}"
+                        <Border Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1" CornerRadius="8"
-                                Padding="6" MinWidth="360" MaxWidth="520">
+                                Padding="6" MinWidth="420" MaxWidth="620">
                             <StackPanel>
                                 <ListBox x:Name="GlobalSearchResults"
                                          ItemsSource="{Binding Search.Results}"
@@ -241,18 +307,14 @@
                                          MouseDoubleClick="OnSearchResultDoubleClick">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid Margin="6">
+                                            <Grid Margin="8,6">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Title}"
-                                                           FontWeight="SemiBold"
-                                                           TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Grid.Column="1"
-                                                           Text="{Binding LocalDate}"
-                                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                                           Margin="14,0,0,0" />
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Grid.Column="1" Text="{Binding LocalDate}"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}" Margin="14,0,0,0" />
                                             </Grid>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
@@ -264,548 +326,453 @@
                         </Border>
                     </Popup>
                 </Grid>
-                <Button x:Name="NewReminderButton"
-                        Grid.Column="9"
-                        VerticalAlignment="Center"
-                        Command="{Binding OpenQuickAddCommand}"
-                        automation:AutomationProperties.Name="新建提醒"
-                        MinWidth="164" MinHeight="52"
-                        HorizontalContentAlignment="Center"
-                        VerticalContentAlignment="Center">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Viewbox Width="16" Height="16" Margin="0,0,10,0"
-                                 VerticalAlignment="Center" Stretch="Uniform">
-                            <Path Data="M 8,1 L 8,15 M 1,8 L 15,8"
-                                  Stroke="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"
-                                  StrokeThickness="2"
-                                  StrokeStartLineCap="Round"
-                                  StrokeEndLineCap="Round" />
-                        </Viewbox>
-                        <TextBlock Text="{Binding NewText}"
-                                   Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"
-                                   FontSize="17"
-                                   VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-                <StackPanel Grid.Column="8" Orientation="Horizontal" VerticalAlignment="Center">
+
+                <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="ReportsButton"
+                            Style="{StaticResource ToolbarSecondaryButtonStyle}"
                             Command="{Binding OpenReportsCommand}"
                             automation:AutomationProperties.Name="打开报告"
                             Content="{Binding ReportsText}"
-                            MinWidth="72" MinHeight="42"
-                            Margin="0,0,8,0" />
-                    <Button x:Name="ChineseLanguageButton"
-                            Command="{Binding SelectChineseLanguageCommand}"
-                            automation:AutomationProperties.Name="切换为中文"
-                            Content="中"
-                            MinWidth="38" MinHeight="42" />
-                    <Button x:Name="EnglishLanguageButton"
-                            Command="{Binding SelectEnglishLanguageCommand}"
-                            automation:AutomationProperties.Name="Switch to English"
-                            Content="EN"
-                            MinWidth="46" MinHeight="42"
-                            Margin="4,0,8,0" />
+                            MinWidth="72" Margin="0,0,8,0" />
+                    <Button x:Name="NewReminderButton"
+                            Command="{Binding OpenQuickAddCommand}"
+                            automation:AutomationProperties.Name="新建提醒"
+                            MinWidth="120" MinHeight="48"
+                            Margin="0,0,8,0"
+                            HorizontalContentAlignment="Center">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Viewbox Width="16" Height="16" Margin="0,0,10,0">
+                                <Path Data="M 8,1 L 8,15 M 1,8 L 15,8"
+                                      Stroke="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"
+                                      StrokeThickness="2"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round" />
+                            </Viewbox>
+                            <TextBlock Text="{Binding NewText}"
+                                       Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"
+                                       FontSize="16" />
+                        </StackPanel>
+                    </Button>
+                    <Border x:Name="LanguageSelector"
+                            Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="1" CornerRadius="7"
+                            Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="ChineseLanguageButton"
+                                    Command="{Binding SelectChineseLanguageCommand}"
+                                    automation:AutomationProperties.Name="切换为中文"
+                                    Content="中">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource LanguageButtonStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsChineseLanguageSelected}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SelectionBackgroundBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+                                                <Setter Property="Foreground" Value="{DynamicResource FocusBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <Button x:Name="EnglishLanguageButton"
+                                    Command="{Binding SelectEnglishLanguageCommand}"
+                                    automation:AutomationProperties.Name="Switch to English"
+                                    Content="EN">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource LanguageButtonStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsEnglishLanguageSelected}" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource SelectionBackgroundBrush}" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+                                                <Setter Property="Foreground" Value="{DynamicResource FocusBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                        </StackPanel>
+                    </Border>
                     <Button x:Name="HelpButton"
+                            Style="{StaticResource ToolbarSecondaryButtonStyle}"
                             Command="{Binding OpenHelpCommand}"
                             automation:AutomationProperties.Name="使用说明"
                             Content="?"
                             ToolTip="{Binding HelpText}"
-                            FontSize="20"
-                            MinWidth="46" MinHeight="46"
-                            Margin="0,0,12,0" />
+                            FontSize="20" MinWidth="46" Padding="10,6" />
                 </StackPanel>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="132" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
-                <StackPanel HorizontalAlignment="Center" Margin="0,82,0,0">
-                    <TextBlock Text="{Binding MonthText}" FontSize="17" HorizontalAlignment="Center" />
-                    <TextBlock Text="{Binding DayText}" FontSize="43" FontWeight="SemiBold"
-                               Foreground="{DynamicResource AccentBrush}" HorizontalAlignment="Center" />
-                    <TextBlock Text="{Binding WeekdayText}" FontSize="17" HorizontalAlignment="Center" />
+        <Border x:Name="PeriodNavigationBar"
+                Grid.Row="1"
+                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="28,7">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="DayPeriodButton"
+                                 GroupName="TimelinePeriod"
+                                 Content="{Binding DayTextLabel}"
+                                 Command="{Binding SelectDayPeriodCommand}"
+                                 IsChecked="{Binding IsDayPeriodSelected, Mode=OneWay}"
+                                 automation:AutomationProperties.Name="按日查看"
+                                 Style="{StaticResource PeriodSegmentRadioButtonStyle}"
+                                 BorderBrush="{DynamicResource PeriodDayBrush}"
+                                 Foreground="{DynamicResource PeriodDayBrush}">
+                        <RadioButton.Tag>
+                            <PathGeometry Figures="M3,4 L17,4 17,18 3,18 Z M3,8 L17,8 M7,2 L7,6 M13,2 L13,6 M7,12 L10,12 10,15 7,15 Z" />
+                        </RadioButton.Tag>
+                    </RadioButton>
+                    <RadioButton x:Name="WeekPeriodButton"
+                                 GroupName="TimelinePeriod"
+                                 Content="{Binding WeekTextLabel}"
+                                 Command="{Binding SelectWeekPeriodCommand}"
+                                 IsChecked="{Binding IsWeekPeriodSelected, Mode=OneWay}"
+                                 automation:AutomationProperties.Name="按周查看"
+                                 Style="{StaticResource PeriodSegmentRadioButtonStyle}"
+                                 BorderBrush="{DynamicResource PeriodWeekBrush}"
+                                 Foreground="{DynamicResource PeriodWeekBrush}">
+                        <RadioButton.Tag>
+                            <PathGeometry Figures="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,12 L8,12 M10,12 L12,12 M14,12 L16,12" />
+                        </RadioButton.Tag>
+                    </RadioButton>
+                    <RadioButton x:Name="MonthPeriodButton"
+                                 GroupName="TimelinePeriod"
+                                 Content="{Binding MonthTextLabel}"
+                                 Command="{Binding SelectMonthPeriodCommand}"
+                                 IsChecked="{Binding IsMonthPeriodSelected, Mode=OneWay}"
+                                 automation:AutomationProperties.Name="按月查看"
+                                 Style="{StaticResource PeriodSegmentRadioButtonStyle}"
+                                 BorderBrush="{DynamicResource PeriodMonthBrush}"
+                                 Foreground="{DynamicResource PeriodMonthBrush}">
+                        <RadioButton.Tag>
+                            <PathGeometry Figures="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,11 L8,11 M10,11 L12,11 M14,11 L16,11 M6,15 L8,15 M10,15 L12,15 M14,15 L16,15" />
+                        </RadioButton.Tag>
+                    </RadioButton>
                 </StackPanel>
-            </Border>
 
-            <Grid Grid.Column="1">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="52" />
-                    <RowDefinition Height="72" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Button x:Name="PreviousPeriodButton"
+                            Style="{StaticResource ToolbarSecondaryButtonStyle}"
+                            Command="{Binding PreviousPeriodCommand}"
+                            automation:AutomationProperties.Name="上一时段"
+                            Content="‹" FontSize="23" MinWidth="46" Padding="10,5" />
+                    <Button x:Name="TodayPeriodButton"
+                            Style="{StaticResource ToolbarSecondaryButtonStyle}"
+                            Command="{Binding TodayPeriodCommand}"
+                            automation:AutomationProperties.Name="返回今天"
+                            Content="{Binding TodayText}"
+                            MinWidth="88" Margin="10,0" />
+                    <Button x:Name="NextPeriodButton"
+                            Style="{StaticResource ToolbarSecondaryButtonStyle}"
+                            Command="{Binding NextPeriodCommand}"
+                            automation:AutomationProperties.Name="下一时段"
+                            Content="›" FontSize="23" MinWidth="46" Padding="10,5" />
+                </StackPanel>
 
-                <Grid Grid.Row="0" Margin="26,6,26,4">
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ChooseDateButton"
+                            Style="{StaticResource ToolbarSecondaryButtonStyle}"
+                            Command="{Binding ChooseDateCommand}"
+                            automation:AutomationProperties.Name="选择日期"
+                            MinWidth="290"
+                            BorderBrush="{DynamicResource FocusBrush}"
+                            Foreground="{DynamicResource FocusBrush}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="▣" FontFamily="Segoe UI Symbol" FontSize="19" Margin="0,0,10,0" />
+                            <TextBlock x:Name="PeriodLabel"
+                                       Text="{Binding PeriodLabel}"
+                                       FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="⌄" FontSize="16" Margin="12,0,0,0" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="RefreshTimelineButton"
+                            Style="{StaticResource ToolbarSecondaryButtonStyle}"
+                            Command="{Binding LoadCommand}"
+                            automation:AutomationProperties.Name="刷新时间线"
+                            Content="↻"
+                            ToolTip="F5"
+                            FontSize="20" MinWidth="46" Padding="10,5" Margin="10,0,0,0" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <UniformGrid x:Name="MetricsStrip" Grid.Row="2" Rows="1" Columns="2" Margin="28,12,28,8">
+            <Button x:Name="PastSevenDaysCard"
+                    Style="{StaticResource MetricCardButtonStyle}"
+                    Command="{Binding OpenPastSevenDaysAnalyticsCommand}"
+                    automation:AutomationProperties.Name="{Binding PastSevenDaysAccessibleName}"
+                    Margin="0,0,7,0">
+                <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="PreviousPeriodButton"
-                            Grid.Column="0"
-                            Command="{Binding PreviousPeriodCommand}"
-                            automation:AutomationProperties.Name="上一时段"
-                            Content="‹"
-                            FontSize="22"
-                            MinWidth="42"
-                            Margin="0,0,10,0" />
-                    <Border Grid.Column="1"
-                            Background="{DynamicResource SubtleBackgroundBrush}"
-                            CornerRadius="8"
-                            Padding="3"
-                            VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal"
-                                VerticalAlignment="Center">
-                        <RadioButton x:Name="DayPeriodButton"
-                                     GroupName="TimelinePeriod"
-                                     Content="{Binding DayTextLabel}"
-                                     Command="{Binding SelectDayPeriodCommand}"
-                                     IsChecked="{Binding IsDayPeriodSelected, Mode=OneWay}"
-                                     automation:AutomationProperties.Name="按日查看"
-                                     Style="{StaticResource PeriodSegmentRadioButtonStyle}"
-                                     Background="{DynamicResource PeriodDaySelectedBrush}"
-                                     BorderBrush="{DynamicResource PeriodDayBrush}"
-                                     Foreground="{DynamicResource PeriodDaySelectedForegroundBrush}"
-                                     Margin="0,0,3,0">
-                            <RadioButton.Tag>
-                                <PathGeometry Figures="M3,4 L17,4 17,18 3,18 Z M3,8 L17,8 M7,2 L7,6 M13,2 L13,6 M7,12 L10,12 10,15 7,15 Z" />
-                            </RadioButton.Tag>
-                        </RadioButton>
-                        <RadioButton x:Name="WeekPeriodButton"
-                                     GroupName="TimelinePeriod"
-                                     Content="{Binding WeekTextLabel}"
-                                     Command="{Binding SelectWeekPeriodCommand}"
-                                     IsChecked="{Binding IsWeekPeriodSelected, Mode=OneWay}"
-                                     automation:AutomationProperties.Name="按周查看"
-                                     Style="{StaticResource PeriodSegmentRadioButtonStyle}"
-                                     Background="{DynamicResource PeriodWeekSelectedBrush}"
-                                     BorderBrush="{DynamicResource PeriodWeekBrush}"
-                                     Foreground="{DynamicResource PeriodWeekSelectedForegroundBrush}"
-                                     Margin="0,0,3,0">
-                            <RadioButton.Tag>
-                                <PathGeometry Figures="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,12 L8,12 M10,12 L12,12 M14,12 L16,12" />
-                            </RadioButton.Tag>
-                        </RadioButton>
-                        <RadioButton x:Name="MonthPeriodButton"
-                                     GroupName="TimelinePeriod"
-                                     Content="{Binding MonthTextLabel}"
-                                     Command="{Binding SelectMonthPeriodCommand}"
-                                     IsChecked="{Binding IsMonthPeriodSelected, Mode=OneWay}"
-                                     automation:AutomationProperties.Name="按月查看"
-                                     Style="{StaticResource PeriodSegmentRadioButtonStyle}"
-                                     Background="{DynamicResource PeriodMonthSelectedBrush}"
-                                     BorderBrush="{DynamicResource PeriodMonthBrush}"
-                                     Foreground="{DynamicResource PeriodMonthSelectedForegroundBrush}">
-                            <RadioButton.Tag>
-                                <PathGeometry Figures="M2,4 L18,4 18,18 2,18 Z M2,8 L18,8 M6,2 L6,6 M14,2 L14,6 M6,11 L8,11 M10,11 L12,11 M14,11 L16,11 M6,15 L8,15 M10,15 L12,15 M14,15 L16,15" />
-                            </RadioButton.Tag>
-                        </RadioButton>
-                    </StackPanel>
-                    </Border>
-                    <TextBlock x:Name="PeriodLabel"
-                               Grid.Column="2"
-                               Text="{Binding PeriodLabel}"
-                               automation:AutomationProperties.Name="{Binding PeriodLabel, StringFormat=当前时段：{0}}"
-                               FontSize="18"
-                               FontWeight="SemiBold"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center" />
-                    <Button x:Name="RefreshTimelineButton"
-                            Grid.Column="5"
-                            Command="{Binding LoadCommand}"
-                            automation:AutomationProperties.Name="刷新时间线"
-                            Content="刷新"
-                            MinWidth="64"
-                            Margin="10,0,0,0" />
-                    <Button x:Name="NextPeriodButton"
-                            Grid.Column="6"
-                            Command="{Binding NextPeriodCommand}"
-                            automation:AutomationProperties.Name="下一时段"
-                            Content="›"
-                            FontSize="22"
-                            MinWidth="42"
-                            Margin="10,0,0,0" />
-                    <Button x:Name="ChooseDateButton"
-                            Grid.Column="4"
-                            Command="{Binding ChooseDateCommand}"
-                            automation:AutomationProperties.Name="选择日期"
-                            Content="{Binding ChooseDateText}"
-                            MinWidth="82"
-                            Margin="10,0,0,0" />
-                    <Button x:Name="CopyItemButton"
-                            Grid.Column="3"
-                            Command="{Binding CopyCommand}"
-                            automation:AutomationProperties.Name="复制当前事项"
-                            Content="复制（Ctrl+D）"
-                            ToolTip="复制当前事项并创建新记录"
-                            MinWidth="118"
-                            Margin="10,0,0,0" />
+                    <TextBlock Text="✓" Foreground="{DynamicResource CompletedBrush}" FontSize="24" Margin="0,0,14,0" />
+                    <TextBlock Grid.Column="1" Text="{Binding PastSevenDaysText}" FontSize="17" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding PastSevenDaysCompleted}"
+                               Foreground="{DynamicResource CompletedBrush}" FontSize="26" FontWeight="SemiBold" />
                 </Grid>
-
-                <UniformGrid Grid.Row="1"
-                             Rows="1"
-                             Columns="2"
-                             Margin="26,4,26,8">
-                    <Button x:Name="PastSevenDaysCard"
-                            Command="{Binding OpenPastSevenDaysAnalyticsCommand}"
-                            automation:AutomationProperties.Name="{Binding PastSevenDaysCompleted, StringFormat='过去 7 天已完成：{0}，打开分析'}"
-                            Margin="0,0,6,0"
-                            HorizontalContentAlignment="Stretch">
-                        <Grid Margin="12,3">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="过去 7 天已完成"
-                                       VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding PastSevenDaysCompleted}"
-                                       FontSize="22"
-                                       FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
-                        </Grid>
-                    </Button>
-                    <Button x:Name="NextFourteenDaysCard"
-                            Command="{Binding OpenNextFourteenDaysAnalyticsCommand}"
-                            automation:AutomationProperties.Name="{Binding NextFourteenDaysPlanned, StringFormat='未来 14 天计划：{0}，打开分析'}"
-                            Margin="6,0,0,0"
-                            HorizontalContentAlignment="Stretch">
-                        <Grid Margin="12,3">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="未来 14 天计划"
-                                       VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1"
-                                       Text="{Binding NextFourteenDaysPlanned}"
-                                       FontSize="22"
-                                       FontWeight="SemiBold"
-                                       VerticalAlignment="Center" />
-                        </Grid>
-                    </Button>
-                </UniformGrid>
-
-                <Grid x:Name="TimelineColumns"
-                      Grid.Row="2"
-                      Margin="26,8,26,20">
+            </Button>
+            <Button x:Name="NextFourteenDaysCard"
+                    Style="{StaticResource MetricCardButtonStyle}"
+                    Command="{Binding OpenNextFourteenDaysAnalyticsCommand}"
+                    automation:AutomationProperties.Name="{Binding NextFourteenDaysAccessibleName}"
+                    Margin="7,0,0,0">
+                <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="3*" MinWidth="620" />
-                        <ColumnDefinition Width="16" />
-                        <ColumnDefinition Width="2*" MinWidth="360" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
+                    <TextBlock Text="▣" Foreground="{DynamicResource AccentBrush}" FontSize="23" Margin="0,0,14,0" />
+                    <TextBlock Grid.Column="1" Text="{Binding NextFourteenDaysText}" FontSize="17" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding NextFourteenDaysPlanned}"
+                               Foreground="{DynamicResource AccentBrush}" FontSize="26" FontWeight="SemiBold" />
+                </Grid>
+            </Button>
+        </UniformGrid>
 
-                    <Grid x:Name="TodoColumn" Grid.Column="2">
+        <Grid x:Name="TimelineColumns" Grid.Row="3" Margin="28,8,28,18">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="2*" />
+            </Grid.ColumnDefinitions>
+
+            <Border x:Name="ReminderPanel" Grid.Column="0" Style="{StaticResource PanelSurfaceStyle}">
+                <Grid x:Name="ReminderColumn" Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Border x:Name="TimelineHeader"
+                            Background="{DynamicResource SubtleBackgroundBrush}"
+                            BorderBrush="{DynamicResource BorderBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="8,4,8,12">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="♢" FontSize="22" Margin="0,0,10,0" />
+                            <TextBlock x:Name="ReminderSectionHeader"
+                                       Text="{Binding RemindersText}"
+                                       automation:AutomationProperties.Name="定时提醒"
+                                       FontSize="20" FontWeight="SemiBold" />
+                            <TextBlock x:Name="TimelineHeaderText" Text="" />
+                        </StackPanel>
+                    </Border>
+                    <Grid Grid.Row="1">
+                        <Border Margin="4,8" Padding="10" VerticalAlignment="Top"
+                                Background="{DynamicResource SubtleBackgroundBrush}"
+                                BorderBrush="{DynamicResource MissedBrush}" BorderThickness="1"
+                                Visibility="Collapsed" Panel.ZIndex="2">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding ErrorMessage}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding ErrorMessage}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource MissedBrush}" TextWrapping="Wrap" />
+                        </Border>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="4,8,4,4">
+                            <ItemsControl x:Name="GroupList" ItemsSource="{Binding Groups}"
+                                          Focusable="False" automation:AutomationProperties.Name="提醒时间线">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel>
+                                            <TextBlock x:Name="GroupName"
+                                                       Text="{Binding Name}"
+                                                       automation:AutomationProperties.Name="{Binding Name, StringFormat=时间线分组：{0}}"
+                                                       Foreground="{DynamicResource AccentBrush}"
+                                                       FontSize="16" FontWeight="SemiBold"
+                                                       Margin="4,10,0,7" />
+                                            <ListBox ItemsSource="{Binding Items}"
+                                                     SelectionChanged="OnTimelineSelectionChanged"
+                                                     ItemContainerStyle="{StaticResource TimelineListItem}"
+                                                     BorderThickness="0" Background="Transparent"
+                                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                     VirtualizingPanel.IsVirtualizing="True"
+                                                     VirtualizingPanel.VirtualizationMode="Recycling"
+                                                     automation:AutomationProperties.Name="{Binding Name, StringFormat={}{0}提醒}">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border x:Name="ReminderRowSurface"
+                                                                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                                                                BorderBrush="{DynamicResource BorderBrush}"
+                                                                BorderThickness="1" CornerRadius="7"
+                                                                Margin="0,0,0,8" Padding="12,9"
+                                                                automation:AutomationProperties.Name="{Binding Title}">
+                                                            <Grid>
+                                                                <Grid.RowDefinitions>
+                                                                    <RowDefinition Height="Auto" />
+                                                                    <RowDefinition Height="Auto" />
+                                                                </Grid.RowDefinitions>
+                                                                <Grid>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="72" />
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <StackPanel VerticalAlignment="Center">
+                                                                        <TextBlock x:Name="Time" Text="{Binding TimeText}" FontSize="16" FontWeight="SemiBold" />
+                                                                        <TextBlock x:Name="CountdownRemaining" Text="{Binding RemainingText}"
+                                                                                   Foreground="{DynamicResource FocusBrush}" FontSize="11" />
+                                                                    </StackPanel>
+                                                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                        <TextBlock x:Name="KindSymbol" Text="{Binding KindSymbol}"
+                                                                                   FontFamily="Segoe UI Symbol" FontSize="18"
+                                                                                   Foreground="{DynamicResource AccentBrush}" Margin="0,0,10,0" />
+                                                                        <TextBlock x:Name="Title" Text="{Binding Title}" FontSize="16"
+                                                                                   FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                                    </StackPanel>
+                                                                    <TextBlock x:Name="Recurrence" Grid.Column="2"
+                                                                               Text="{Binding RecurrenceDisplay}"
+                                                                               Foreground="{DynamicResource SecondaryTextBrush}"
+                                                                               Margin="12,0" VerticalAlignment="Center"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                        <TextBlock x:Name="StatusSymbol" Text="{Binding StatusSymbol}"
+                                                                                   Foreground="{DynamicResource AccentBrush}" Margin="0,0,6,0" />
+                                                                        <TextBlock x:Name="Status" Text="{Binding StatusText}"
+                                                                                   Foreground="{DynamicResource AccentBrush}" />
+                                                                    </StackPanel>
+                                                                </Grid>
+                                                                <StackPanel x:Name="ReminderActions" Grid.Row="1"
+                                                                            Orientation="Horizontal" HorizontalAlignment="Right"
+                                                                            Margin="72,10,0,0" Visibility="Collapsed">
+                                                                    <Button Style="{StaticResource InlineActionButtonStyle}"
+                                                                            Command="{Binding DataContext.EditCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            Content="{Binding DataContext.EditText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}" />
+                                                                    <Button Style="{StaticResource InlineActionButtonStyle}"
+                                                                            Command="{Binding DataContext.CopyCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            Content="{Binding DataContext.CopyText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            ToolTip="复制当前事项并创建新记录（Ctrl+D）"
+                                                                            automation:AutomationProperties.Name="复制当前提醒" />
+                                                                    <Button Style="{StaticResource InlineActionButtonStyle}"
+                                                                            Command="{Binding DataContext.CompleteCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            Content="{Binding DataContext.CompleteText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}" />
+                                                                    <Button Style="{StaticResource InlineActionButtonStyle}"
+                                                                            Command="{Binding DataContext.DeleteCommand, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            Content="{Binding DataContext.DeleteText, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                                            Foreground="{DynamicResource MissedBrush}" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </Border>
+                                                        <DataTemplate.Triggers>
+                                                            <DataTrigger Binding="{Binding GroupName}" Value="已错过">
+                                                                <Setter TargetName="Time" Property="Foreground" Value="{DynamicResource MissedBrush}" />
+                                                                <Setter TargetName="StatusSymbol" Property="Foreground" Value="{DynamicResource MissedBrush}" />
+                                                                <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource MissedBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding GroupName}" Value="已完成">
+                                                                <Setter TargetName="StatusSymbol" Property="Foreground" Value="{DynamicResource CompletedBrush}" />
+                                                                <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource CompletedBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True">
+                                                                <Setter TargetName="ReminderRowSurface" Property="BorderBrush" Value="{DynamicResource FocusBrush}" />
+                                                                <Setter TargetName="ReminderRowSurface" Property="BorderThickness" Value="2" />
+                                                                <Setter TargetName="ReminderActions" Property="Visibility" Value="Visible" />
+                                                                <Setter TargetName="Time" Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                                                <Setter TargetName="CountdownRemaining" Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                                                <Setter TargetName="KindSymbol" Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                                                <Setter TargetName="Title" Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                                                <Setter TargetName="Recurrence" Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                                                <Setter TargetName="StatusSymbol" Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                                                <Setter TargetName="Status" Property="Foreground" Value="{DynamicResource SelectionTextBrush}" />
+                                                            </DataTrigger>
+                                                        </DataTemplate.Triggers>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </StackPanel>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding Name}" Value="已错过">
+                                                <Setter TargetName="GroupName" Property="Foreground" Value="{DynamicResource MissedBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding Name}" Value="已完成">
+                                                <Setter TargetName="GroupName" Property="Foreground" Value="{DynamicResource CompletedBrush}" />
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                        <TextBlock Text="{Binding EmptyRemindersText}"
+                                   Visibility="{Binding IsReminderEmpty, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="16" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border x:Name="TodoPanel" Grid.Column="2" Style="{StaticResource PanelSurfaceStyle}">
+                <Grid x:Name="TodoColumn" Grid.Column="2">
                     <Grid x:Name="TodoSection">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                    <TextBlock x:Name="TodoSectionHeader"
-                               Grid.Row="0"
-                               Text="{Binding TodosText}"
-                               automation:AutomationProperties.Name="待办事项"
-                               FontSize="20"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource AccentBrush}"
-                               Margin="0,0,0,6" />
-                    <ListBox x:Name="PendingTodoList"
-                             Grid.Row="1"
-                             ItemsSource="{Binding PendingTodos}"
-                             ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
-                             SelectionChanged="OnTimelineSelectionChanged"
-                             BorderThickness="0"
-                             Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                             ScrollViewer.CanContentScroll="True"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Auto"
-                             VirtualizingPanel.IsVirtualizing="True"
-                             VirtualizingPanel.VirtualizationMode="Recycling"
-                             automation:AutomationProperties.Name="待办事项列表">
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="{x:Type ListBoxItem}"
-                                   BasedOn="{StaticResource TimelineListItem}">
-                                <Setter Property="automation:AutomationProperties.Name"
-                                        Value="{Binding AccessibleName}" />
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <ListBox.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <VirtualizingStackPanel />
-                            </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                    </ListBox>
-                    </Grid>
-                    </Grid>
-
-                    <Border Grid.Column="1"
-                            Width="1"
-                            HorizontalAlignment="Center"
-                            Background="{DynamicResource BorderBrush}" />
-
-                    <Grid x:Name="ReminderColumn" Grid.Column="0">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="44" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-
-                <TextBlock x:Name="ReminderSectionHeader"
-                           Grid.Row="0"
-                           Text="{Binding RemindersText}"
-                           automation:AutomationProperties.Name="定时提醒"
-                           FontSize="20"
-                           FontWeight="SemiBold"
-                           Foreground="{DynamicResource AccentBrush}"
-                           VerticalAlignment="Center"
-                           Margin="0,0,0,6" />
-
-                <Border x:Name="TimelineHeader"
-                        Grid.Row="1" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
-                        BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,0,0,1">
-                    <Grid Margin="54,0,26,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="110" />
-                            <ColumnDefinition Width="2.2*" />
-                            <ColumnDefinition Width="1.25*" />
-                            <ColumnDefinition Width="1.05*" />
-                            <ColumnDefinition Width="1.1*" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="TimelineHeaderText" Grid.Column="0" Text="时间" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="提醒" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Text="重复" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Text="重要性" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="4" Text="状态" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                    </Grid>
-                </Border>
-
-                <Grid Grid.Row="2">
-                    <Border Margin="12,8,12,0"
-                            Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
-                            BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}"
-                            BorderThickness="1"
-                            Padding="12"
-                            VerticalAlignment="Top"
-                            Panel.ZIndex="2"
-                            Visibility="Collapsed">
-                        <Border.Style>
-                            <Style TargetType="Border">
-                                <Setter Property="Visibility" Value="Visible" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding ErrorMessage}" Value="{x:Null}">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding ErrorMessage}" Value="">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Border.Style>
-                        <TextBlock Text="{Binding ErrorMessage}" Foreground="{DynamicResource MissedBrush}" />
-                    </Border>
-
-                    <ScrollViewer VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled"
-                                  Padding="26,8,26,20">
-                        <ItemsControl x:Name="GroupList"
-                                      ItemsSource="{Binding Groups}"
-                                      Focusable="False"
-                                      automation:AutomationProperties.Name="今天提醒时间线">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel>
-                                        <Grid Height="58">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="34" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border x:Name="GroupMarker" Width="26" Height="26" CornerRadius="13"
-                                                    Background="{DynamicResource AccentBrush}"
-                                                    HorizontalAlignment="Center" VerticalAlignment="Center">
-                                                <TextBlock x:Name="GroupSymbol" Text="◷" Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"
-                                                           FontFamily="Segoe UI Symbol" FontSize="14"
-                                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            </Border>
-                                            <TextBlock x:Name="GroupName" Grid.Column="1"
-                                                       Text="{Binding Name}"
-                                                       automation:AutomationProperties.Name="{Binding Name, StringFormat=时间线分组：{0}}"
-                                                       Foreground="{DynamicResource AccentBrush}"
-                                                       FontSize="20" FontWeight="SemiBold"
-                                                       VerticalAlignment="Center" Margin="8,0,0,0" />
-                                        </Grid>
-                                        <ListBox ItemsSource="{Binding Items}"
-                                                 SelectionChanged="OnTimelineSelectionChanged"
-                                                 ItemContainerStyle="{StaticResource TimelineListItem}"
-                                                 BorderThickness="0"
-                                                 Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
-                                                 MaxHeight="320"
-                                                 ScrollViewer.CanContentScroll="True"
-                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                                 VirtualizingPanel.IsVirtualizing="True"
-                                                 VirtualizingPanel.VirtualizationMode="Recycling"
-                                                 automation:AutomationProperties.Name="{Binding Name, StringFormat={}{0}提醒}">
-                                            <ListBox.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <VirtualizingStackPanel />
-                                                </ItemsPanelTemplate>
-                                            </ListBox.ItemsPanel>
-                                            <ListBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border BorderBrush="{DynamicResource BorderBrush}"
-                                                            BorderThickness="0,0,0,1"
-                                                            MinHeight="64" Padding="28,0,8,0"
-                                                            automation:AutomationProperties.Name="{Binding Title}">
-                                                        <Grid>
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="110" />
-                                                                <ColumnDefinition Width="2.2*" />
-                                                                <ColumnDefinition Width="1.25*" />
-                                                                <ColumnDefinition Width="1.05*" />
-                                                                <ColumnDefinition Width="1.1*" />
-                                                            </Grid.ColumnDefinitions>
-                                                            <StackPanel Grid.Column="0"
-                                                                        VerticalAlignment="Center">
-                                                                <TextBlock x:Name="Time"
-                                                                           Text="{Binding TimeText}"
-                                                                           FontSize="18" />
-                                                                <TextBlock x:Name="CountdownRemaining"
-                                                                           Text="{Binding RemainingText}"
-                                                                           Foreground="{DynamicResource AccentBrush}"
-                                                                           FontSize="12"
-                                                                           Margin="0,2,0,0" />
-                                                            </StackPanel>
-                                                            <StackPanel Grid.Column="1" Orientation="Horizontal"
-                                                                        VerticalAlignment="Center">
-                                                                <Border Width="42" Height="42"
-                                                                        BorderBrush="{DynamicResource BorderBrush}"
-                                                                        BorderThickness="1" CornerRadius="5"
-                                                                        Margin="0,0,16,0">
-                                                                    <TextBlock x:Name="KindSymbol"
-                                                                               Text="{Binding KindSymbol}"
-                                                                               FontFamily="Segoe UI Symbol"
-                                                                               FontSize="20"
-                                                                               HorizontalAlignment="Center"
-                                                                               VerticalAlignment="Center" />
-                                                                </Border>
-                                                                <TextBlock x:Name="Title" Text="{Binding Title}" FontSize="18"
-                                                                           FontWeight="SemiBold"
-                                                                           TextTrimming="CharacterEllipsis"
-                                                                           VerticalAlignment="Center" />
-                                                            </StackPanel>
-                                                            <TextBlock x:Name="Recurrence" Grid.Column="2"
-                                                                       Text="{Binding RecurrenceDisplay}"
-                                                                       TextTrimming="CharacterEllipsis"
-                                                                       VerticalAlignment="Center" />
-                                                            <StackPanel Grid.Column="3" Orientation="Horizontal"
-                                                                        VerticalAlignment="Center">
-                                                                <TextBlock x:Name="ImportanceSymbol"
-                                                                           Text="{Binding ImportanceSymbol}"
-                                                                           Foreground="{DynamicResource SecondaryTextBrush}"
-                                                                           FontWeight="Bold" Margin="0,0,10,0" />
-                                                                <TextBlock x:Name="Importance"
-                                                                           Text="{Binding ImportanceText}" />
-                                                            </StackPanel>
-                                                            <StackPanel Grid.Column="4" Orientation="Horizontal"
-                                                                        VerticalAlignment="Center">
-                                                                <TextBlock x:Name="StatusSymbol"
-                                                                           Text="{Binding StatusSymbol}"
-                                                                           FontFamily="Segoe UI Symbol"
-                                                                           Foreground="{DynamicResource AccentBrush}"
-                                                                           FontSize="18" Margin="0,0,10,0" />
-                                                                <TextBlock x:Name="Status"
-                                                                           Text="{Binding StatusText}"
-                                                                           Foreground="{DynamicResource AccentBrush}" />
-                                                            </StackPanel>
-                                                        </Grid>
-                                                    </Border>
-                                                    <DataTemplate.Triggers>
-                                                        <DataTrigger Binding="{Binding ImportanceText}" Value="重要">
-                                                            <Setter TargetName="ImportanceSymbol" Property="Foreground"
-                                                                    Value="{DynamicResource ImportantBrush}" />
-                                                            <Setter TargetName="Importance" Property="Foreground"
-                                                                    Value="{DynamicResource ImportantBrush}" />
-                                                            <Setter TargetName="Importance" Property="FontWeight"
-                                                                    Value="SemiBold" />
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding GroupName}" Value="已错过">
-                                                            <Setter TargetName="Time" Property="Foreground"
-                                                                    Value="{DynamicResource MissedBrush}" />
-                                                            <Setter TargetName="StatusSymbol" Property="Foreground"
-                                                                    Value="{DynamicResource MissedBrush}" />
-                                                            <Setter TargetName="Status" Property="Foreground"
-                                                                    Value="{DynamicResource MissedBrush}" />
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding GroupName}" Value="已完成">
-                                                            <Setter TargetName="StatusSymbol" Property="Foreground"
-                                                                    Value="{DynamicResource CompletedBrush}" />
-                                                            <Setter TargetName="Status" Property="Foreground"
-                                                                    Value="{DynamicResource CompletedBrush}" />
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}"
-                                                                     Value="True">
-                                                            <Setter TargetName="Time" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="CountdownRemaining" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="KindSymbol" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="Title" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="Recurrence" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="ImportanceSymbol" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="Importance" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="StatusSymbol" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                            <Setter TargetName="Status" Property="Foreground"
-                                                                    Value="{DynamicResource SelectionTextBrush}" />
-                                                        </DataTrigger>
-                                                    </DataTemplate.Triggers>
-                                                </DataTemplate>
-                                            </ListBox.ItemTemplate>
-                                        </ListBox>
-                                    </StackPanel>
-                                    <DataTemplate.Triggers>
-                                        <DataTrigger Binding="{Binding Name}" Value="已错过">
-                                            <Setter TargetName="GroupMarker" Property="Background"
-                                                    Value="{DynamicResource MissedBrush}" />
-                                            <Setter TargetName="GroupSymbol" Property="Text" Value="!" />
-                                            <Setter TargetName="GroupName" Property="Foreground"
-                                                    Value="{DynamicResource MissedBrush}" />
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding Name}" Value="已完成">
-                                            <Setter TargetName="GroupMarker" Property="Background" Value="#7A828C" />
-                                            <Setter TargetName="GroupSymbol" Property="Text" Value="✓" />
-                                            <Setter TargetName="GroupName" Property="Foreground"
-                                                    Value="{DynamicResource SecondaryTextBrush}" />
-                                        </DataTrigger>
-                                    </DataTemplate.Triggers>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
+                        <Border Background="{DynamicResource SubtleBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="8,4,8,12">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="☑" FontFamily="Segoe UI Symbol" FontSize="20" Margin="0,0,10,0" />
+                                <TextBlock x:Name="TodoSectionHeader"
+                                           Text="{Binding TodosText}"
+                                           automation:AutomationProperties.Name="待办事项"
+                                           FontSize="20" FontWeight="SemiBold" />
+                            </StackPanel>
+                        </Border>
+                        <ListBox x:Name="PendingTodoList"
+                                 Grid.Row="1" ItemsSource="{Binding PendingTodos}"
+                                 ItemTemplate="{StaticResource TodoTimelineItemTemplate}"
+                                 SelectionChanged="OnTimelineSelectionChanged"
+                                 BorderThickness="0" Background="Transparent"
+                                 Padding="4,16,4,4"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                 automation:AutomationProperties.Name="待办事项列表">
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="{x:Type ListBoxItem}" BasedOn="{StaticResource TimelineListItem}">
+                                    <Setter Property="automation:AutomationProperties.Name" Value="{Binding AccessibleName}" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                        </ListBox>
+                        <TextBlock Grid.Row="1"
+                                   Text="{Binding EmptyTodosText}"
+                                   Visibility="{Binding IsTodoEmpty, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
+                                   FontSize="16" />
                     </Grid>
                 </Grid>
-            </Grid>
+            </Border>
         </Grid>
 
-        <Border Grid.Row="2" Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ActiveBorderBrushKey}}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="4"
+                Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,1,0,0">
             <TextBlock x:Name="TimelineFooterText"
-                       Text="{Binding ShortcutFooter, StringFormat=快捷键：{0}}"
+                       Text="{Binding ShortcutFooter}"
                        Foreground="{DynamicResource SecondaryTextBrush}"
-                       VerticalAlignment="Center" Margin="30,0" />
+                       VerticalAlignment="Center" Margin="28,0" />
         </Border>
     </Grid>
 </UserControl>

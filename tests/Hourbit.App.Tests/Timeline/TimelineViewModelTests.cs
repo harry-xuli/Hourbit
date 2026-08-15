@@ -38,13 +38,60 @@ public sealed class TimelineViewModelTests
         Assert.Equal("Reminders", vm.RemindersText);
         Assert.Equal("To-do", vm.TodosText);
         Assert.Equal("Search", vm.SearchText);
+        Assert.Equal("Search reminders and to-dos", vm.SearchPlaceholderText);
         Assert.Equal("Choose date", vm.ChooseDateText);
+        Assert.Equal("Today", vm.TodayText);
+        Assert.Equal("Edit", vm.EditText);
+        Assert.Equal("Copy", vm.CopyText);
+        Assert.Equal("Complete", vm.CompleteText);
+        Assert.Equal("Delete", vm.DeleteText);
+        Assert.Equal("No plans in this period", vm.EmptyTimelineText);
         Assert.Equal("Day", vm.DayTextLabel);
         Assert.Equal("Week", vm.WeekTextLabel);
         Assert.Equal("Month", vm.MonthTextLabel);
+        Assert.Equal("Wednesday, July 29, 2026", vm.DateText);
+        Assert.Equal("July 27 – August 2, 2026", vm.PeriodLabel);
         Assert.Equal(UiLanguage.EnUs, vm.CurrentLanguage);
+        Assert.False(vm.IsChineseLanguageSelected);
+        Assert.True(vm.IsEnglishLanguageSelected);
         Assert.Equal([UiLanguage.EnUs], saved);
         Assert.Equal(range, vm.CurrentPeriod.Range);
+    }
+
+    [Fact]
+    public async Task Empty_timeline_exposes_a_localized_future_period_message()
+    {
+        var vm = Create(new FakeTimelineQuery());
+
+        await vm.LoadAsync();
+
+        Assert.True(vm.IsTimelineEmpty);
+        Assert.Equal("此时段暂无计划", vm.EmptyTimelineText);
+        Assert.True(vm.IsReminderEmpty);
+        Assert.True(vm.IsTodoEmpty);
+        Assert.Equal("此时段暂无提醒", vm.EmptyRemindersText);
+        Assert.Equal("此时段暂无待办", vm.EmptyTodosText);
+    }
+
+    [Fact]
+    public async Task Today_command_returns_to_local_today_without_changing_period_mode()
+    {
+        var query = new RecordingPeriodQuery();
+        var vm = Create(
+            query,
+            culture: CultureInfo.GetCultureInfo("zh-CN"));
+
+        await vm.SelectMonthPeriodCommand.ExecuteAsync(null);
+        await vm.NextPeriodCommand.ExecuteAsync(null);
+        Assert.Equal(new DateOnly(2026, 8, 29), vm.SelectedDate);
+
+        await vm.TodayPeriodCommand.ExecuteAsync(null);
+
+        Assert.Equal(new DateOnly(2026, 7, 29), vm.SelectedDate);
+        Assert.Equal(TimelinePeriodKind.Month, vm.SelectedPeriodKind);
+        Assert.Equal(
+            new LocalDateRange(new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)),
+            query.Ranges[^1]);
     }
 
     [Fact]
@@ -97,7 +144,7 @@ public sealed class TimelineViewModelTests
                 new DateOnly(2026, 7, 27),
                 new DateOnly(2026, 8, 2)),
             period.Range);
-        Assert.Equal("2026年7月27日 – 2026年8月2日", period.Label);
+        Assert.Equal("July 27 – August 2, 2026", period.Label);
     }
 
     [Fact]
@@ -137,7 +184,7 @@ public sealed class TimelineViewModelTests
         Assert.Equal(
             new LocalDateRange(new DateOnly(2026, 7, 29), new DateOnly(2026, 7, 29)),
             query.Ranges[^1]);
-        Assert.Equal("2026年7月29日 Wednesday", vm.PeriodLabel);
+        Assert.Equal("Wednesday, July 29, 2026", vm.PeriodLabel);
 
         await vm.PreviousPeriodCommand.ExecuteAsync(null);
         Assert.Equal(

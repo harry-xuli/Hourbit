@@ -1,5 +1,6 @@
 using System.Globalization;
 using Hourbit.App.Analytics;
+using Hourbit.App.Localization;
 using Hourbit.Core.Analytics;
 
 namespace Hourbit.App.Tests.Analytics;
@@ -10,6 +11,45 @@ public sealed class AnalyticsViewModelTests
         "UTC+08-analytics-vm", TimeSpan.FromHours(8), "UTC+08", "UTC+08");
     private static readonly DateTimeOffset Now =
         new(2026, 8, 9, 10, 0, 0, TimeSpan.FromHours(8));
+
+    [Fact]
+    public async Task Shared_language_switch_updates_all_report_copy_dates_and_legend_without_requerying()
+    {
+        var calls = 0;
+        var localization = new LocalizationService(
+            CultureInfo.GetCultureInfo("zh-CN"), null);
+        var snapshot = CreateSnapshot(new LocalDateRange(
+            new DateOnly(2026, 8, 3), new DateOnly(2026, 8, 9)));
+        var vm = new AnalyticsViewModel(
+            (range, ct) =>
+            {
+                calls++;
+                return Task.FromResult(snapshot);
+            },
+            new FixedTimeProvider(Now.ToUniversalTime()),
+            Zone,
+            CultureInfo.GetCultureInfo("zh-CN"),
+            localization);
+        await vm.SelectRangeAsync(AnalyticsRangeKind.Recent7Days);
+
+        localization.SetLanguage(UiLanguage.EnUs);
+
+        Assert.Equal(1, calls);
+        Assert.Equal("Analytics report - Hourbit", vm.WindowTitle);
+        Assert.Equal("Analytics report", vm.TitleText);
+        Assert.Equal("Last 7 days", vm.RangeOptions[0].Label);
+        Assert.Equal("Status", vm.DimensionOptions[0].Label);
+        Assert.Equal("Completed", vm.CompletedText);
+        Assert.Equal("Future plans", vm.FuturePlannedText);
+        Assert.Equal("Overdue", vm.OverdueText);
+        Assert.Equal("Distribution", vm.DistributionText);
+        Assert.Equal("Completion trend", vm.TrendText);
+        Assert.Equal(
+            ["Completed", "Incomplete", "Overdue"],
+            vm.LegendItems.Select(static item => item.Label));
+        Assert.Contains("Status distribution", vm.DonutSummary);
+        Assert.Contains("Completion trend", vm.TrendSummary);
+    }
 
     [Theory]
     [InlineData(AnalyticsRangeKind.Recent7Days, "2026-08-03", "2026-08-09")]
@@ -29,6 +69,22 @@ public sealed class AnalyticsViewModelTests
             new LocalDateRange(DateOnly.Parse(expectedStart), DateOnly.Parse(expectedEnd)),
             Assert.Single(loader.Ranges));
         Assert.Same(loader.Snapshots.Single(), vm.Snapshot);
+    }
+
+    [Theory]
+    [InlineData(AnalyticsRangeKind.Recent7Days, "2026-08-03", "2026-08-09")]
+    [InlineData(AnalyticsRangeKind.CurrentMonth, "2026-08-01", "2026-08-31")]
+    public async Task Selecting_a_preset_syncs_the_visible_custom_dates(
+        AnalyticsRangeKind kind,
+        string expectedStart,
+        string expectedEnd)
+    {
+        var vm = Create(new RecordingLoader().LoadAsync);
+
+        await vm.SelectRangeAsync(kind);
+
+        Assert.Equal(DateOnly.Parse(expectedStart), vm.CustomStart);
+        Assert.Equal(DateOnly.Parse(expectedEnd), vm.CustomEnd);
     }
 
     [Fact]
