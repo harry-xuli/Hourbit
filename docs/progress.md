@@ -10,6 +10,13 @@ v0.3.0 已发布。v0.4.0 功能与语言/日历 follow-up 收尾已完成并推
 
 ## 已完成
 
+### 重复待办（schema v6，已提交并推送）
+
+- 自然语言 `每天 / 每个工作日 / 每周N` 前缀创建重复待办（无时间、不入提醒调度器）；
+- 完成重复待办后自动生成下一次待办（每日 +1 天、工作日跳过周末、每周按所选星期）；
+- todos 表新增 `recurrence_kind` / `recurrence_days_of_week` 列（schema v5→v6 迁移 + 备份校验）；
+- 编辑/复制重复待办保留其重复规则；README 已同步。
+
 ### v0.4.0 功能与语言/日历 follow-up（已提交并推送）
 
 - 暖色主题、`中 / EN` UI 切换、ISO 周（周一至周日）、未来日期导航、全局搜索、仅待办面板、托盘双击恢复、统一快捷键、公开项目 Moment→Hourbit 重命名（保留旧数据目录/AppId/启动项/单实例兼容）；
@@ -29,11 +36,15 @@ v0.3.0 已发布。v0.4.0 功能与语言/日历 follow-up 收尾已完成并推
 
 ## 待完成（合并进 v0.6.0）
 
-1. 重复待办：自然语言 `每天 / 每个工作日 / 每周N` 创建重复待办；完成后续期生成下一次；schema v6 迁移；
-2. 分析报告：PDF 导出、配对导出 UI（完整/匿名隐私模式）、报告端到端（Task 8）；
-3. 数据重置 UI（重启门控「重置为全新状态」）；
-4. CompositionRoot 重构、产物瘦身、高 DPI 目检清单；
-5. 版本 0.6.0 签名发布：全量测试 → build-release（含签名）→ packaged smoke → tag `v0.6.0` → GitHub Release（四附件）。
+1. 分析报告：PDF 导出、配对导出 UI（完整/匿名隐私模式）、报告端到端（Task 8）；
+2. 数据重置 UI（重启门控「重置为全新状态」）；
+3. CompositionRoot 重构、产物瘦身、高 DPI 目检清单；
+4. 版本 0.6.0 签名发布：全量测试 → build-release（含签名）→ packaged smoke → tag `v0.6.0` → GitHub Release。
+
+### 已知环境阻塞
+
+- Inno Setup 6.7.3 安装包（约 10 MB，GitHub Release 资产）在本沙箱下载超时，暂无法构建 `Hourbit-Setup-x64.exe`；
+  免安装 ZIP 不受影响。发布前需在可访问 GitHub 资产的环境重试下载，或用便携解压方式安装 Inno Setup。
 
 ## 验证基线
 
