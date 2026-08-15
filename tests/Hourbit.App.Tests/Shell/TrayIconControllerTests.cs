@@ -156,6 +156,7 @@ public sealed class TrayIconControllerTests
             Items = items;
             SetItemsCalls++;
         }
+        public void RaiseActivated() => Activated?.Invoke();
         public void Dispose() { }
     }
 
