@@ -203,10 +203,14 @@ try {
     }
 
     $quotedOutputDirectory = '"' + $outputDirectory + '"'
+    $stderrPath = Join-Path $outputDirectory 'self-test-stderr.txt'
+    $stdoutPath = Join-Path $outputDirectory 'self-test-stdout.txt'
     $process = Start-Process `
         -FilePath $executable `
         -ArgumentList @('--self-test', $quotedOutputDirectory) `
         -WindowStyle Hidden `
+        -RedirectStandardError $stderrPath `
+        -RedirectStandardOutput $stdoutPath `
         -PassThru
 
     if (-not $process.WaitForExit(30000)) {
@@ -218,7 +222,9 @@ try {
     $process.Refresh()
     $exitCode = $process.ExitCode
     if ($exitCode -ne 0) {
-        throw "Portable self-test exited with code $exitCode."
+        $stderr = if (Test-Path $stderrPath) { Get-Content $stderrPath -Raw } else { '' }
+        $stdout = if (Test-Path $stdoutPath) { Get-Content $stdoutPath -Raw } else { '' }
+        throw "Portable self-test exited with code $exitCode.`nSTDERR: $stderr`nSTDOUT: $stdout"
     }
 
     $resultPath = Join-Path $outputDirectory 'self-test.jsonl'
