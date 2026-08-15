@@ -17,6 +17,7 @@ public sealed class EditTodoViewModel : ObservableObject
     private string _dateText;
     private string _timeText = string.Empty;
     private ReminderImportance _selectedImportance;
+    private RecurrenceRule? _recurrence;
     private string? _errorMessage;
     private TodoDraft? _persistedSaveDraft;
     private string? _refreshOnlyMessage;
@@ -30,6 +31,7 @@ public sealed class EditTodoViewModel : ObservableObject
         _title = draft.Title;
         _dateText = FormatDate(draft.DueDate);
         _selectedImportance = draft.Importance;
+        _recurrence = draft.Recurrence;
         _afterSaved = _ => Task.CompletedTask;
         InitializeCommands();
     }
@@ -61,6 +63,7 @@ public sealed class EditTodoViewModel : ObservableObject
         _title = item.Title;
         _dateText = FormatDate(item.DueDate);
         _selectedImportance = item.Importance;
+        _recurrence = item.Recurrence;
         InitializeCommands();
     }
 
@@ -146,7 +149,8 @@ public sealed class EditTodoViewModel : ObservableObject
     {
         ArgumentNullException.ThrowIfNull(source);
         var viewModel = new EditTodoViewModel(
-            new TodoDraft(source.Title, source.DueDate, source.Importance),
+            new TodoDraft(source.Title, source.DueDate, source.Importance,
+                source.Recurrence),
             zone,
             service,
             afterSaved);
@@ -193,7 +197,7 @@ public sealed class EditTodoViewModel : ObservableObject
 
         if (string.IsNullOrWhiteSpace(TimeText))
         {
-            draft = new TodoDraft(title, dueDate, SelectedImportance);
+            draft = new TodoDraft(title, dueDate, SelectedImportance, _recurrence);
             ErrorMessage = null;
             return true;
         }
@@ -446,5 +450,6 @@ public sealed class EditTodoViewModel : ObservableObject
         left is not null &&
         string.Equals(left.Title, right.Title, StringComparison.Ordinal) &&
         left.DueDate == right.DueDate &&
-        left.Importance == right.Importance;
+        left.Importance == right.Importance &&
+        left.Recurrence == right.Recurrence;
 }

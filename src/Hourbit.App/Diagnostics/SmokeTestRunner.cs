@@ -186,7 +186,7 @@ internal static class SmokeTestRunner
             databasePath, ct);
         await using var marker = connection.CreateCommand();
         marker.CommandText =
-            "SELECT COUNT(*) FROM schema_info WHERE version = 5;";
+            "SELECT COUNT(*) FROM schema_info WHERE version = 6;";
         if (Convert.ToInt32(
                 await marker.ExecuteScalarAsync(ct),
                 CultureInfo.InvariantCulture) != 1)

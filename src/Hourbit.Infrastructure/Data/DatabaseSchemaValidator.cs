@@ -48,6 +48,30 @@ internal static class DatabaseSchemaValidator
         );
         """;
 
+    internal const string CreateTodosVersionSixSql = """
+        CREATE TABLE todos (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL CHECK(length(trim(title)) BETWEEN 1 AND 200),
+            created_at TEXT NOT NULL,
+            due_date TEXT NULL CHECK(
+                due_date IS NULL OR (
+                    length(due_date) = 10 AND
+                    due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+                )
+            ),
+            importance INTEGER NOT NULL CHECK(importance IN (0, 1)),
+            is_completed INTEGER NOT NULL CHECK(is_completed IN (0, 1)),
+            completed_at TEXT NULL,
+            deleted_at TEXT NULL,
+            recurrence_kind INTEGER NULL,
+            recurrence_days_of_week TEXT NULL,
+            CHECK(
+                (is_completed = 0 AND completed_at IS NULL) OR
+                (is_completed = 1 AND completed_at IS NOT NULL)
+            )
+        );
+        """;
+
     internal const string CreateOccurrencesVersionFourSql = """
         CREATE TABLE occurrences (
             id TEXT PRIMARY KEY,
@@ -239,6 +263,13 @@ internal static class DatabaseSchemaValidator
         new("deleted_at", "TEXT", false, false)
     ];
 
+    private static readonly ColumnShape[] TodoColumnsVersionSix =
+    [
+        .. TodoColumnsVersionFour,
+        new("recurrence_kind", "INTEGER", false, false),
+        new("recurrence_days_of_week", "TEXT", false, false)
+    ];
+
     private static readonly ColumnShape[] ActionLogColumns =
     [
         new("id", "TEXT", false, true),
@@ -415,6 +446,39 @@ internal static class DatabaseSchemaValidator
         await ValidateTableAsync(
             connection, transaction, "todos", TodoColumnsVersionFour,
             CreateTodosVersionFourSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "action_log", ActionLogColumns,
+            CreateActionLogVersionFourSql, OccurrenceForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "settings", SettingsColumns,
+            CreateSettingsSql, [], ct);
+        foreach (var index in VersionFiveIndexes)
+            await ValidateIndexAsync(connection, transaction, index, ct);
+        await ValidateForeignKeyCheckAsync(connection, transaction, ct);
+    }
+
+    internal static async Task ValidateVersionSixAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken ct)
+    {
+        await ValidateExactMarkersAsync(
+            connection, transaction, [1, 2, 3, 4, 5, 6], ct);
+        await ValidateTableAsync(
+            connection, transaction, "schema_info", SchemaInfoColumns,
+            CreateSchemaInfoSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "items", ItemColumns,
+            CreateItemsSql, [], ct);
+        await ValidateTableAsync(
+            connection, transaction, "occurrences", OccurrenceVersionFiveColumns,
+            CreateOccurrencesVersionFiveSql, ItemForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "recurrence_rules", RecurrenceColumns,
+            CreateRecurrenceRulesSql, ItemForeignKey, ct);
+        await ValidateTableAsync(
+            connection, transaction, "todos", TodoColumnsVersionSix,
+            CreateTodosVersionSixSql, [], ct);
         await ValidateTableAsync(
             connection, transaction, "action_log", ActionLogColumns,
             CreateActionLogVersionFourSql, OccurrenceForeignKey, ct);

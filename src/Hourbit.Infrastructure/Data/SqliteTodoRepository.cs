@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Data.Common;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
@@ -9,7 +10,7 @@ namespace Hourbit.Infrastructure.Data;
 public sealed class SqliteTodoRepository : ITodoRepository
 {
     private const string SelectColumns =
-        "id, title, created_at, due_date, importance, is_completed, completed_at";
+        "id, title, created_at, due_date, importance, is_completed, completed_at, recurrence_kind, recurrence_days_of_week";
     private readonly string _databasePath;
 
     private SqliteTodoRepository(string databasePath) =>
@@ -96,7 +97,8 @@ public sealed class SqliteTodoRepository : ITodoRepository
             existing.DueDate,
             existing.Importance,
             isCompleted,
-            completedAt);
+            completedAt,
+            existing.Recurrence);
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -155,10 +157,10 @@ public sealed class SqliteTodoRepository : ITodoRepository
         command.CommandText = """
             INSERT INTO todos(
                 id, title, created_at, due_date, importance,
-                is_completed, completed_at)
+                is_completed, completed_at, recurrence_kind, recurrence_days_of_week)
             VALUES (
                 $id, $title, $createdAt, $dueDate, $importance,
-                $isCompleted, $completedAt);
+                $isCompleted, $completedAt, $recurrenceKind, $recurrenceDaysOfWeek);
             """;
         AddParameters(command, item);
         await command.ExecuteNonQueryAsync(ct);
@@ -193,7 +195,9 @@ public sealed class SqliteTodoRepository : ITodoRepository
             UPDATE todos
             SET title = $title,
                 due_date = $dueDate,
-                importance = $importance
+                importance = $importance,
+                recurrence_kind = $recurrenceKind,
+                recurrence_days_of_week = $recurrenceDaysOfWeek
             WHERE id = $id AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$id", item.Id.ToString("D"));
@@ -203,6 +207,7 @@ public sealed class SqliteTodoRepository : ITodoRepository
                 ? DBNull.Value
                 : Format(item.DueDate.Value));
         command.Parameters.AddWithValue("$importance", (int)item.Importance);
+        AddRecurrenceParameters(command, item.Recurrence);
         return command;
     }
 
@@ -219,6 +224,23 @@ public sealed class SqliteTodoRepository : ITodoRepository
             item.CompletedAt is null
                 ? DBNull.Value
                 : Format(item.CompletedAt.Value));
+        AddRecurrenceParameters(command, item.Recurrence);
+    }
+
+    private static void AddRecurrenceParameters(
+        SqliteCommand command,
+        RecurrenceRule? recurrence)
+    {
+        command.Parameters.AddWithValue("$recurrenceKind",
+            recurrence is null ? DBNull.Value : (int)recurrence.Kind);
+        command.Parameters.AddWithValue("$recurrenceDaysOfWeek",
+            recurrence is null
+                ? DBNull.Value
+                : string.Join(
+                    ",",
+                    recurrence.DaysOfWeek
+                        .Select(static day => (int)day)
+                        .Order()));
     }
 
     private static TodoItem ReadTodo(SqliteDataReader reader) =>
@@ -231,7 +253,24 @@ public sealed class SqliteTodoRepository : ITodoRepository
             reader.GetInt32(5) == 1,
             reader.IsDBNull(6)
                 ? null
-                : ParseDateTimeOffset(reader.GetString(6)));
+                : ParseDateTimeOffset(reader.GetString(6)),
+            ReadRecurrence(reader));
+
+    private static RecurrenceRule? ReadRecurrence(SqliteDataReader reader)
+    {
+        if (reader.IsDBNull(7))
+            return null;
+
+        var kind = (RecurrenceKind)reader.GetInt32(7);
+        var daysOfWeek = reader.IsDBNull(8)
+            ? ImmutableHashSet<DayOfWeek>.Empty
+            : reader.GetString(8)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(static value => (DayOfWeek)int.Parse(
+                    value, CultureInfo.InvariantCulture))
+                .ToImmutableHashSet();
+        return new RecurrenceRule(kind, daysOfWeek, TimeOnly.MinValue);
+    }
 
     private static string Format(DateTimeOffset value) =>
         value.ToString("O", CultureInfo.InvariantCulture);

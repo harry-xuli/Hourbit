@@ -49,12 +49,28 @@ public static class DatabaseMigrator
             """;
         await command.ExecuteNonQueryAsync(ct);
 
+        var versionSixMarkers =
+            await DatabaseSchemaValidator.CountVersionMarkersAsync(
+                connection, (SqliteTransaction)transaction, 6, ct);
+        if (versionSixMarkers > 0)
+        {
+            await DatabaseSchemaValidator.ValidateVersionSixAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            await transaction.CommitAsync(ct);
+            return;
+        }
+
         var versionFiveMarkers =
             await DatabaseSchemaValidator.CountVersionMarkersAsync(
                 connection, (SqliteTransaction)transaction, 5, ct);
         if (versionFiveMarkers > 0)
         {
             await DatabaseSchemaValidator.ValidateVersionFiveAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            await UpgradeToVersionSixAsync(command, ct);
+            command.CommandText = "INSERT INTO schema_info(version) VALUES (6);";
+            await command.ExecuteNonQueryAsync(ct);
+            await DatabaseSchemaValidator.ValidateVersionSixAsync(
                 connection, (SqliteTransaction)transaction, ct);
             await transaction.CommitAsync(ct);
             return;
@@ -86,6 +102,11 @@ public static class DatabaseMigrator
             command.CommandText = "INSERT INTO schema_info(version) VALUES (5);";
             await command.ExecuteNonQueryAsync(ct);
             await DatabaseSchemaValidator.ValidateVersionFiveAsync(
+                connection, (SqliteTransaction)transaction, ct);
+            await UpgradeToVersionSixAsync(command, ct);
+            command.CommandText = "INSERT INTO schema_info(version) VALUES (6);";
+            await command.ExecuteNonQueryAsync(ct);
+            await DatabaseSchemaValidator.ValidateVersionSixAsync(
                 connection, (SqliteTransaction)transaction, ct);
             await transaction.CommitAsync(ct);
             return;
@@ -213,6 +234,12 @@ public static class DatabaseMigrator
         command.CommandText = "INSERT INTO schema_info(version) VALUES (5);";
         await command.ExecuteNonQueryAsync(ct);
         await DatabaseSchemaValidator.ValidateVersionFiveAsync(
+            connection, (SqliteTransaction)transaction, ct);
+
+        await UpgradeToVersionSixAsync(command, ct);
+        command.CommandText = "INSERT INTO schema_info(version) VALUES (6);";
+        await command.ExecuteNonQueryAsync(ct);
+        await DatabaseSchemaValidator.ValidateVersionSixAsync(
             connection, (SqliteTransaction)transaction, ct);
 
         await transaction.CommitAsync(ct);
@@ -345,6 +372,17 @@ public static class DatabaseMigrator
                     StringComparison.Ordinal);
             await command.ExecuteNonQueryAsync(ct);
         }
+    }
+
+    private static async Task UpgradeToVersionSixAsync(
+        SqliteCommand command,
+        CancellationToken ct)
+    {
+        command.CommandText = """
+            ALTER TABLE todos ADD COLUMN recurrence_kind INTEGER NULL;
+            ALTER TABLE todos ADD COLUMN recurrence_days_of_week TEXT NULL;
+            """;
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     private static async Task<bool> HasColumnAsync(SqliteConnection connection, SqliteTransaction transaction,

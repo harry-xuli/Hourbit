@@ -76,6 +76,50 @@ public sealed class TodoServiceTests
     }
 
     [Fact]
+    public async Task Completing_a_recurring_todo_generates_the_next_occurrence()
+    {
+        var todos = new FakeTodoRepository();
+        var recurring = new TodoItem(
+            Guid.NewGuid(), "每天锻炼", Now.AddHours(-1),
+            new DateOnly(2026, 8, 3), ReminderImportance.Normal, false, null,
+            RecurrenceRule.Daily(TimeOnly.MinValue));
+        await todos.SaveAsync(recurring, default);
+        var service = CreateService(todos: todos);
+
+        await service.CompleteAsync(recurring.Id, default);
+
+        var all = await todos.GetAllAsync(default);
+        Assert.Equal(2, all.Count);
+        var completed = all.Single(item => item.Id == recurring.Id);
+        Assert.True(completed.IsCompleted);
+        var next = all.Single(item => item.Id != recurring.Id);
+        Assert.False(next.IsCompleted);
+        Assert.Equal("每天锻炼", next.Title);
+        Assert.Equal(new DateOnly(2026, 8, 4), next.DueDate);
+        Assert.Equal(RecurrenceKind.Daily, next.Recurrence!.Kind);
+    }
+
+    [Fact]
+    public async Task Completing_a_weekdays_recurring_todo_skips_the_weekend()
+    {
+        var todos = new FakeTodoRepository();
+        var recurring = new TodoItem(
+            Guid.NewGuid(), "工作日复盘", Now.AddHours(-1),
+            new DateOnly(2026, 8, 7), // Friday
+            ReminderImportance.Normal, false, null,
+            RecurrenceRule.Weekdays(TimeOnly.MinValue));
+        await todos.SaveAsync(recurring, default);
+        var service = CreateService(todos: todos);
+
+        await service.CompleteAsync(recurring.Id, default);
+
+        var next = (await todos.GetAllAsync(default))
+            .Single(item => item.Id != recurring.Id);
+        Assert.Equal(new DateOnly(2026, 8, 10), next.DueDate); // next Monday
+        Assert.Equal(RecurrenceKind.Weekdays, next.Recurrence!.Kind);
+    }
+
+    [Fact]
     public async Task Edit_and_complete_interleaving_preserves_both_detail_and_completion_changes()
     {
         var inner = new FakeTodoRepository();

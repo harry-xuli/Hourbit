@@ -24,7 +24,8 @@ public sealed record ReminderDraft(
 public sealed record TodoDraft(
     string Title,
     DateOnly? DueDate,
-    ReminderImportance Importance) : ItemDraft(Title, Importance);
+    ReminderImportance Importance,
+    RecurrenceRule? Recurrence = null) : ItemDraft(Title, Importance);
 
 public sealed record ParseChoice(string Label, ItemDraft Draft);
 

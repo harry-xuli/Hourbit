@@ -413,7 +413,7 @@ internal sealed record VerifiedBackup(
 internal static class BackupPackage
 {
     internal const int FormatVersion = 1;
-    internal const int CurrentSchemaVersion = 5;
+    internal const int CurrentSchemaVersion = 6;
     internal const long MaximumDatabaseBytes = 1024L * 1024L * 1024L;
     private const long MaximumManifestBytes = 64L * 1024L;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -587,6 +587,11 @@ internal static class BackupPackage
             else if (version == 5)
             {
                 await DatabaseSchemaValidator.ValidateVersionFiveAsync(
+                    connection, null, ct);
+            }
+            else if (version == 6)
+            {
+                await DatabaseSchemaValidator.ValidateVersionSixAsync(
                     connection, null, ct);
             }
             return version;

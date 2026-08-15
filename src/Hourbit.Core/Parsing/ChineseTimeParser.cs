@@ -169,13 +169,14 @@ public sealed class ChineseTimeParser : IChineseTimeParser
 
         if (recurrenceMatch.Success && !clockMatch.Success)
         {
-            var todoTitle = ExtractTitle(RemoveMatches(normalized, dateMatch));
+            TryExtractRecurrence(recurrenceMatch, out var todoRecurrence);
+            var todoTitle = ExtractTitle(RemoveMatches(normalized, recurrenceMatch, dateMatch));
             if (!TryValidateTitle(todoTitle, originalText, out var todoTitleInvalid))
             {
                 return todoTitleInvalid;
             }
 
-            return Todo(todoTitle, date);
+            return Todo(todoTitle, date, todoRecurrence);
         }
 
         RecurrenceRule? recurrenceRule = null;
@@ -775,8 +776,11 @@ public sealed class ChineseTimeParser : IChineseTimeParser
     private static ParseResult.Success Success(string title, DateTimeOffset due, RecurrenceRule? recurrence) =>
         new(new ReminderDraft(title, due, ReminderKind.Countdown, ReminderImportance.Normal, recurrence));
 
-    private static ParseResult.Success Todo(string title, DateOnly? dueDate) =>
-        new(new TodoDraft(title, dueDate, ReminderImportance.Normal));
+    private static ParseResult.Success Todo(
+        string title,
+        DateOnly? dueDate,
+        RecurrenceRule? recurrence = null) =>
+        new(new TodoDraft(title, dueDate, ReminderImportance.Normal, recurrence));
 
     private static string RemoveMatches(string text, params Match[] matches)
     {

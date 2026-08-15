@@ -9,7 +9,8 @@ public sealed record TodoItem
         DateOnly? DueDate,
         ReminderImportance Importance,
         bool IsCompleted,
-        DateTimeOffset? CompletedAt)
+        DateTimeOffset? CompletedAt,
+        RecurrenceRule? Recurrence = null)
     {
         ArgumentNullException.ThrowIfNull(Title);
         var normalizedTitle = Title.Trim();
@@ -31,6 +32,7 @@ public sealed record TodoItem
         this.Importance = Importance;
         this.IsCompleted = IsCompleted;
         this.CompletedAt = CompletedAt;
+        this.Recurrence = Recurrence;
     }
 
     public Guid Id { get; }
@@ -40,4 +42,5 @@ public sealed record TodoItem
     public ReminderImportance Importance { get; }
     public bool IsCompleted { get; }
     public DateTimeOffset? CompletedAt { get; }
+    public RecurrenceRule? Recurrence { get; }
 }

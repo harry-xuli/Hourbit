@@ -228,9 +228,6 @@ public sealed class ChineseTimeParserTests
     [Theory]
     [InlineData("买牛奶", "买牛奶")]
     [InlineData("提醒我买牛奶", "买牛奶")]
-    [InlineData("每天锻炼", "每天锻炼")]
-    [InlineData("每周一整理房间", "每周一整理房间")]
-    [InlineData("每周五晚上看书", "每周五晚上看书")]
     public void Returns_an_undated_non_recurring_todo_when_no_date_or_clock_is_present(
         string text, string expectedTitle)
     {
@@ -239,6 +236,31 @@ public sealed class ChineseTimeParserTests
         Assert.Equal(expectedTitle, draft.Title);
         Assert.Null(draft.DueDate);
         Assert.Equal(ReminderImportance.Normal, draft.Importance);
+        Assert.Null(draft.Recurrence);
+    }
+
+    [Theory]
+    [InlineData("每天锻炼", "锻炼", RecurrenceKind.Daily)]
+    [InlineData("每周一整理房间", "整理房间", RecurrenceKind.Weekly)]
+    [InlineData("每个工作日复盘", "复盘", RecurrenceKind.Weekdays)]
+    public void Returns_a_recurring_todo_when_a_recurrence_prefix_has_no_clock(
+        string text, string expectedTitle, RecurrenceKind kind)
+    {
+        var draft = Todo(text);
+
+        Assert.Equal(expectedTitle, draft.Title);
+        Assert.Null(draft.DueDate);
+        Assert.Equal(ReminderImportance.Normal, draft.Importance);
+        Assert.Equal(kind, draft.Recurrence!.Kind);
+    }
+
+    [Fact]
+    public void Weekly_recurring_todo_preserves_the_selected_weekday()
+    {
+        var draft = Todo("每周一整理房间");
+
+        Assert.Equal(RecurrenceKind.Weekly, draft.Recurrence!.Kind);
+        Assert.Equal([DayOfWeek.Monday], draft.Recurrence.DaysOfWeek);
     }
 
     [Theory]

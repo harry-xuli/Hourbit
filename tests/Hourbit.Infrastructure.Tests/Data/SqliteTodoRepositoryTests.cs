@@ -65,6 +65,28 @@ public sealed class SqliteTodoRepositoryTests
     }
 
     [Fact]
+    public async Task Recurring_todo_round_trips_the_recurrence_rule()
+    {
+        using var temp = new TempDirectory();
+        var repository = await SqliteTodoRepository.OpenAsync(
+            Path.Combine(temp.Path, "moment.db"), default);
+        var todo = new TodoItem(
+            Guid.NewGuid(), "每周复盘", CreatedAt,
+            new DateOnly(2026, 8, 7), ReminderImportance.Normal, false, null,
+            RecurrenceRule.Weekly(
+                [DayOfWeek.Monday, DayOfWeek.Friday], TimeOnly.MinValue));
+
+        await repository.SaveAsync(todo, default);
+
+        var stored = await repository.GetAsync(todo.Id, default);
+        Assert.Equal(todo, stored);
+        Assert.Equal(RecurrenceKind.Weekly, stored!.Recurrence!.Kind);
+        Assert.Equal(
+            [DayOfWeek.Monday, DayOfWeek.Friday],
+            stored.Recurrence.DaysOfWeek.OrderBy(static day => day));
+    }
+
+    [Fact]
     public async Task Crud_and_completion_operations_are_consistent()
     {
         using var temp = new TempDirectory();
@@ -315,10 +337,16 @@ public sealed class SqliteTodoRepositoryTests
             "SELECT COUNT(*) FROM schema_info WHERE version = 4;"));
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM schema_info WHERE version = 5;"));
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 6;"));
         Assert.True(await ColumnExistsAsync(
             connection, "occurrences", "deleted_at"));
         Assert.True(await ColumnExistsAsync(
             connection, "todos", "deleted_at"));
+        Assert.True(await ColumnExistsAsync(
+            connection, "todos", "recurrence_kind"));
+        Assert.True(await ColumnExistsAsync(
+            connection, "todos", "recurrence_days_of_week"));
         Assert.True(await ColumnExistsAsync(
             connection, "occurrences", "delivery_attempts"));
         Assert.True(await ColumnExistsAsync(
@@ -396,6 +424,8 @@ public sealed class SqliteTodoRepositoryTests
             "SELECT COUNT(*) FROM schema_info WHERE version = 4;"));
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM schema_info WHERE version = 5;"));
+        Assert.Equal(1, await ScalarIntAsync(connection,
+            "SELECT COUNT(*) FROM schema_info WHERE version = 6;"));
         Assert.Equal(1, await ScalarIntAsync(connection,
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'todos';"));
         Assert.Equal(1, await ScalarIntAsync(connection, """
@@ -975,6 +1005,9 @@ public sealed class SqliteTodoRepositoryTests
                 StringComparison.Ordinal)
             .Replace("REFERENCES occurrences(id)",
                 "REFERENCES occurrences_v4_fixture(id)", StringComparison.Ordinal);
+        var todosSql = DatabaseSchemaValidator.CreateTodosVersionFourSql
+            .Replace("CREATE TABLE todos", "CREATE TABLE todos_v4_fixture",
+                StringComparison.Ordinal);
         command.CommandText = $"""
             {occurrencesSql}
             INSERT INTO occurrences_v4_fixture(
@@ -990,7 +1023,17 @@ public sealed class SqliteTodoRepositoryTests
             DROP TABLE occurrences;
             ALTER TABLE occurrences_v4_fixture RENAME TO occurrences;
             ALTER TABLE action_log_v4_fixture RENAME TO action_log;
-            DELETE FROM schema_info WHERE version = 5;
+            {todosSql}
+            INSERT INTO todos_v4_fixture(
+                id, title, created_at, due_date, importance,
+                is_completed, completed_at, deleted_at)
+            SELECT
+                id, title, created_at, due_date, importance,
+                is_completed, completed_at, deleted_at
+            FROM todos;
+            DROP TABLE todos;
+            ALTER TABLE todos_v4_fixture RENAME TO todos;
+            DELETE FROM schema_info WHERE version IN (5, 6);
             DROP INDEX IF EXISTS ix_occurrences_active_delivery_retry;
             """;
         await command.ExecuteNonQueryAsync();

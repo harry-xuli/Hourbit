@@ -45,7 +45,7 @@ public sealed class TodoService(
         ValidateTodoDraft(draft);
         var item = new TodoItem(
             Guid.NewGuid(), draft.Title, clock.Now, draft.DueDate,
-            draft.Importance, false, null);
+            draft.Importance, false, null, draft.Recurrence);
         await todoRepository.SaveAsync(item, ct);
         return item;
     }
@@ -62,7 +62,8 @@ public sealed class TodoService(
 
         var edited = new TodoItem(
             current.Id, draft.Title, current.CreatedAt, draft.DueDate,
-            draft.Importance, current.IsCompleted, current.CompletedAt);
+            draft.Importance, current.IsCompleted, current.CompletedAt,
+            draft.Recurrence);
         await todoRepository.UpdateAsync(edited, ct);
     }
 
@@ -72,8 +73,17 @@ public sealed class TodoService(
         if (current is null || current.IsCompleted)
             return;
 
-        await todoRepository.SetCompletedAsync(
-            todoId, true, clock.Now, ct);
+        var now = clock.Now;
+        await todoRepository.SetCompletedAsync(todoId, true, now, ct);
+
+        if (current.Recurrence is { } recurrence)
+        {
+            var nextDueDate = NextTodoDueDate(current.DueDate, recurrence);
+            var next = new TodoItem(
+                Guid.NewGuid(), current.Title, now, nextDueDate,
+                current.Importance, false, null, current.Recurrence);
+            await todoRepository.SaveAsync(next, ct);
+        }
     }
 
     public Task DeleteAsync(Guid todoId, CancellationToken ct) =>
@@ -170,7 +180,40 @@ public sealed class TodoService(
         {
             throw new ArgumentOutOfRangeException(nameof(draft));
         }
+
+        if (draft.Recurrence is not null)
+            ValidateRecurrence(draft.Recurrence);
     }
+
+    private DateOnly NextTodoDueDate(
+        DateOnly? current,
+        RecurrenceRule recurrence)
+    {
+        var from = current ?? LocalToday;
+        for (var offset = 1; offset <= 14; offset++)
+        {
+            var candidate = from.AddDays(offset);
+            if (AllowsTodoDay(recurrence, candidate.DayOfWeek))
+                return candidate;
+        }
+
+        throw new InvalidOperationException(
+            "No recurring todo occurrence found within 14 days.");
+    }
+
+    private static bool AllowsTodoDay(
+        RecurrenceRule recurrence,
+        DayOfWeek dayOfWeek) => recurrence.Kind switch
+    {
+        RecurrenceKind.Daily => true,
+        RecurrenceKind.Weekdays => dayOfWeek is >= DayOfWeek.Monday and <= DayOfWeek.Friday,
+        RecurrenceKind.Weekly => recurrence.DaysOfWeek.Contains(dayOfWeek),
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(recurrence), recurrence.Kind, "Unknown recurrence kind.")
+    };
+
+    private DateOnly LocalToday => DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTime(clock.Now, _schedulingTimeZone).DateTime);
 
     private static void ValidateReminderDraft(ReminderDraft draft)
     {
