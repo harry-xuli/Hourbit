@@ -61,3 +61,17 @@ jobs:
             artifacts/Hourbit-Portable-x64.zip
             artifacts/Hourbit-Portable-x64.zip.sha256
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release create v0.6.0 `
+            "artifacts/Hourbit-Setup-x64.exe" `
+            "artifacts/Hourbit-Setup-x64.exe.sha256" `
+            "artifacts/Hourbit-Portable-x64.zip" `
+            "artifacts/Hourbit-Portable-x64.zip.sha256" `
+            --repo harry-xuli/Hourbit `
+            --title "Hourbit 日程 v0.6.0" `
+            --notes "Hourbit 日程 v0.6.0：中英文界面本地化、重复待办（schema v6）、数据重置、PDF/配对导出、搜索与未来日期导航。CI 构建产物未签名（NotSigned）。"
