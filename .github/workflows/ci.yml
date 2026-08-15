@@ -43,9 +43,21 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress --yes
 
+      - name: Import code-signing certificate
+        shell: pwsh
+        env:
+          CODE_SIGNING_PFX: ${{ secrets.CODE_SIGNING_PFX }}
+          CODE_SIGNING_PFX_PASSWORD: ${{ secrets.CODE_SIGNING_PFX_PASSWORD }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:CODE_SIGNING_PFX))
+          $password = ConvertTo-SecureString $env:CODE_SIGNING_PFX_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          Write-Host "Imported code-signing certificate."
+
       - name: Build release artifacts
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -SkipSign -SkipTests
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -SkipTests
 
       - name: Run packaged smoke test
         shell: pwsh
@@ -75,4 +87,4 @@ jobs:
             "artifacts/Hourbit-Portable-x64.zip.sha256" `
             --repo harry-xuli/Hourbit `
             --title "Hourbit 日程 $tag" `
-            --notes "Hourbit 日程 $tag：中英文界面本地化、重复待办（schema v6）、数据重置、PDF/配对导出、搜索与未来日期导航；修复分析窗口日期选择器的语言绑定导致的启动崩溃。CI 构建产物未签名（NotSigned）。"
+            --notes "Hourbit 日程 $tag：中英文界面本地化、重复待办（schema v6）、数据重置、PDF/配对导出、搜索与未来日期导航；修复分析窗口日期选择器的语言绑定导致的启动崩溃。已使用个人代码签名证书签名。"
