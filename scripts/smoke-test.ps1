@@ -223,8 +223,10 @@ try {
     $exitCode = $process.ExitCode
     if ($exitCode -ne 0) {
         $stderr = if (Test-Path $stderrPath) { Get-Content $stderrPath -Raw } else { '' }
-        $stdout = if (Test-Path $stdoutPath) { Get-Content $stdoutPath -Raw } else { '' }
-        throw "Portable self-test exited with code $exitCode.`nSTDERR: $stderr`nSTDOUT: $stdout"
+        Write-Output '--- self-test stderr begin ---'
+        Write-Output $stderr
+        Write-Output '--- self-test stderr end ---'
+        throw "Portable self-test exited with code $exitCode."
     }
 
     $resultPath = Join-Path $outputDirectory 'self-test.jsonl'
