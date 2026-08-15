@@ -75,7 +75,19 @@ internal static class SmokeTestRunner
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Self-test failed: {exception}");
+            var message = $"Self-test failed: {exception}";
+            Console.Error.WriteLine(message);
+            try
+            {
+                await File.WriteAllTextAsync(
+                    Path.Combine(outputPath, "self-test-failure.txt"),
+                    message + Environment.NewLine + exception,
+                    ct);
+            }
+            catch
+            {
+                // Diagnostics must not mask the original failure.
+            }
             return 1;
         }
         finally
