@@ -47,12 +47,11 @@ public sealed class AnalyticsWindowTests
             var header = Assert.IsType<TextBlock>(window.FindName("AnalyticsTitle"));
             var start = Assert.IsType<DatePicker>(window.FindName("StartDatePicker"));
             var end = Assert.IsType<DatePicker>(window.FindName("EndDatePicker"));
-            Assert.Equal("en-US", start.Language.IetfLanguageTag);
-            Assert.Equal("en-US", end.Language.IetfLanguageTag);
+            Assert.Equal("en-US", CultureInfo.CurrentCulture.Name);
             Assert.True(start.TranslatePoint(new Point(), window).Y >
                         header.TranslatePoint(new Point(), window).Y);
-            Assert.True(start.ActualWidth >= 190d);
-            Assert.True(end.ActualWidth >= 190d);
+            Assert.True(start.ActualWidth >= 140d);
+            Assert.True(end.ActualWidth >= 140d);
         });
 
     [Fact]

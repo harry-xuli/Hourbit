@@ -69,14 +69,12 @@
                                Margin="16,0,7,0" VerticalAlignment="Center" />
                     <DatePicker x:Name="StartDatePicker" Grid.Column="4"
                                 SelectedDate="{Binding CustomStartDate, Mode=TwoWay}"
-                                Language="{Binding UiLanguageTag}"
                                 automation:AutomationProperties.Name="{Binding FromText}"
                                 MinWidth="140" MinHeight="38" />
                     <TextBlock x:Name="ToLabel" Grid.Column="5" Text="{Binding ToText}"
                                Margin="12,0,7,0" VerticalAlignment="Center" />
                     <DatePicker x:Name="EndDatePicker" Grid.Column="6"
                                 SelectedDate="{Binding CustomEndDate, Mode=TwoWay}"
-                                Language="{Binding UiLanguageTag}"
                                 automation:AutomationProperties.Name="{Binding ToText}"
                                 MinWidth="140" MinHeight="38" />
                     <Button x:Name="ApplyRangeButton" Grid.Column="7"

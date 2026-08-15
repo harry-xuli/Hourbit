@@ -1,4 +1,3 @@
-using System.Windows.Markup;
 using Hourbit.App.Commands;
 using Hourbit.App.Localization;
 
@@ -6,41 +5,17 @@ namespace Hourbit.App.Timeline;
 
 public partial class DatePickerWindow : System.Windows.Window
 {
-    private readonly ILocalizationService _localization;
-
     public DatePickerWindow(DateOnly current, ILocalizationService localization)
     {
         ArgumentNullException.ThrowIfNull(localization);
-        _localization = localization;
         InitializeComponent();
         DataContext = new DatePickerDialogViewModel(localization);
-        ApplyLanguage();
         DateInput.SelectedDate = current.ToDateTime(TimeOnly.MinValue);
-        _localization.LanguageChanged += OnLanguageChanged;
-        Closed += OnClosed;
     }
 
     public DateOnly? SelectedDate => DateInput.SelectedDate is { } date
         ? DateOnly.FromDateTime(date)
         : null;
-
-    private void OnLanguageChanged(object? sender, EventArgs e)
-    {
-        if (Dispatcher.CheckAccess())
-            ApplyLanguage();
-        else
-            Dispatcher.Invoke(ApplyLanguage);
-    }
-
-    private void ApplyLanguage()
-    {
-        var language = XmlLanguage.GetLanguage(_localization.LanguageTag);
-        Language = language;
-        DateInput.Language = language;
-    }
-
-    private void OnClosed(object? sender, EventArgs e) =>
-        _localization.LanguageChanged -= OnLanguageChanged;
 
     private void OnAccept(object sender, System.Windows.RoutedEventArgs e)
     {

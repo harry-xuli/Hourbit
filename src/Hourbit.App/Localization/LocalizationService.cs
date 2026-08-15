@@ -10,6 +10,7 @@ public sealed class LocalizationService : ILocalizationService
             ?? (windowsCulture.TwoLetterISOLanguageName.Equals("zh", StringComparison.OrdinalIgnoreCase)
                 ? UiLanguage.ZhCn
                 : UiLanguage.EnUs);
+        ApplyCulture();
     }
 
     public event EventHandler? LanguageChanged;
@@ -33,7 +34,19 @@ public sealed class LocalizationService : ILocalizationService
         }
 
         CurrentLanguage = language;
+        ApplyCulture();
         LanguageChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    // WPF controls (DatePicker/Calendar) fall back to the thread's current
+    // culture when their xml:lang is not set, so keep the thread culture in
+    // sync with the app language instead of setting the Language property on
+    // each control (which breaks the Calendar popup).
+    private void ApplyCulture()
+    {
+        var culture = CurrentCulture;
+        CultureInfo.CurrentCulture = culture;
+        CultureInfo.CurrentUICulture = culture;
     }
 
     private static UiLanguage? ParsePersisted(string? code) => code switch

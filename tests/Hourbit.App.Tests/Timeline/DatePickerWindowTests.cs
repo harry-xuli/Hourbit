@@ -20,8 +20,8 @@ public sealed class DatePickerWindowTests
             Assert.Equal("Choose date", window.Title);
             Assert.Equal("Which day do you want to view?",
                 Assert.IsType<TextBlock>(window.FindName("DatePickerHeading")).Text);
-            Assert.Equal("en-US",
-                Assert.IsType<DatePicker>(window.FindName("DateInput")).Language.IetfLanguageTag);
+            Assert.IsType<DatePicker>(window.FindName("DateInput"));
+            Assert.Equal("en-US", CultureInfo.CurrentCulture.Name);
         });
 
     [Fact]
@@ -37,7 +37,7 @@ public sealed class DatePickerWindowTests
             Assert.Equal("选择日期", window.Title);
             Assert.Equal("查看哪一天？",
                 Assert.IsType<TextBlock>(window.FindName("DatePickerHeading")).Text);
-            Assert.Equal("zh-CN",
-                Assert.IsType<DatePicker>(window.FindName("DateInput")).Language.IetfLanguageTag);
+            Assert.IsType<DatePicker>(window.FindName("DateInput"));
+            Assert.Equal("zh-CN", CultureInfo.CurrentCulture.Name);
         });
 }

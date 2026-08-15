@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Collections.Immutable;
-using System.Windows.Markup;
 using Hourbit.App.Commands;
 using Hourbit.App.Localization;
 using Hourbit.Core.Analytics;
@@ -112,7 +111,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     public string ToText => Translate("Analytics.To");
     public string ApplyText => Translate("Analytics.Apply");
     public string ExportText => Translate("Analytics.Export");
-    public XmlLanguage UiLanguageTag => XmlLanguage.GetLanguage(_localization.LanguageTag);
+    public string UiLanguageTag => _localization.LanguageTag;
     public string LoadingText => Translate("Analytics.Loading");
     public string CompletedText => Translate("Analytics.Completed");
     public string FuturePlannedText => Translate("Analytics.Future");
