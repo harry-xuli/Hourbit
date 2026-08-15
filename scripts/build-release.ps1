@@ -295,10 +295,10 @@ Push-Location $repositoryRoot
 try {
     # WPF and scheduler timing tests share process-global resources. Keep the
     # release gate deterministic instead of running all test projects in parallel.
-    & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false
+    & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false --blame-hang --blame-hang-timeout 90s
     if ($LASTEXITCODE -ne 0) {
         Write-Output 'First release test pass failed; retrying once.'
-        & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false
+        & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false --blame-hang --blame-hang-timeout 90s
         if ($LASTEXITCODE -ne 0) {
             throw "Release tests failed with exit code $LASTEXITCODE."
         }
