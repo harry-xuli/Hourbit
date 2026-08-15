@@ -4,7 +4,7 @@
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         xmlns:domain="clr-namespace:Hourbit.Core.Domain;assembly=Hourbit.Core"
         xmlns:loc="clr-namespace:Hourbit.App.Localization"
-        Title="{loc:Alert.Title}"
+        Title="{loc:Loc Alert.Title}"
         Width="720"
         SizeToContent="Height"
         MinWidth="520"
@@ -14,7 +14,7 @@
         ShowInTaskbar="True"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
-        automation:AutomationProperties.Name="{loc:Alert.WindowAccessibleName}"
+        automation:AutomationProperties.Name="{loc:Loc Alert.WindowAccessibleName}"
         Closing="OnClosing"
         PreviewKeyDown="OnPreviewKeyDown">
     <ScrollViewer x:Name="AlertScrollViewer"
@@ -34,7 +34,7 @@
                 <TextBlock Text="⚠" FontFamily="Segoe UI Symbol"
                            FontSize="28" Margin="0,0,12,0"
                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
-                <TextBlock Text="{loc:Alert.Title}" FontSize="25" FontWeight="SemiBold"
+                <TextBlock Text="{loc:Loc Alert.Title}" FontSize="25" FontWeight="SemiBold"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
             </StackPanel>
@@ -64,7 +64,7 @@
             </Border>
 
             <StackPanel Grid.Row="3">
-                <TextBlock Text="{loc:Alert.SnoozeLabel}"
+                <TextBlock Text="{loc:Loc Alert.SnoozeLabel}"
                            FontWeight="SemiBold"
                            Margin="0,0,0,10"
                            Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}" />
@@ -74,10 +74,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze5}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="{loc:Alert.Snooze5AccessibleName}">
+                            automation:AutomationProperties.Name="{loc:Loc Alert.Snooze5AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="{loc:Alert.FiveMinutes}" />
+                            <TextBlock Text="{loc:Loc Alert.FiveMinutes}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="Snooze10Button"
@@ -85,10 +85,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze10}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="{loc:Alert.Snooze10AccessibleName}">
+                            automation:AutomationProperties.Name="{loc:Loc Alert.Snooze10AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="{loc:Alert.TenMinutes}" />
+                            <TextBlock Text="{loc:Loc Alert.TenMinutes}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="Snooze30Button"
@@ -96,10 +96,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze30}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="{loc:Alert.Snooze30AccessibleName}">
+                            automation:AutomationProperties.Name="{loc:Loc Alert.Snooze30AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="{loc:Alert.ThirtyMinutes}" />
+                            <TextBlock Text="{loc:Loc Alert.ThirtyMinutes}" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="Snooze60Button"
@@ -107,10 +107,10 @@
                             Style="{StaticResource SecondaryButton}"
                             Tag="{x:Static domain:ImportantAlertAction.Snooze60}"
                             Click="OnActionClick"
-                            automation:AutomationProperties.Name="{loc:Alert.Snooze60AccessibleName}">
+                            automation:AutomationProperties.Name="{loc:Loc Alert.Snooze60AccessibleName}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="◷" Margin="0,0,8,0" />
-                            <TextBlock Text="{loc:Alert.SixtyMinutes}" />
+                            <TextBlock Text="{loc:Loc Alert.SixtyMinutes}" />
                         </StackPanel>
                     </Button>
                 </UniformGrid>
@@ -127,10 +127,10 @@
                         Style="{StaticResource SecondaryButton}"
                         Tag="{x:Static domain:ImportantAlertAction.Ignore}"
                         Click="OnActionClick"
-                        automation:AutomationProperties.Name="{loc:Alert.IgnoreAccessibleName}">
+                        automation:AutomationProperties.Name="{loc:Loc Alert.IgnoreAccessibleName}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="⊘" Margin="0,0,8,0" />
-                        <TextBlock Text="{loc:Alert.Ignore}" />
+                        <TextBlock Text="{loc:Loc Alert.Ignore}" />
                     </StackPanel>
                 </Button>
                 <Button x:Name="CompleteButton"
@@ -141,11 +141,11 @@
                         Click="OnActionClick"
                         Background="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
                         BorderBrush="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"
-                        automation:AutomationProperties.Name="{loc:Alert.CompleteAccessibleName}">
+                        automation:AutomationProperties.Name="{loc:Loc Alert.CompleteAccessibleName}">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="✓" Margin="0,0,8,0"
                                    Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
-                        <TextBlock Text="{loc:Alert.Complete}"
+                        <TextBlock Text="{loc:Loc Alert.Complete}"
                                    Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
                     </StackPanel>
                 </Button>
