@@ -27,19 +27,6 @@ jobs:
             dotnet test Hourbit.slnx --configuration Release --maxcpucount:1 --blame-hang --blame-hang-timeout 120s --logger "console;verbosity=detailed"
           }
 
-      - name: Install dotnet-dump
-        if: failure()
-        run: dotnet tool install --global dotnet-dump
-
-      - name: Analyze hang dump
-        if: failure()
-        shell: pwsh
-        run: |
-          $dump = Get-ChildItem -Path tests/Hourbit.App.Tests/TestResults -Recurse -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $dump) { Write-Host "No hang dump found."; exit 0 }
-          Write-Host "Analyzing $($dump.FullName)"
-          dotnet-dump analyze $dump.FullName --command "clrstack -all" --command "exit" 2>&1 | Out-String
-
   release:
     name: Package release artifacts
     if: startsWith(github.ref, 'refs/tags/v')
@@ -80,11 +67,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          gh release create v0.6.0 `
+          $tag = "$env:GITHUB_REF_NAME"
+          gh release create $tag `
             "artifacts/Hourbit-Setup-x64.exe" `
             "artifacts/Hourbit-Setup-x64.exe.sha256" `
             "artifacts/Hourbit-Portable-x64.zip" `
             "artifacts/Hourbit-Portable-x64.zip.sha256" `
             --repo harry-xuli/Hourbit `
-            --title "Hourbit 日程 v0.6.0" `
-            --notes "Hourbit 日程 v0.6.0：中英文界面本地化、重复待办（schema v6）、数据重置、PDF/配对导出、搜索与未来日期导航。CI 构建产物未签名（NotSigned）。"
+            --title "Hourbit 日程 $tag" `
+            --notes "Hourbit 日程 $tag：中英文界面本地化、重复待办（schema v6）、数据重置、PDF/配对导出、搜索与未来日期导航；修复分析窗口日期选择器的语言绑定导致的启动崩溃。CI 构建产物未签名（NotSigned）。"

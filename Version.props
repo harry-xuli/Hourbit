@@ -2,7 +2,7 @@
   <PropertyGroup>
     <ProductName>Hourbit 日程</ProductName>
     <ExecutableName>Hourbit</ExecutableName>
-    <SemanticVersion>0.6.0</SemanticVersion>
+    <SemanticVersion>0.6.1</SemanticVersion>
     <ReleaseDate>2026-08-15</ReleaseDate>
   </PropertyGroup>
 </Project>
