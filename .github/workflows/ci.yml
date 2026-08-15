@@ -27,6 +27,15 @@ jobs:
             dotnet test Hourbit.slnx --configuration Release --maxcpucount:1 --blame-hang --blame-hang-timeout 120s --logger "console;verbosity=detailed"
           }
 
+      - name: Upload hang dumps on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hang-dumps
+          path: |
+            tests/**/TestResults/**/*
+          if-no-files-found: ignore
+
   release:
     name: Package release artifacts
     if: startsWith(github.ref, 'refs/tags/v')
