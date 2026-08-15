@@ -10,6 +10,13 @@ v0.3.0 已发布。v0.4.0 功能与语言/日历 follow-up 收尾已完成并推
 
 ## 已完成
 
+### 分析报告 PDF/配对导出（已提交并推送）
+
+- `PdfReportExporter` 生成中文 PDF（元数据、KPI、分布、趋势、隐私说明）；
+- `ReportExportService` 从同一快照原子写出 PDF + CSV，失败清理部分产物；
+- 分析窗口新增「导出报告」按钮（隐私模式选择 + 保存对话框）；
+- 覆盖测试：PDF 结构/中文编码、匿名说明、原子写出与失败清理。
+
 ### 数据重置（已提交并推送）
 
 - `DataResetRequest` 请求文件（原子写入、JSON、30 分钟有效期）；
@@ -45,10 +52,9 @@ v0.3.0 已发布。v0.4.0 功能与语言/日历 follow-up 收尾已完成并推
 
 ## 待完成（合并进 v0.6.0）
 
-1. 分析报告：PDF 导出、配对导出 UI（完整/匿名隐私模式）、报告端到端（Task 8）；
-2. 数据生命周期 smoke（Task 5：`reset-backup-restorable` 等事件）；
-3. CompositionRoot 重构、产物瘦身、高 DPI 目检清单；
-4. 版本 0.6.0 签名发布：全量测试 → build-release（含签名）→ packaged smoke → tag `v0.6.0` → GitHub Release。
+1. 报告端到端与数据生命周期 smoke（Task 5/8：`reset-backup-restorable`、PDF/CSV/UI 同快照校验）；
+2. CompositionRoot 重构、产物瘦身、高 DPI 目检清单；
+3. 版本 0.6.0 签名发布：全量测试 → build-release（含签名）→ packaged smoke → tag `v0.6.0` → GitHub Release。
 
 ### 已知环境阻塞
 
