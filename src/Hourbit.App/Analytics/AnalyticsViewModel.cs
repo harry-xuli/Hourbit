@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using Hourbit.App.Commands;
 using Hourbit.App.Localization;
 using Hourbit.Core.Analytics;
+using Hourbit.Core.Reporting;
 
 namespace Hourbit.App.Analytics;
 
@@ -39,6 +40,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     private readonly TimeZoneInfo _zone;
     private readonly CultureInfo _culture;
     private readonly ILocalizationService _localization;
+    private readonly ReportExportService? _exportService;
     private CancellationTokenSource? _loadCancellation;
     private long _generation;
     private AnalyticsSnapshot? _snapshot;
@@ -65,13 +67,15 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
         TimeProvider? timeProvider = null,
         TimeZoneInfo? zone = null,
         CultureInfo? culture = null,
-        ILocalizationService? localization = null)
+        ILocalizationService? localization = null,
+        ReportExportService? exportService = null)
     {
         _loadSnapshot = loadSnapshot ?? throw new ArgumentNullException(nameof(loadSnapshot));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _zone = zone ?? TimeZoneInfo.Local;
         _culture = culture ?? CultureInfo.CurrentCulture;
         _localization = localization ?? new LocalizationService(_culture, null);
+        _exportService = exportService;
         _localization.LanguageChanged += OnLanguageChanged;
         _donutSummary = Translate("Analytics.NoDistribution");
         _trendSummary = Translate("Analytics.NoTrend");
@@ -106,6 +110,7 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
     public string FromText => Translate("Analytics.From");
     public string ToText => Translate("Analytics.To");
     public string ApplyText => Translate("Analytics.Apply");
+    public string ExportText => Translate("Analytics.Export");
     public string UiLanguageTag => _localization.LanguageTag;
     public string LoadingText => Translate("Analytics.Loading");
     public string CompletedText => Translate("Analytics.Completed");
@@ -325,6 +330,20 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
         return ApplyCustomRangeAsync();
     }
 
+    public async Task<IReadOnlyList<string>> ExportReportAsync(
+        ReportPrivacyMode privacy,
+        string basePath,
+        CancellationToken ct)
+    {
+        ThrowIfDisposed();
+        var exportService = _exportService ??
+            throw new InvalidOperationException("报告导出未配置。");
+        if (_snapshot is null)
+            throw new InvalidOperationException("没有可导出的报告。");
+
+        return await exportService.ExportAsync(_snapshot, privacy, basePath, ct);
+    }
+
     public void SelectDimension(DonutDimension dimension) =>
         SelectedDimension = dimension;
 
@@ -495,7 +514,8 @@ public sealed class AnalyticsViewModel : ObservableObject, IDisposable
                  {
                      nameof(WindowTitle), nameof(TitleText), nameof(RangeText),
                      nameof(YearText), nameof(FromText), nameof(ToText),
-                     nameof(ApplyText), nameof(UiLanguageTag), nameof(LoadingText),
+                     nameof(ApplyText), nameof(ExportText), nameof(UiLanguageTag),
+                     nameof(LoadingText),
                      nameof(CompletedText),
                      nameof(FuturePlannedText), nameof(OverdueText),
                      nameof(DistributionText), nameof(TrendText), nameof(DimensionText),

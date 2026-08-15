@@ -369,12 +369,17 @@ public sealed class CompositionRoot : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(zone);
         ArgumentNullException.ThrowIfNull(culture);
         var service = new AnalyticsQueryService(query, timeProvider, culture);
+        var metadata = ProductMetadata.FromAssembly(
+            typeof(AnalyticsViewModel).Assembly);
+        var exportService = new ReportExportService(
+            metadata.ProductName, metadata.Version);
         return new AnalyticsViewModel(
             (range, ct) => service.CreateSnapshotAsync(range, zone, ct),
             timeProvider,
             zone,
             culture,
-            localization);
+            localization,
+            exportService);
     }
 
     internal static async Task TryCreateDailyBackupAsync(
