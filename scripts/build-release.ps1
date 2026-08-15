@@ -3,7 +3,8 @@ param(
     [string]$InnoCompiler,
     [switch]$ValidateOnly,
     [string]$ValidationProbePath,
-    [switch]$SkipSign
+    [switch]$SkipSign,
+    [switch]$SkipInstaller
 )
 
 $ErrorActionPreference = 'Stop'
@@ -282,7 +283,7 @@ if (-not [string]::IsNullOrWhiteSpace($ValidationProbePath)) {
     throw '-ValidationProbePath can only be used with -ValidateOnly.'
 }
 
-$resolvedCompiler = Resolve-InnoCompiler
+$resolvedCompiler = if ($SkipInstaller) { $null } else { Resolve-InnoCompiler }
 New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
 
 Push-Location $repositoryRoot
@@ -360,32 +361,43 @@ try {
         -CompressionLevel Optimal `
         -Force
 
-    & $resolvedCompiler `
-        "/DPublishDir=$publishDirectory" `
-        "/DArtifactsDir=$artifactsRoot" `
-        "/DAppVersion=$($releaseMetadata.Version)" `
-        "/DAppProductName=$($releaseMetadata.Product)" `
-        "/DAppAssemblyName=$($releaseMetadata.AssemblyName)" `
-        $installerScript
-    if ($LASTEXITCODE -ne 0) {
-        throw "Inno Setup failed with exit code $LASTEXITCODE."
+    if (-not $SkipInstaller) {
+        & $resolvedCompiler `
+            "/DPublishDir=$publishDirectory" `
+            "/DArtifactsDir=$artifactsRoot" `
+            "/DAppVersion=$($releaseMetadata.Version)" `
+            "/DAppProductName=$($releaseMetadata.Product)" `
+            "/DAppAssemblyName=$($releaseMetadata.AssemblyName)" `
+            $installerScript
+        if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE."
+        }
+
+        if (-not (Test-Path -LiteralPath $installerArtifact -PathType Leaf)) {
+            throw 'The installer artifact was not created.'
+        }
+
+        if (-not $SkipSign) {
+            Invoke-ReleaseSigning -Path $installerArtifact
+        }
+
+        Write-Sha256File -Path $installerArtifact
     }
 
-    if (-not (Test-Path -LiteralPath $portableArchive -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $installerArtifact -PathType Leaf)) {
-        throw 'One or more expected release artifacts were not created.'
-    }
-
-    if (-not $SkipSign) {
-        Invoke-ReleaseSigning -Path $installerArtifact
+    if (-not (Test-Path -LiteralPath $portableArchive -PathType Leaf)) {
+        throw 'The portable archive was not created.'
     }
 
     Write-Sha256File -Path $portableArchive
-    Write-Sha256File -Path $installerArtifact
 
-    Get-Item -LiteralPath $portableArchive, $installerArtifact |
+    $artifacts = if ($SkipInstaller) {
+        @($portableArchive)
+    } else {
+        @($portableArchive, $installerArtifact)
+    }
+    Get-Item -LiteralPath $artifacts |
         Select-Object FullName, Length
-    Get-FileHash -LiteralPath $portableArchive, $installerArtifact -Algorithm SHA256
+    Get-FileHash -LiteralPath $artifacts -Algorithm SHA256
 }
 finally {
     Pop-Location
