@@ -5,9 +5,14 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- The Windows App SDK auto-initializer runs a module constructor that calls
+         MddBootstrapInitialize2, which deadlocks inside the VSTest testhost during
+         xUnit discovery. Disable it and bootstrap explicitly in Program.Main. -->
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
     <EnableMsixTooling Condition="'$(PublishSingleFile)' == 'true'">true</EnableMsixTooling>
     <WindowsAppSDKSelfContained Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSDKSelfContained>
     <WindowsAppSdkUndockedRegFreeWinRTInitialize Condition="'$(PublishSingleFile)' == 'true'">true</WindowsAppSdkUndockedRegFreeWinRTInitialize>
+    <WindowsAppSdkIncludeVersionInfo Condition="'$(WindowsAppSDKSelfContained)' != 'true'">true</WindowsAppSdkIncludeVersionInfo>
     <StartupObject>Hourbit.App.Program</StartupObject>
     <RootNamespace>Hourbit.App</RootNamespace>
     <AssemblyName>$(ExecutableName)</AssemblyName>
