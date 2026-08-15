@@ -125,6 +125,19 @@ public sealed class CompositionRoot : IAsyncDisposable
         var clock = new SystemClock();
         var zone = TimeZoneInfo.Local;
         var databasePath = DatabasePathResolver.Resolve(AppContext.BaseDirectory);
+        try
+        {
+            var dataResetApplier = new DataResetApplier(
+                new DataResetRequestStore(databasePath));
+            await dataResetApplier.ApplyPendingAsync(databasePath, ct);
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException(
+                "本地数据重置失败，原有数据已保留：" + exception.Message,
+                exception);
+        }
+
         var dataFolder =
             Path.GetDirectoryName(databasePath) ?? AppContext.BaseDirectory;
         var backupDirectory = Path.Combine(dataFolder, "backups");
