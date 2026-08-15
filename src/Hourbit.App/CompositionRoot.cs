@@ -167,13 +167,21 @@ public sealed class CompositionRoot : IAsyncDisposable
             restoreLifecycle,
             () => clock.Now.ToUniversalTime(),
             zone);
+        var dataResetCoordinator = new DataResetCoordinator(
+            backupService,
+            new DataResetRequestStore(databasePath),
+            databasePath,
+            clock,
+            () => System.Windows.Application.Current.Dispatcher.BeginInvoke(
+                new Action(System.Windows.Application.Current.Shutdown)));
         var settings = new SettingsViewModel(
             hotkey,
             settingsStore,
             new StartupRegistrationService(),
             executablePath,
             backupService,
-            ReleasePageService.FromAssembly(Assembly.GetExecutingAssembly()));
+            ReleasePageService.FromAssembly(Assembly.GetExecutingAssembly()),
+            dataResetCoordinator);
         await settings.LoadAsync(ct);
         var localization = new LocalizationService(
             CultureInfo.CurrentUICulture, settings.UiLanguage);

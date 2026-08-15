@@ -22,6 +22,8 @@ public sealed class SettingsViewModel : ObservableObject
     private readonly string? _executablePath;
     private readonly IBackupService? _backupService;
     private readonly IReleasePageService? _releasePage;
+    private readonly IDataResetCoordinator? _resetCoordinator;
+    private string _resetConfirmationText = string.Empty;
     private string _hotkey = "Ctrl+Alt+Space";
     private bool _startWithWindows;
     private int _alertVolume = 100;
@@ -46,7 +48,8 @@ public sealed class SettingsViewModel : ObservableObject
         IStartupRegistrationService? startup = null,
         string? executablePath = null,
         IBackupService? backupService = null,
-        IReleasePageService? releasePage = null)
+        IReleasePageService? releasePage = null,
+        IDataResetCoordinator? resetCoordinator = null)
     {
         _hotkeys = hotkeys ?? throw new ArgumentNullException(nameof(hotkeys));
         _store = store ?? throw new ArgumentNullException(nameof(store));
@@ -54,6 +57,7 @@ public sealed class SettingsViewModel : ObservableObject
         _executablePath = executablePath;
         _backupService = backupService;
         _releasePage = releasePage;
+        _resetCoordinator = resetCoordinator;
     }
 
     public string Hotkey
@@ -228,6 +232,33 @@ public sealed class SettingsViewModel : ObservableObject
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
         return GetBackupService().RestoreAsync(backupPath, ct);
+    }
+
+    public string ResetConfirmationText
+    {
+        get => _resetConfirmationText;
+        set
+        {
+            if (SetProperty(ref _resetConfirmationText, value ?? string.Empty))
+                OnPropertyChanged(nameof(CanResetLocalData));
+        }
+    }
+
+    public bool CanResetLocalData =>
+        _resetCoordinator is not null && ResetConfirmationText == "重置 Hourbit";
+
+    public async Task RequestResetAsync(
+        string backupPath,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(backupPath);
+        var coordinator = _resetCoordinator ??
+            throw new InvalidOperationException("数据重置未配置。");
+        if (!CanResetLocalData)
+            throw new InvalidOperationException("请输入确认短语「重置 Hourbit」。");
+
+        _ = await coordinator.RequestAsync(backupPath, ct);
+        WarningMessage = "备份已完成，Hourbit 将重新启动为空白状态。";
     }
 
     public void OpenReleasePage() =>

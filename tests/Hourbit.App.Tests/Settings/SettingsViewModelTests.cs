@@ -45,6 +45,42 @@ public sealed class SettingsViewModelTests
             backup.RestoredPaths);
     }
 
+    [Fact]
+    public async Task Reset_requires_the_confirmation_phrase_before_requesting_reset()
+    {
+        var coordinator = new RecordingDataResetCoordinator();
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            new RecordingSettingsStore(),
+            resetCoordinator: coordinator);
+
+        Assert.False(vm.CanResetLocalData);
+
+        vm.ResetConfirmationText = "重置 Hourbit";
+        Assert.True(vm.CanResetLocalData);
+
+        await vm.RequestResetAsync(@"C:\chosen\reset.moment-backup");
+
+        Assert.Equal(1, coordinator.RequestCount);
+        Assert.Equal(@"C:\chosen\reset.moment-backup", coordinator.LastBackupPath);
+    }
+
+    [Fact]
+    public async Task Reset_without_the_phrase_does_not_request_reset()
+    {
+        var coordinator = new RecordingDataResetCoordinator();
+        var vm = new SettingsViewModel(
+            new StubHotkeys(HotkeyRegistrationResult.Registered),
+            new RecordingSettingsStore(),
+            resetCoordinator: coordinator);
+
+        vm.ResetConfirmationText = "错误短语";
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            vm.RequestResetAsync(@"C:\chosen\reset.moment-backup"));
+
+        Assert.Equal(0, coordinator.RequestCount);
+    }
+
     [Theory]
     [InlineData(null, false)]
     [InlineData("", false)]
@@ -426,6 +462,21 @@ public sealed class SettingsViewModelTests
         {
             RestoredPaths.Add(backupPath);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingDataResetCoordinator : IDataResetCoordinator
+    {
+        public int RequestCount { get; private set; }
+        public string? LastBackupPath { get; private set; }
+
+        public Task<RequestResetResult> RequestAsync(
+            string backupPath,
+            CancellationToken ct)
+        {
+            RequestCount++;
+            LastBackupPath = backupPath;
+            return Task.FromResult(new RequestResetResult(true));
         }
     }
 }

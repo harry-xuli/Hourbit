@@ -158,6 +158,19 @@ public partial class SettingsView : Window
             "备份已恢复");
     }
 
+    private async void OnResetLocalData(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null)
+            return;
+        var path = _actions?.SelectBackupExportPath?.Invoke()
+                   ?? SelectBackupExportPath();
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+        await RunAsync(
+            ct => ViewModel.RequestResetAsync(path, ct),
+            "备份已完成，Hourbit 将重新启动为空白状态。");
+    }
+
     private void OnCheckForUpdates(object sender, RoutedEventArgs e)
     {
         if (ViewModel is null)
