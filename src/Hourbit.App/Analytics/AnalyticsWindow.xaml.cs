@@ -1,6 +1,5 @@
 using System.IO;
 using Hourbit.Core.Reporting;
-using Microsoft.Win32;
 
 namespace Hourbit.App.Analytics;
 
@@ -33,7 +32,7 @@ public partial class AnalyticsWindow : System.Windows.Window
         if (privacy is null)
             return;
 
-        var picker = new SaveFileDialog
+        var picker = new Microsoft.Win32.SaveFileDialog
         {
             Title = "导出报告",
             Filter = "PDF 报告 (*.pdf)|*.pdf",
