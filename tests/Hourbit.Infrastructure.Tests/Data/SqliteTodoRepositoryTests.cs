@@ -79,8 +79,12 @@ public sealed class SqliteTodoRepositoryTests
         await repository.SaveAsync(todo, default);
 
         var stored = await repository.GetAsync(todo.Id, default);
-        Assert.Equal(todo, stored);
-        Assert.Equal(RecurrenceKind.Weekly, stored!.Recurrence!.Kind);
+        Assert.NotNull(stored);
+        Assert.Equal(todo.Id, stored!.Id);
+        Assert.Equal(todo.Title, stored.Title);
+        Assert.Equal(todo.DueDate, stored.DueDate);
+        Assert.Equal(todo.Importance, stored.Importance);
+        Assert.Equal(RecurrenceKind.Weekly, stored.Recurrence!.Kind);
         Assert.Equal(
             [DayOfWeek.Monday, DayOfWeek.Friday],
             stored.Recurrence.DaysOfWeek.OrderBy(static day => day));

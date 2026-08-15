@@ -94,7 +94,7 @@ public sealed class BackupServiceTests
         await using var stream = manifestEntry.Open();
         using var document = await JsonDocument.ParseAsync(stream);
         Assert.Equal(1, document.RootElement.GetProperty("formatVersion").GetInt32());
-        Assert.Equal(5, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(6, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(
             DateTimeOffset.Parse("2026-07-29T01:02:03Z"),
             document.RootElement.GetProperty("createdAt").GetDateTimeOffset());
