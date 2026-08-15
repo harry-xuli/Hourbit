@@ -56,7 +56,8 @@
 ### P0 —— 补上 Authenticode 签名（当前为 NotSigned）
 
 - 现状：GitHub Release 的产物是 **NotSigned**（CI 无证书），发布说明已如实标注。
-- 原因：签名用的证书（自签名 `CN=Harry`，含私钥）只存在于**本机当前用户证书库**，CI 拿不到；且本沙箱无法下载 Inno Setup 安装包、NuGet 离线还原失败，导致本地无法完成签名构建。
+- 原因：签名用的证书（自签名 `CN=Harry`，含私钥，指纹 `9CE4…FED8`）只存在于**本机当前用户证书库**，CI 拿不到；**且该私钥被标记为「不可导出」，`Export-PfxCertificate` 已实测失败（无法导出不可导出的私钥），因此无法导出 pfx 给 CI 使用**；本沙箱也无法下载 Inno Setup 安装包、NuGet 离线还原失败，导致本地无法完成签名构建。
+- 结论：签名**只能在本机（证书库内）完成**，无法迁到 CI。CI 产物将长期为 NotSigned（已披露）。
 - 待办：在一台**有网络 + .NET SDK + Inno Setup 6** 的 Windows 机器上执行：
   ```powershell
   dotnet test Hourbit.slnx -c Release
@@ -65,15 +66,10 @@
   然后把签名后的 4 个文件覆盖到 GitHub Release v0.6.0（或发 v0.6.1）。
 - 备注：证书是自签名，在他人机器上 SmartScreen 仍可能提示「未知发布者」，但不再是「无签名」。
 
-### P1 —— 清理本机 git 状态
+### P1 —— 清理本机 git 状态（✅ 主工作区已同步）
 
-- 本机 `D:\Coding\window alert tool`（主工作区）仍是 v0.2.1。请在有权限的环境执行：
-  ```powershell
-  cd 'D:\Coding\window alert tool'
-  git fetch origin
-  git checkout main && git merge --ff-only origin/main   # 快进到 v0.6.0
-  ```
-- 之后可删除临时工作副本 `dev-work` 与过期工作树 `.worktrees\hourbit-v0.2.2`（后者目录名已过期，实际是 v0.4.0 分支）。
+- ✅ 本机 `D:\Coding\window alert tool`（主工作区）已快进到 v0.6.0（`main` @ `e21b161`，`Hourbit.*` 命名、`Hourbit.slnx`、`Version.props`=0.6.0），并清理了残留的 `src/Moment.*` / `tests/Moment.*` 构建输出目录。
+- 仍可做的收尾：删除临时工作副本 `dev-work` 与过期工作树 `.worktrees\hourbit-v0.2.2`（目录名已过期，实际是 v0.4.0 分支）。
 
 ### P2 —— CI 单测 job 仍是红的（发布不受影响）
 
