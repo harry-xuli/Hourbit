@@ -1,3 +1,4 @@
+using System.IO;
 using Hourbit.Core.Analytics;
 using Hourbit.Core.Reporting;
 
