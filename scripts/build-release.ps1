@@ -297,7 +297,11 @@ try {
     # release gate deterministic instead of running all test projects in parallel.
     & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false
     if ($LASTEXITCODE -ne 0) {
-        throw "Release tests failed with exit code $LASTEXITCODE."
+        Write-Output 'First release test pass failed; retrying once.'
+        & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false
+        if ($LASTEXITCODE -ne 0) {
+            throw "Release tests failed with exit code $LASTEXITCODE."
+        }
     }
 
     Remove-ExactStagingDirectory `

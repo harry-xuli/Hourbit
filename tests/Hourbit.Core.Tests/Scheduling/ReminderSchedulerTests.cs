@@ -168,7 +168,7 @@ public sealed class ReminderSchedulerTests
         repository.ReleaseFirstQuery.TrySetResult();
         await stop;
         await restart;
-        await repository.SecondQueryEntered.Task.WaitAsync(TimeSpan.FromSeconds(60));
+        await repository.SecondQueryEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(2, repository.QueryCount);
     }
 
@@ -244,7 +244,7 @@ public sealed class ReminderSchedulerTests
 
         clock.AdvanceBy(TimeSpan.FromMinutes(1));
         await sink.WaitForFirstAttemptAsync();
-        await failureCommitted.Task.WaitAsync(TimeSpan.FromSeconds(60));
+        await failureCommitted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var failed = await repository.GetScheduledReminderAsync(
             reminder.Occurrence.Id, CancellationToken.None);
         Assert.Equal(OccurrenceState.DeliveryFailed, failed!.Occurrence.State);
@@ -620,24 +620,24 @@ public sealed class ReminderSchedulerTests
                     changed = _recoverableQueryChanged.Task;
                 }
 
-                await changed.WaitAsync(TimeSpan.FromSeconds(60));
+                await changed.WaitAsync(TimeSpan.FromSeconds(10));
             }
         }
 
         public Task WaitForMissedTransitionAsync() =>
-            _missedTransition.Task.WaitAsync(TimeSpan.FromSeconds(60));
+            _missedTransition.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         public void BlockNextMissedTransition() =>
             Interlocked.Exchange(ref _blockMissedTransition, 1);
 
         public Task WaitForBlockedMissedTransitionAsync() =>
-            _blockedMissedTransition.Task.WaitAsync(TimeSpan.FromSeconds(60));
+            _blockedMissedTransition.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         public void ReleaseBlockedMissedTransition() =>
             _releaseMissedTransition.TrySetResult();
 
         public Task<bool> WaitForMissedTransitionResultAsync() =>
-            _missedTransitionResult.Task.WaitAsync(TimeSpan.FromSeconds(60));
+            _missedTransitionResult.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         private static TaskCompletionSource NewSignal() =>
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -676,7 +676,7 @@ public sealed class ReminderSchedulerTests
                     changed = _changed.Task;
                 }
 
-                await changed.WaitAsync(TimeSpan.FromSeconds(60));
+                await changed.WaitAsync(TimeSpan.FromSeconds(10));
             }
         }
 
@@ -722,7 +722,7 @@ public sealed class ReminderSchedulerTests
                     requested = _delayRequested.Task;
                 }
 
-                await requested.WaitAsync(TimeSpan.FromSeconds(60));
+                await requested.WaitAsync(TimeSpan.FromSeconds(10));
             }
         }
 
