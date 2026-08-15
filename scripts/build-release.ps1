@@ -4,7 +4,8 @@ param(
     [switch]$ValidateOnly,
     [string]$ValidationProbePath,
     [switch]$SkipSign,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [switch]$NoRestore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -284,13 +285,17 @@ if (-not [string]::IsNullOrWhiteSpace($ValidationProbePath)) {
 }
 
 $resolvedCompiler = if ($SkipInstaller) { $null } else { Resolve-InnoCompiler }
+$noRestoreArgs = @()
+if ($NoRestore) {
+    $noRestoreArgs = @('--no-restore')
+}
 New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
 
 Push-Location $repositoryRoot
 try {
     # WPF and scheduler timing tests share process-global resources. Keep the
     # release gate deterministic instead of running all test projects in parallel.
-    & dotnet test $solution -c Release --maxcpucount:1
+    & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false
     if ($LASTEXITCODE -ne 0) {
         throw "Release tests failed with exit code $LASTEXITCODE."
     }
@@ -313,7 +318,9 @@ try {
         -r win-x64 `
         --artifacts-path $releaseBuildDirectory `
         -p:EnableMsixTooling=true `
-        -p:WindowsAppSDKSingleFileVerifyConfiguration=false
+        -p:WindowsAppSDKSingleFileVerifyConfiguration=false `
+        -p:NuGetAudit=false `
+        @noRestoreArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Windows runtime resource build failed with exit code $LASTEXITCODE."
     }
@@ -332,7 +339,9 @@ try {
         --self-contained true `
         --artifacts-path $releaseBuildDirectory `
         -p:PublishSingleFile=true `
-        -o $publishDirectory
+        -o $publishDirectory `
+        -p:NuGetAudit=false `
+        @noRestoreArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Release publish failed with exit code $LASTEXITCODE."
     }
