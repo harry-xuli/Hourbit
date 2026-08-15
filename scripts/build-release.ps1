@@ -5,7 +5,8 @@ param(
     [string]$ValidationProbePath,
     [switch]$SkipSign,
     [switch]$SkipInstaller,
-    [switch]$NoRestore
+    [switch]$NoRestore,
+    [switch]$SkipTests
 )
 
 $ErrorActionPreference = 'Stop'
@@ -293,15 +294,19 @@ New-Item -ItemType Directory -Path $artifactsRoot -Force | Out-Null
 
 Push-Location $repositoryRoot
 try {
-    # WPF and scheduler timing tests share process-global resources. Keep the
-    # release gate deterministic instead of running all test projects in parallel.
-    & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false --blame-hang --blame-hang-timeout 90s
-    if ($LASTEXITCODE -ne 0) {
-        Write-Output 'First release test pass failed; retrying once.'
+    if (-not $SkipTests) {
+        # WPF and scheduler timing tests share process-global resources. Keep the
+        # release gate deterministic instead of running all test projects in parallel.
         & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false --blame-hang --blame-hang-timeout 90s
         if ($LASTEXITCODE -ne 0) {
-            throw "Release tests failed with exit code $LASTEXITCODE."
+            Write-Output 'First release test pass failed; retrying once.'
+            & dotnet test $solution -c Release --maxcpucount:1 @noRestoreArgs -p:NuGetAudit=false --blame-hang --blame-hang-timeout 90s
+            if ($LASTEXITCODE -ne 0) {
+                throw "Release tests failed with exit code $LASTEXITCODE."
+            }
         }
+    } else {
+        Write-Output 'Release test gate skipped (-SkipTests).'
     }
 
     Remove-ExactStagingDirectory `

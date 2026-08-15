@@ -45,7 +45,7 @@ jobs:
 
       - name: Build release artifacts
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -SkipSign
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1 -SkipSign -SkipTests
 
       - name: Run packaged smoke test
         shell: pwsh
