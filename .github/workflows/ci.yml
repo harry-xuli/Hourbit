@@ -53,11 +53,7 @@ jobs:
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:CODE_SIGNING_PFX))
           $password = ConvertTo-SecureString $env:CODE_SIGNING_PFX_PASSWORD -AsPlainText -Force
           $cert = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          # Trust the self-signed certificate so Authenticode chain validation succeeds.
-          $cerPath = Join-Path $env:RUNNER_TEMP 'codesign.cer'
-          [IO.File]::WriteAllBytes($cerPath, $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-          Import-Certificate -FilePath $cerPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-          Write-Host "Imported and trusted code-signing certificate."
+          Write-Host "Imported code-signing certificate."
 
       - name: Build release artifacts
         shell: pwsh
