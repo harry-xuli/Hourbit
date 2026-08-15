@@ -43,7 +43,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="1.2*" />
                         <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="80" />
+                        <ColumnDefinition Width="70" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -71,14 +71,14 @@
                                 SelectedDate="{Binding CustomStartDate, Mode=TwoWay}"
                                 Language="{Binding UiLanguageTag}"
                                 automation:AutomationProperties.Name="{Binding FromText}"
-                                MinWidth="190" MinHeight="38" />
+                                MinWidth="140" MinHeight="38" />
                     <TextBlock x:Name="ToLabel" Grid.Column="5" Text="{Binding ToText}"
                                Margin="12,0,7,0" VerticalAlignment="Center" />
                     <DatePicker x:Name="EndDatePicker" Grid.Column="6"
                                 SelectedDate="{Binding CustomEndDate, Mode=TwoWay}"
                                 Language="{Binding UiLanguageTag}"
                                 automation:AutomationProperties.Name="{Binding ToText}"
-                                MinWidth="190" MinHeight="38" />
+                                MinWidth="140" MinHeight="38" />
                     <Button x:Name="ApplyRangeButton" Grid.Column="7"
                             Content="{Binding ApplyText}"
                             Command="{Binding RefreshCommand}"
