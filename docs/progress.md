@@ -10,13 +10,14 @@ v0.3.0 已发布。v0.4.0 功能与语言/日历 follow-up 收尾已完成并推
 
 ## 已完成
 
-### 数据重置基础（已提交并推送）
+### 数据重置（已提交并推送）
 
 - `DataResetRequest` 请求文件（原子写入、JSON、30 分钟有效期）；
 - `DataResetApplier`：校验路径/备份/时效，隔离旧数据库与 sidecar，重建空库，失败回滚；
 - `DataResetCoordinator`：备份导出 → 写入请求 → 请求重启；
 - 启动时在打开任何仓库前应用待处理的重置请求（`CompositionRoot.OpenAsync`）；
-- 覆盖测试：过期/畸形请求、错误路径、缺失备份、隔离重建、导出失败安全。
+- 设置页新增「重置本地数据」分区：警告 + 备份导出 + 确认短语「重置 Hourbit」+ 确认后启用按钮；
+- 覆盖测试：过期/畸形请求、错误路径、缺失备份、隔离重建、导出失败安全、确认短语门控。
 
 ### 重复待办（schema v6，已提交并推送）
 
@@ -45,7 +46,7 @@ v0.3.0 已发布。v0.4.0 功能与语言/日历 follow-up 收尾已完成并推
 ## 待完成（合并进 v0.6.0）
 
 1. 分析报告：PDF 导出、配对导出 UI（完整/匿名隐私模式）、报告端到端（Task 8）；
-2. 数据重置设置页 UI（备份选择 + 确认短语 + 重置按钮）与数据生命周期 smoke（Task 4/5）；
+2. 数据生命周期 smoke（Task 5：`reset-backup-restorable` 等事件）；
 3. CompositionRoot 重构、产物瘦身、高 DPI 目检清单；
 4. 版本 0.6.0 签名发布：全量测试 → build-release（含签名）→ packaged smoke → tag `v0.6.0` → GitHub Release。
 
