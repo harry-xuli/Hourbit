@@ -27,14 +27,18 @@ jobs:
             dotnet test Hourbit.slnx --configuration Release --maxcpucount:1 --blame-hang --blame-hang-timeout 120s --logger "console;verbosity=detailed"
           }
 
-      - name: Upload hang dumps on failure
+      - name: Install dotnet-dump
         if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hang-dumps
-          path: |
-            tests/**/TestResults/**/*
-          if-no-files-found: ignore
+        run: dotnet tool install --global dotnet-dump
+
+      - name: Analyze hang dump
+        if: failure()
+        shell: pwsh
+        run: |
+          $dump = Get-ChildItem -Path tests/Hourbit.App.Tests/TestResults -Recurse -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dump) { Write-Host "No hang dump found."; exit 0 }
+          Write-Host "Analyzing $($dump.FullName)"
+          dotnet-dump analyze $dump.FullName --command "clrstack -all" --command "exit" 2>&1 | Out-String
 
   release:
     name: Package release artifacts
