@@ -47,10 +47,14 @@ public sealed class ReminderActionService(
             return;
         }
 
-        var next = current.Item.Recurrence is null
-            ? null
-            : ReminderOccurrence.Schedule(current.Item.Id, recurrenceCalculator.NextAfter(
-                current.Item.Recurrence, current.Occurrence.DueAt, _schedulingTimeZone));
+        // A delivered (Fired) recurrence already scheduled its next occurrence during
+        // delivery. Only a still-Scheduled occurrence needs a continuation here,
+        // otherwise the same due_at_utc would be inserted twice.
+        var next = current.Item.Recurrence is not null &&
+                   current.Occurrence.State == OccurrenceState.Scheduled
+            ? ReminderOccurrence.Schedule(current.Item.Id, recurrenceCalculator.NextAfter(
+                current.Item.Recurrence, current.Occurrence.DueAt, _schedulingTimeZone))
+            : null;
 
         await repository.ApplyActionAsync(occurrenceId, state, clock.Now, next, ct);
         schedulerSignal.Refresh();

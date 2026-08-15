@@ -30,6 +30,23 @@ public sealed class ReminderActionServiceTests
     }
 
     [Fact]
+    public async Task Complete_for_a_fired_recurrence_does_not_duplicate_the_delivered_next_occurrence()
+    {
+        var repository = new FakeReminderRepository();
+        var current = await AddRecurringReminderAsync(repository, Now.AddMinutes(20));
+        var deliveredNext = ReminderOccurrence.Schedule(
+            current.ItemId, Now.AddDays(1).AddMinutes(20));
+        await repository.ApplyActionAsync(
+            current.Id, OccurrenceState.Fired, Now, deliveredNext, CancellationToken.None);
+
+        await CreateService(repository).CompleteAsync(current.Id, CancellationToken.None);
+
+        var scheduled = await repository.GetScheduledAsync(CancellationToken.None);
+        var next = Assert.Single(scheduled);
+        Assert.Equal(deliveredNext.Id, next.Occurrence.Id);
+    }
+
+    [Fact]
     public async Task Ignore_without_recurrence_creates_no_future_occurrence()
     {
         var repository = new FakeReminderRepository();
