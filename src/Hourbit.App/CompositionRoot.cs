@@ -155,6 +155,7 @@ public sealed class CompositionRoot : IAsyncDisposable
 
         var repository = await SqliteReminderRepository.OpenAsync(databasePath, ct);
         var todoRepository = await SqliteTodoRepository.OpenAsync(databasePath, ct);
+        var todoOrderStore = new SqliteTodoOrderStore(databasePath);
         var conversionStore = await SqliteItemConversionStore.OpenAsync(databasePath, ct);
         var settingsStore = new SqliteSettingsStore(databasePath);
         var hotkey = new GlobalHotkeyService();
@@ -271,7 +272,8 @@ public sealed class CompositionRoot : IAsyncDisposable
                     throw new InvalidOperationException(result.ErrorMessage);
             },
             datePicker,
-            search);
+            search,
+            todoOrderStore);
         timelineForSearch = timeline;
         timelineForDialogs = timeline;
         var timelineRefresh = new TimelineRefreshCoordinator(

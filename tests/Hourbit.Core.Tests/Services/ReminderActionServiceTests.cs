@@ -108,6 +108,52 @@ public sealed class ReminderActionServiceTests
     }
 
     [Fact]
+    public async Task Missed_occurrence_can_be_completed_and_refreshes_the_scheduler()
+    {
+        var repository = new FakeReminderRepository();
+        var current = TestData.Scheduled("已错过提醒", "2026-07-29T08:50:00+08:00");
+        await repository.AddAsync(current, CancellationToken.None);
+        Assert.True(await repository.TryTransitionAsync(
+            current.Occurrence.Id, OccurrenceState.Scheduled,
+            OccurrenceState.Missed, Now, CancellationToken.None));
+        var signal = new RecordingSignal();
+        var service = new ReminderActionService(repository, new RecurrenceCalculator(), signal,
+            new FakeClock(Now), ChinaZone);
+
+        await service.CompleteAsync(current.Occurrence.Id, CancellationToken.None);
+
+        Assert.Equal(OccurrenceState.Completed,
+            (await repository.GetScheduledReminderAsync(
+                current.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
+        Assert.Equal(1, signal.RefreshCount);
+    }
+
+    [Fact]
+    public async Task Missed_important_occurrence_can_be_snoozed_for_five_minutes()
+    {
+        var repository = new FakeReminderRepository();
+        var current = TestData.Scheduled(
+            "已错过的重要提醒", "2026-07-29T08:50:00+08:00",
+            ReminderImportance.Important);
+        await repository.AddAsync(current, CancellationToken.None);
+        Assert.True(await repository.TryTransitionAsync(
+            current.Occurrence.Id, OccurrenceState.Scheduled,
+            OccurrenceState.Missed, Now, CancellationToken.None));
+        var signal = new RecordingSignal();
+        var service = new ReminderActionService(repository, new RecurrenceCalculator(), signal,
+            new FakeClock(Now), ChinaZone);
+
+        var snoozed = await service.SnoozeAsync(
+            current.Occurrence.Id, TimeSpan.FromMinutes(5), CancellationToken.None);
+
+        Assert.Equal(OccurrenceState.Snoozed,
+            (await repository.GetScheduledReminderAsync(
+                current.Occurrence.Id, CancellationToken.None))!.Occurrence.State);
+        Assert.Equal(Now.AddMinutes(5), snoozed.DueAt);
+        Assert.Equal(1, signal.RefreshCount);
+    }
+
+    [Fact]
     public async Task Snooze_for_a_missing_occurrence_throws_without_signal_or_mutation()
     {
         var repository = new FakeReminderRepository();

@@ -247,12 +247,17 @@ function Invoke-ReleaseSigning {
             -Certificate $certificate `
             -TimestampServer 'http://timestamp.digicert.com' `
             -HashAlgorithm SHA256
-        # A self-signed certificate is applied correctly but reports UnknownError/
-        # NotTrusted because its root is not in the machine's trusted store. Treat
-        # those as success and only fail when no valid signature was produced.
-        if ($signature.Status -notin @('Valid', 'UnknownError', 'NotTrusted')) {
+        $allowedStatuses = @('Valid', 'UnknownError', 'NotTrusted')
+        $signerThumbprint = if ($null -eq $signature.SignerCertificate) {
+            $null
+        } else {
+            $signature.SignerCertificate.Thumbprint
+        }
+        if ($signature.Status -notin $allowedStatuses -or
+            $signerThumbprint -ne $certificate.Thumbprint) {
             throw "Code signing failed for '$file': $($signature.Status) $($signature.StatusMessage)"
         }
+        Write-Output "Signed '$file' with $($certificate.Subject) ($($certificate.Thumbprint)); status: $($signature.Status)."
     }
 }
 

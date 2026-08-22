@@ -83,10 +83,17 @@ function Add-ReleaseSignature {
         }
 
         $signature = Set-AuthenticodeSignature @params
-        if ($signature.Status -ne 'Valid') {
+        $allowedStatuses = @('Valid', 'UnknownError', 'NotTrusted')
+        $signerThumbprint = if ($null -eq $signature.SignerCertificate) {
+            $null
+        } else {
+            $signature.SignerCertificate.Thumbprint
+        }
+        if ($signature.Status -notin $allowedStatuses -or
+            $signerThumbprint -ne $Certificate.Thumbprint) {
             throw "签名失败：$file -> $($signature.Status) $($signature.StatusMessage)"
         }
-        Write-Output "已签名：$file"
+        Write-Output "已签名：$file（状态：$($signature.Status)）"
     }
 }
 

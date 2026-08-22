@@ -50,8 +50,12 @@ public sealed class AnalyticsWindowTests
             Assert.Equal("en-US", CultureInfo.CurrentCulture.Name);
             Assert.True(start.TranslatePoint(new Point(), window).Y >
                         header.TranslatePoint(new Point(), window).Y);
-            Assert.True(start.ActualWidth >= 140d);
-            Assert.True(end.ActualWidth >= 140d);
+            Assert.True(start.ActualWidth >= 190d);
+            Assert.True(end.ActualWidth >= 190d);
+            Assert.Equal(16d, start.FontSize);
+            Assert.Equal(16d, end.FontSize);
+            Assert.True(start.Resources.Contains(typeof(Button)));
+            Assert.True(end.Resources.Contains(typeof(Button)));
         });
 
     [Fact]

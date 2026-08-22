@@ -72,7 +72,7 @@ public sealed class ReminderActionService(
     }
 
     private static bool IsActionable(OccurrenceState state) =>
-        state is OccurrenceState.Scheduled or OccurrenceState.Fired;
+        state is OccurrenceState.Scheduled or OccurrenceState.Fired or OccurrenceState.Missed;
 
     private static void ValidateSnoozeDelay(ReminderImportance importance, TimeSpan delay)
     {

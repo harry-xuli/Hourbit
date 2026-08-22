@@ -41,7 +41,8 @@
                  Margin="22,22,22,12"
                  VerticalContentAlignment="Center"
                  IsEnabled="{Binding CanEdit}"
-                 automation:AutomationProperties.Name="快速创建待办或提醒输入" />
+                 Tag="{localization:Loc QuickAdd.InputAccessible}"
+                 automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
 
         <Border Grid.Row="1"
                 Margin="22,0,22,12"
@@ -135,7 +136,8 @@
                         Content="{localization:Loc Editor.RetryRefresh}"
                         Command="{Binding SubmitCommand}"
                         Visibility="{Binding IsRefreshOnly, Converter={StaticResource BooleanToVisibility}}"
-                        automation:AutomationProperties.Name="重试刷新时间轴" />
+                        Tag="{localization:Loc Editor.RetryRefresh}"
+                        automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
             </Grid>
         </Border>
 
@@ -158,7 +160,8 @@
                     <TextBox x:Name="DetailTitleBox"
                              Grid.Column="1"
                              Text="{Binding Details.Title, UpdateSourceTrigger=PropertyChanged}"
-                             automation:AutomationProperties.Name="详细提醒内容" />
+                             Tag="{localization:Loc Editor.Content}"
+                             automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                 </Grid>
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
@@ -171,10 +174,12 @@
                     <TextBox x:Name="DetailDateBox"
                              Grid.Column="1"
                              Text="{Binding Details.DateText, UpdateSourceTrigger=PropertyChanged}"
-                             automation:AutomationProperties.Name="详细日期" />
+                             Tag="{localization:Loc Editor.DateTime}"
+                             automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                     <TextBox Grid.Column="3"
                              Text="{Binding Details.TimeText, UpdateSourceTrigger=PropertyChanged}"
-                             automation:AutomationProperties.Name="详细时间" />
+                             Tag="{localization:Loc Editor.DateTime}"
+                             automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                 </Grid>
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
@@ -190,14 +195,16 @@
                               DisplayMemberPath="Label"
                               SelectedValuePath="Value"
                               SelectedValue="{Binding Details.SelectedKind}"
-                              automation:AutomationProperties.Name="详细提醒类型" />
+                              Tag="{localization:Loc Editor.Kind}"
+                              automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                     <TextBlock Grid.Column="3" Text="{localization:Loc Editor.Importance}" VerticalAlignment="Center" />
                     <ComboBox Grid.Column="4" MinHeight="40"
                               ItemsSource="{Binding Details.Importances}"
                               DisplayMemberPath="Label"
                               SelectedValuePath="Value"
                               SelectedValue="{Binding Details.SelectedImportance}"
-                              automation:AutomationProperties.Name="详细重要性" />
+                              Tag="{localization:Loc Editor.Importance}"
+                              automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                 </Grid>
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -213,13 +220,15 @@
                               DisplayMemberPath="Label"
                               SelectedValuePath="Value"
                               SelectedValue="{Binding Details.SelectedRecurrence}"
-                              automation:AutomationProperties.Name="详细重复方式" />
+                              Tag="{localization:Loc Editor.Recurrence}"
+                              automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                     <TextBlock Grid.Column="3" Text="{localization:Loc Editor.Weekdays}"
                                VerticalAlignment="Center"
                                Visibility="{Binding Details.IsWeekly, Converter={StaticResource BooleanToVisibility}}" />
                     <ItemsControl Grid.Column="4"
                                   ItemsSource="{Binding Details.Weekdays}"
-                                  automation:AutomationProperties.Name="详细每周日期"
+                                  Tag="{localization:Loc Editor.Weekdays}"
+                                  automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}"
                                   Visibility="{Binding Details.IsWeekly, Converter={StaticResource BooleanToVisibility}}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
@@ -259,7 +268,8 @@
                     <TextBox x:Name="TodoDetailTitleBox"
                              Grid.Column="1"
                              Text="{Binding TodoDetails.Title, UpdateSourceTrigger=PropertyChanged}"
-                             automation:AutomationProperties.Name="详细待办内容" />
+                             Tag="{localization:Loc Editor.Content}"
+                             automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                 </Grid>
                 <Grid Margin="0,0,0,10">
                     <Grid.ColumnDefinitions>
@@ -271,10 +281,12 @@
                     <TextBlock Text="{localization:Loc Editor.DateTime}" VerticalAlignment="Center" />
                     <TextBox Grid.Column="1"
                              Text="{Binding TodoDetails.DateText, UpdateSourceTrigger=PropertyChanged}"
-                             automation:AutomationProperties.Name="详细待办日期，可留空" />
+                             Tag="{localization:Loc Editor.DateTime}"
+                             automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                     <TextBox Grid.Column="3"
                              Text="{Binding TodoDetails.TimeText, UpdateSourceTrigger=PropertyChanged}"
-                             automation:AutomationProperties.Name="详细提醒时间，可留空" />
+                             Tag="{localization:Loc Editor.DateTime}"
+                             automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                 </Grid>
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -287,7 +299,8 @@
                               DisplayMemberPath="Label"
                               SelectedValuePath="Value"
                               SelectedValue="{Binding TodoDetails.SelectedImportance}"
-                              automation:AutomationProperties.Name="详细待办重要性" />
+                              Tag="{localization:Loc Editor.Importance}"
+                              automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                 </Grid>
                 <TextBlock Text="{localization:Loc QuickAdd.ReminderConversionHint}"
                            Foreground="{DynamicResource SecondaryTextBrush}"

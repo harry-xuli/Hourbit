@@ -40,6 +40,7 @@ public sealed class TimelineViewModel : ObservableObject
     private readonly ILocalizationService _localization;
     private readonly Func<UiLanguage, Task> _saveLanguage;
     private readonly IDatePicker _datePicker;
+    private readonly ITodoOrderStore _todoOrderStore;
     private CancellationTokenSource? _loadCancellation;
     private TimelineItemViewModel? _selectedItem;
     private TodoTimelineItemViewModel? _selectedTodo;
@@ -70,7 +71,8 @@ public sealed class TimelineViewModel : ObservableObject
         ILocalizationService? localization = null,
         Func<UiLanguage, Task>? saveLanguage = null,
         IDatePicker? datePicker = null,
-        SearchViewModel? search = null)
+        SearchViewModel? search = null,
+        ITodoOrderStore? todoOrderStore = null)
     {
         _query = query;
         _clock = clock;
@@ -87,13 +89,15 @@ public sealed class TimelineViewModel : ObservableObject
         _localization = localization ?? new LocalizationService(_culture, null);
         _saveLanguage = saveLanguage ?? (_ => Task.CompletedTask);
         _datePicker = datePicker ?? new NullDatePicker();
+        _todoOrderStore = todoOrderStore ?? new NullTodoOrderStore();
         Search = search;
         _selectedDate = LocalToday;
         _selectedPeriodKind = TimelinePeriodKind.Day;
         _currentPeriod = TimelinePeriod.Create(
             _selectedDate, _selectedPeriodKind, CurrentUiCulture);
-        Groups = new[] { "已错过", "接下来", "已完成" }
-            .Select(static name => new TimelineGroupViewModel(name)).ToArray();
+        Groups = Enum.GetValues<TimelineGroupKind>()
+            .Select(kind => new TimelineGroupViewModel(kind, CurrentLanguage))
+            .ToArray();
         LoadCommand = new AsyncCommand((_, _) => LoadAsync());
         EditCommand = new AsyncCommand(
             (_, ct) => ObserveAsync(() => EditAsync(ct)), _ => HasSelection);
@@ -172,7 +176,18 @@ public sealed class TimelineViewModel : ObservableObject
     public string ReportsText => _localization.Translate("Action.Report");
     public string HelpText => _localization.Translate("Action.Help");
     public string SearchText => _localization.Translate("Action.Search");
+    public string SearchAccessibleText => _localization.Translate("Search.Global");
+    public string ReportsAccessibleText => _localization.Translate("Action.OpenReport");
+    public string NewAccessibleText => _localization.Translate("Action.NewReminder");
     public string SearchPlaceholderText => _localization.Translate("Search.Placeholder");
+    public string SearchResultsText => _localization.Translate("Search.Results");
+    public string RefreshText => _localization.Translate("Action.Refresh");
+    public string PreviousPeriodText => _localization.Translate("Action.PreviousPeriod");
+    public string NextPeriodText => _localization.Translate("Action.NextPeriod");
+    public string SwitchChineseText => _localization.Translate("Action.SwitchChinese");
+    public string SwitchEnglishText => _localization.Translate("Action.SwitchEnglish");
+    public string ReminderListText => _localization.Translate("Timeline.ReminderList");
+    public string TodoListText => _localization.Translate("Timeline.TodoList");
     public string ChooseDateText => _localization.Translate("Action.ChooseDate");
     public string TodayText => _localization.Translate("Action.Today");
     public string EditText => _localization.Translate("Action.Edit");
@@ -187,6 +202,9 @@ public sealed class TimelineViewModel : ObservableObject
     public string DayTextLabel => _localization.Translate("Period.Day");
     public string WeekTextLabel => _localization.Translate("Period.Week");
     public string MonthTextLabel => _localization.Translate("Period.Month");
+    public string DayAccessibleText => _localization.Translate("Period.ViewDay");
+    public string WeekAccessibleText => _localization.Translate("Period.ViewWeek");
+    public string MonthAccessibleText => _localization.Translate("Period.ViewMonth");
     public string PastSevenDaysText => _localization.Translate("Timeline.PastSevenDaysCompleted");
     public string NextFourteenDaysText => _localization.Translate("Timeline.NextFourteenDaysPlanned");
     public string ShortcutFooter => _localization.Translate("Timeline.ShortcutPrefix") +
@@ -199,7 +217,8 @@ public sealed class TimelineViewModel : ObservableObject
         System.Globalization.CultureInfo.InvariantCulture);
     public string WeekdayText => TimeZoneInfo.ConvertTime(_clock.Now, _zone).ToString("dddd",
         CurrentUiCulture);
-    public string NextReminderText => Items.FirstOrDefault(item => item.GroupName == "接下来") is { } next
+    public string NextReminderText => Items.FirstOrDefault(
+        item => item.GroupKind == TimelineGroupKind.Upcoming) is { } next
         ? $"{next.TimeText} {next.Title}"
         : _localization.Translate("Timeline.NextReminderNone");
     public int CompletedCount => _todosCompletedToday + _remindersCompletedToday;
@@ -298,6 +317,8 @@ public sealed class TimelineViewModel : ObservableObject
                 now,
                 _zone,
                 cancellation.Token);
+            var storedTodoOrder = await _todoOrderStore.LoadAsync(
+                cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
             ErrorMessage = null;
             SelectedTodo = null;
@@ -308,11 +329,20 @@ public sealed class TimelineViewModel : ObservableObject
             foreach (var group in Groups)
                 group.Items.Clear();
             var todoItems = snapshot.Todos
-                .Select(row => new TodoTimelineItemViewModel(row, localDate))
+                .Select(row => new TodoTimelineItemViewModel(
+                    row, localDate, CurrentLanguage))
                 .ToArray();
+            var todoOrder = storedTodoOrder
+                .Select(static (id, index) => (id, index))
+                .GroupBy(static pair => pair.id)
+                .ToDictionary(
+                    static group => group.Key,
+                    static group => group.First().index);
             foreach (var todo in todoItems
                          .Where(static todo => !todo.IsCompleted)
-                         .OrderBy(static todo => todo.DueOrder)
+                         .OrderBy(todo => todoOrder.TryGetValue(
+                             todo.TodoId, out var rank) ? rank : int.MaxValue)
+                         .ThenBy(static todo => todo.DueOrder)
                          .ThenBy(static todo => todo.DueDate)
                          .ThenBy(static todo => todo.TodoId))
             {
@@ -326,13 +356,14 @@ public sealed class TimelineViewModel : ObservableObject
                 CompletedTodos.Add(todo);
             }
             foreach (var item in snapshot.Reminders
-                         .Select(row => new TimelineItemViewModel(row, _clock.Now))
+                         .Select(row => new TimelineItemViewModel(
+                             row, _clock.Now, CurrentLanguage))
                          .OrderBy(item => item.GroupOrder)
                          .ThenBy(item => item.DueAt)
                          .ThenBy(item => item.OccurrenceId))
             {
                 Items.Add(item);
-                Groups.Single(group => group.Name == item.GroupName).Items.Add(item);
+                Groups.Single(group => group.Kind == item.GroupKind).Items.Add(item);
             }
             _todosCompletedToday = snapshot.TodosCompletedToday;
             _remindersCompletedToday = snapshot.RemindersCompletedToday;
@@ -372,6 +403,45 @@ public sealed class TimelineViewModel : ObservableObject
         }
     }
 
+    public async Task MoveTodoAsync(
+        Guid sourceTodoId,
+        Guid targetTodoId,
+        CancellationToken ct)
+    {
+        var source = PendingTodos.FirstOrDefault(
+            todo => todo.TodoId == sourceTodoId);
+        var target = PendingTodos.FirstOrDefault(
+            todo => todo.TodoId == targetTodoId);
+        if (source is null || target is null)
+            return;
+
+        var sourceIndex = PendingTodos.IndexOf(source);
+        var targetIndex = PendingTodos.IndexOf(target);
+        if (sourceIndex == targetIndex)
+            return;
+
+        var previousOrder = PendingTodos.ToArray();
+        PendingTodos.Move(sourceIndex, targetIndex);
+        try
+        {
+            await _todoOrderStore.SaveAsync(
+                PendingTodos.Select(static todo => todo.TodoId).ToArray(), ct);
+        }
+        catch
+        {
+            PendingTodos.Clear();
+            foreach (var todo in previousOrder)
+                PendingTodos.Add(todo);
+            throw;
+        }
+    }
+
+    public Task TryMoveTodoAsync(
+        Guid sourceTodoId,
+        Guid targetTodoId,
+        CancellationToken ct) =>
+        ObserveAsync(() => MoveTodoAsync(sourceTodoId, targetTodoId, ct));
+
     private IAsyncCommand CreatePeriodSelectionCommand(TimelinePeriodKind kind) =>
         new AsyncCommand((_, _) => ObserveAsync(() => SelectPeriodAsync(kind)));
 
@@ -391,7 +461,18 @@ public sealed class TimelineViewModel : ObservableObject
         OnPropertyChanged(nameof(ReportsText));
         OnPropertyChanged(nameof(HelpText));
         OnPropertyChanged(nameof(SearchText));
+        OnPropertyChanged(nameof(SearchAccessibleText));
+        OnPropertyChanged(nameof(ReportsAccessibleText));
+        OnPropertyChanged(nameof(NewAccessibleText));
         OnPropertyChanged(nameof(SearchPlaceholderText));
+        OnPropertyChanged(nameof(SearchResultsText));
+        OnPropertyChanged(nameof(RefreshText));
+        OnPropertyChanged(nameof(PreviousPeriodText));
+        OnPropertyChanged(nameof(NextPeriodText));
+        OnPropertyChanged(nameof(SwitchChineseText));
+        OnPropertyChanged(nameof(SwitchEnglishText));
+        OnPropertyChanged(nameof(ReminderListText));
+        OnPropertyChanged(nameof(TodoListText));
         OnPropertyChanged(nameof(ChooseDateText));
         OnPropertyChanged(nameof(TodayText));
         OnPropertyChanged(nameof(EditText));
@@ -406,6 +487,9 @@ public sealed class TimelineViewModel : ObservableObject
         OnPropertyChanged(nameof(DayTextLabel));
         OnPropertyChanged(nameof(WeekTextLabel));
         OnPropertyChanged(nameof(MonthTextLabel));
+        OnPropertyChanged(nameof(DayAccessibleText));
+        OnPropertyChanged(nameof(WeekAccessibleText));
+        OnPropertyChanged(nameof(MonthAccessibleText));
         OnPropertyChanged(nameof(PastSevenDaysText));
         OnPropertyChanged(nameof(NextFourteenDaysText));
         OnPropertyChanged(nameof(PastSevenDaysAccessibleName));
@@ -420,6 +504,12 @@ public sealed class TimelineViewModel : ObservableObject
         OnPropertyChanged(nameof(DateText));
         OnPropertyChanged(nameof(MonthText));
         OnPropertyChanged(nameof(WeekdayText));
+        foreach (var group in Groups)
+            group.SetLanguage(language);
+        foreach (var item in Items)
+            item.SetLanguage(language);
+        foreach (var todo in PendingTodos.Concat(CompletedTodos))
+            todo.SetLanguage(language);
     }
 
     private async Task SelectPeriodAsync(TimelinePeriodKind kind)

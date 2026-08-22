@@ -119,6 +119,26 @@ public sealed class TimelinePeriodSelectorXamlTests
         Assert.Contains("#FFF9F2", colorsXaml);
     }
 
+    [Fact]
+    public void Rows_use_one_surface_context_actions_and_todo_drag_reordering()
+    {
+        var timelineXaml = ReadRepositoryFile(
+            "src", "Hourbit.App", "Timeline", "TimelineView.xaml");
+
+        Assert.Contains("x:Key=\"FlatTimelineListItem\"", timelineXaml);
+        Assert.Contains("<ContextMenu", timelineXaml);
+        Assert.Contains("Header=\"{Binding EditText}\"", timelineXaml);
+        Assert.Contains("Header=\"{Binding CopyText}\"", timelineXaml);
+        Assert.Contains("Header=\"{Binding CompleteText}\"", timelineXaml);
+        Assert.Contains("Header=\"{Binding DeleteText}\"", timelineXaml);
+        Assert.Contains("AllowDrop=\"True\"", timelineXaml);
+        Assert.Contains("PreviewMouseMove=\"OnTodoPreviewMouseMove\"", timelineXaml);
+        Assert.Contains("Drop=\"OnTodoDrop\"", timelineXaml);
+        Assert.DoesNotContain("x:Name=\"TodoStatusSymbol\"", timelineXaml);
+        Assert.DoesNotContain("x:Name=\"TodoActions\"", timelineXaml);
+        Assert.DoesNotContain("x:Name=\"ReminderActions\"", timelineXaml);
+    }
+
     private static string ReadRepositoryFile(params string[] segments)
     {
         var repositoryRoot = Path.GetFullPath(Path.Combine(

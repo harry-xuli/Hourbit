@@ -1,5 +1,6 @@
 using System.Globalization;
 using Hourbit.App.Commands;
+using Hourbit.App.Localization;
 using Hourbit.Core.Domain;
 using Hourbit.Core.Services;
 
@@ -7,7 +8,12 @@ namespace Hourbit.App.Timeline;
 
 public sealed class TodoTimelineItemViewModel : ObservableObject
 {
-    public TodoTimelineItemViewModel(TodoTimelineRow row, DateOnly localDate)
+    private UiLanguage _language;
+
+    public TodoTimelineItemViewModel(
+        TodoTimelineRow row,
+        DateOnly localDate,
+        UiLanguage language = UiLanguage.ZhCn)
     {
         TodoId = row.TodoId;
         Title = row.Title;
@@ -16,6 +22,7 @@ public sealed class TodoTimelineItemViewModel : ObservableObject
         Importance = row.Importance;
         IsCompleted = row.IsCompleted;
         CompletedAt = row.CompletedAt;
+        _language = language;
         IsOverdue = !IsCompleted && DueDate is { } dueDate && dueDate < localDate;
         DueOrder = DueDate switch
         {
@@ -36,14 +43,21 @@ public sealed class TodoTimelineItemViewModel : ObservableObject
     public bool IsOverdue { get; }
     public int DueOrder { get; }
     public string DueDateText => DueDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-        ?? "无日期";
-    public string ImportanceText => Importance == ReminderImportance.Important ? "重要" : "普通";
+        ?? Translate("Timeline.NoDate");
+    public string ImportanceText => Translate(
+        Importance == ReminderImportance.Important
+            ? "Importance.Important"
+            : "Importance.Normal");
     public string ImportanceSymbol => Importance == ReminderImportance.Important ? "↑" : "●";
-    public string StatusText => IsCompleted ? "已完成" : IsOverdue ? "已逾期" : "待办中";
+    public string StatusText => Translate(IsCompleted
+        ? "Timeline.Status.Completed"
+        : IsOverdue
+            ? "Timeline.TodoOverdue"
+            : "Timeline.Todo");
     public string StatusSymbol => IsCompleted ? "✓" : IsOverdue ? "!" : "□";
     public string? CompletedTimeText => CompletedAt?.ToString("HH:mm", CultureInfo.InvariantCulture);
     public string AccessibleName =>
-        $"待办：{Title}，{DueDateText}，{ImportanceText}，{StatusText}";
+        $"{Translate("Timeline.Todo")}：{Title}，{DueDateText}，{ImportanceText}，{StatusText}";
 
     public TodoItem Item => new(
         TodoId,
@@ -53,4 +67,18 @@ public sealed class TodoTimelineItemViewModel : ObservableObject
         Importance,
         IsCompleted,
         CompletedAt);
+
+    public void SetLanguage(UiLanguage language)
+    {
+        if (_language == language)
+            return;
+        _language = language;
+        OnPropertyChanged(nameof(DueDateText));
+        OnPropertyChanged(nameof(ImportanceText));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(AccessibleName));
+    }
+
+    private string Translate(string key) =>
+        LocalizationCatalog.Translate(_language, key);
 }

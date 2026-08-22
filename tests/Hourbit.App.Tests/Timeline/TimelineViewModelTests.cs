@@ -74,6 +74,37 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task Language_switch_updates_group_status_todo_and_countdown_text()
+    {
+        var localization = new LocalizationService(
+            CultureInfo.GetCultureInfo("zh-CN"), null);
+        var snapshot = new TimelineSnapshot(
+            [TodoRow("Undated task", null)],
+            [TestData.Row("Late reminder", "2026-07-29T08:30:00+08:00",
+                OccurrenceState.Missed, kind: ReminderKind.Countdown)],
+            0,
+            0);
+        var vm = Create(
+            new FakeTimelineQuery(snapshot),
+            localization: localization);
+        await vm.LoadAsync();
+
+        await vm.SelectEnglishLanguageCommand.ExecuteAsync(null);
+
+        Assert.Equal(
+            ["Missed", "Upcoming", "Completed"],
+            vm.Groups.Select(static group => group.Name));
+        var reminder = Assert.Single(vm.Items);
+        Assert.Equal("Missed", reminder.StatusText);
+        Assert.Equal("Does not repeat", reminder.RecurrenceDisplay);
+        Assert.Equal("Due now", reminder.RemainingText);
+        var todo = Assert.Single(vm.PendingTodos);
+        Assert.Equal("No date", todo.DueDateText);
+        Assert.Equal("To-do", todo.StatusText);
+        Assert.Equal("Normal", todo.ImportanceText);
+    }
+
+    [Fact]
     public async Task Today_command_returns_to_local_today_without_changing_period_mode()
     {
         var query = new RecordingPeriodQuery();
@@ -460,6 +491,35 @@ public sealed class TimelineViewModelTests
     }
 
     [Fact]
+    public async Task Todo_drag_order_is_loaded_and_persisted()
+    {
+        var first = TodoRow("第一项", null);
+        var second = TodoRow("第二项", null);
+        var third = TodoRow("第三项", null);
+        var orderStore = new RecordingTodoOrderStore(
+            [third.TodoId, first.TodoId, second.TodoId]);
+        var vm = Create(
+            new FakeTimelineQuery(new TimelineSnapshot(
+                [first, second, third], [], 0, 0)),
+            todoOrderStore: orderStore);
+        await vm.LoadAsync();
+
+        Assert.Equal(
+            ["第三项", "第一项", "第二项"],
+            vm.PendingTodos.Select(static todo => todo.Title));
+
+        await vm.MoveTodoAsync(
+            second.TodoId, third.TodoId, CancellationToken.None);
+
+        Assert.Equal(
+            ["第二项", "第三项", "第一项"],
+            vm.PendingTodos.Select(static todo => todo.Title));
+        Assert.Equal(
+            [second.TodoId, third.TodoId, first.TodoId],
+            orderStore.SavedOrder);
+    }
+
+    [Fact]
     public async Task Todo_complete_targets_the_selected_todo_and_refreshes_collections()
     {
         var todo = TodoRow("提交报表", new DateOnly(2026, 7, 29));
@@ -756,7 +816,8 @@ public sealed class TimelineViewModelTests
         IClock? clock = null,
         ILocalizationService? localization = null,
         Func<UiLanguage, Task>? saveLanguage = null,
-        IDatePicker? datePicker = null)
+        IDatePicker? datePicker = null,
+        ITodoOrderStore? todoOrderStore = null)
     {
         var reminderDialogs = dialogs ?? new Dialogs();
         var todoDialogs = reminderDialogs as ITodoDialogService ?? new Dialogs();
@@ -772,7 +833,25 @@ public sealed class TimelineViewModelTests
             analyticsNavigation,
             localization: localization,
             saveLanguage: saveLanguage,
-            datePicker: datePicker);
+            datePicker: datePicker,
+            todoOrderStore: todoOrderStore);
+    }
+
+    private sealed class RecordingTodoOrderStore(
+        IReadOnlyList<Guid> initialOrder) : ITodoOrderStore
+    {
+        public IReadOnlyList<Guid> SavedOrder { get; private set; } = [];
+
+        public Task<IReadOnlyList<Guid>> LoadAsync(CancellationToken ct) =>
+            Task.FromResult(initialOrder);
+
+        public Task SaveAsync(
+            IReadOnlyList<Guid> todoIds,
+            CancellationToken ct)
+        {
+            SavedOrder = todoIds.ToArray();
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class DatePickerStub(DateOnly? result) : IDatePicker

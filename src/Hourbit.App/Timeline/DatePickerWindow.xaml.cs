@@ -17,6 +17,12 @@ public partial class DatePickerWindow : System.Windows.Window
         ? DateOnly.FromDateTime(date)
         : null;
 
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        if (DataContext is IDisposable disposable)
+            disposable.Dispose();
+    }
+
     private void OnAccept(object sender, System.Windows.RoutedEventArgs e)
     {
         if (DateInput.SelectedDate is null)

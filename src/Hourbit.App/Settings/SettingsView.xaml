@@ -11,7 +11,8 @@
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"
         Foreground="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"
-        automation:AutomationProperties.Name="Hourbit 日程设置"
+        Tag="{localization:Loc Settings.WindowAccessible}"
+        automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}"
         Loaded="OnLoaded"
         Closed="OnClosed">
     <ScrollViewer x:Name="SettingsScrollViewer"
@@ -34,13 +35,15 @@
                         <TextBox x:Name="HotkeyBox"
                                  Text="{Binding Hotkey, Mode=OneWay}"
                                  TabIndex="1"
-                                 automation:AutomationProperties.Name="全局快捷键" />
+                                 Tag="{localization:Loc Settings.HotkeyGroup}"
+                                 automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                         <Button x:Name="SaveHotkeyButton"
                                 Grid.Column="2"
                                 MinWidth="126"
                                 TabIndex="2"
                                 Click="OnSaveHotkey"
-                                automation:AutomationProperties.Name="测试并保存快捷键">
+                                Tag="{localization:Loc Settings.TestAndSave}"
+                                automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="⌨" Margin="0,0,8,0"
                                            Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />
@@ -63,7 +66,8 @@
                           TabIndex="3"
                           MinHeight="36"
                           VerticalContentAlignment="Center"
-                          automation:AutomationProperties.Name="开机启动" />
+                          Tag="{localization:Loc Settings.StartupOption}"
+                          automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
             </GroupBox>
 
             <GroupBox Header="{localization:Loc Settings.NotificationsGroup}" Margin="0,18,0,0" Padding="18">
@@ -90,7 +94,8 @@
                                     MinWidth="150"
                                     TabIndex="4"
                                     Click="OnTestNormalNotification"
-                                    automation:AutomationProperties.Name="发送测试通知">
+                                    Tag="{localization:Loc Settings.SendTestNotification}"
+                                    automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="▣" Margin="0,0,8,0" />
                                     <TextBlock Text="{localization:Loc Settings.SendTestNotification}" />
@@ -120,7 +125,8 @@
                                     MinWidth="150"
                                     TabIndex="5"
                                     Click="OnTestImportantAlert"
-                                    automation:AutomationProperties.Name="测试重要提醒">
+                                    Tag="{localization:Loc Settings.TestImportantReminder}"
+                                    automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="⚠" Margin="0,0,8,0" />
                                     <TextBlock Text="{localization:Loc Settings.TestImportantReminder}" />
@@ -142,12 +148,14 @@
                         <TextBox x:Name="SoundPathBox"
                                  Text="{Binding CustomAlertSoundPath, UpdateSourceTrigger=PropertyChanged}"
                                  TabIndex="6"
-                                 automation:AutomationProperties.Name="自定义 WAV 声音路径" />
+                                 Tag="{localization:Loc Settings.SoundGroup}"
+                                 automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                         <Button Grid.Column="2"
                                 Style="{StaticResource SecondaryButton}"
                                 TabIndex="7"
                                 Click="OnPickSound"
-                                automation:AutomationProperties.Name="选择 WAV 声音文件">
+                                Tag="{localization:Loc Settings.ChooseWav}"
+                                automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="…" Margin="0,0,8,0" />
                                 <TextBlock Text="{localization:Loc Settings.ChooseWav}" />
@@ -168,7 +176,8 @@
                                 Style="{StaticResource SecondaryButton}"
                                 TabIndex="8"
                                 Click="OnPreviewSound"
-                                automation:AutomationProperties.Name="播放声音预览">
+                                Tag="{localization:Loc Settings.Play}"
+                                automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="▶" Margin="0,0,8,0" />
                                 <TextBlock Text="{localization:Loc Settings.Play}" />
@@ -178,7 +187,8 @@
                                 Style="{StaticResource SecondaryButton}"
                                 TabIndex="9"
                                 Click="OnStopSound"
-                                automation:AutomationProperties.Name="停止声音预览">
+                                Tag="{localization:Loc Settings.Stop}"
+                                automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="■" Margin="0,0,8,0" />
                                 <TextBlock Text="{localization:Loc Settings.Stop}" />
@@ -196,7 +206,8 @@
                                 Value="{Binding AlertVolume, Mode=TwoWay}"
                                 TabIndex="10"
                                 Margin="12,0"
-                                automation:AutomationProperties.Name="提醒音量 0 到 100" />
+                                Tag="{localization:Loc Settings.Volume}"
+                                automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                         <TextBlock Grid.Column="6"
                                    Text="{Binding AlertVolume, StringFormat={}{0}%}"
                                    VerticalAlignment="Center"
@@ -211,7 +222,8 @@
                             Margin="0,0,10,0"
                             TabIndex="11"
                             Click="OnOpenDataFolder"
-                            automation:AutomationProperties.Name="打开数据文件夹">
+                            Tag="{localization:Loc Settings.OpenDataFolder}"
+                            automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="▤" Margin="0,0,8,0" />
                             <TextBlock Text="{localization:Loc Settings.OpenDataFolder}" />
@@ -222,7 +234,8 @@
                             Margin="0,0,10,0"
                             TabIndex="12"
                             Click="OnOpenBackupFolder"
-                            automation:AutomationProperties.Name="打开备份文件夹">
+                            Tag="{localization:Loc Settings.OpenBackupFolder}"
+                            automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="↺" Margin="0,0,8,0" />
                             <TextBlock Text="{localization:Loc Settings.OpenBackupFolder}" />
@@ -233,7 +246,8 @@
                             Margin="0,0,10,0"
                             TabIndex="13"
                             Click="OnCreateBackup"
-                            automation:AutomationProperties.Name="立即创建备份">
+                            Tag="{localization:Loc Settings.CreateBackup}"
+                            automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                         <TextBlock Text="{localization:Loc Settings.CreateBackup}" />
                     </Button>
                     <Button x:Name="ExportBackupButton"
@@ -241,14 +255,16 @@
                             Margin="0,0,10,0"
                             TabIndex="14"
                             Click="OnExportBackup"
-                            automation:AutomationProperties.Name="导出备份">
+                            Tag="{localization:Loc Settings.ExportBackup}"
+                            automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                         <TextBlock Text="{localization:Loc Settings.ExportBackup}" />
                     </Button>
                     <Button x:Name="RestoreBackupButton"
                             Style="{StaticResource SecondaryButton}"
                             TabIndex="15"
                             Click="OnRestoreBackup"
-                            automation:AutomationProperties.Name="从备份恢复">
+                            Tag="{localization:Loc Settings.RestoreBackup}"
+                            automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                         <TextBlock Text="{localization:Loc Settings.RestoreBackup}" />
                     </Button>
                 </WrapPanel>
@@ -270,17 +286,20 @@
                                 TabIndex="16"
                                 Click="OnExportBackup"
                                 DockPanel.Dock="Left"
-                                automation:AutomationProperties.Name="导出备份">
+                                Tag="{localization:Loc Settings.ExportBackup}"
+                                automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                             <TextBlock Text="{localization:Loc Settings.ExportBackup}" />
                         </Button>
                         <TextBox x:Name="ResetConfirmationBox"
                                  Margin="10,0,0,0"
+                                 TabIndex="17"
                                  Text="{Binding ResetConfirmationText, UpdateSourceTrigger=PropertyChanged}"
-                                 automation:AutomationProperties.Name="确认短语" />
+                                 Tag="{localization:Loc Settings.ResetGroup}"
+                                 automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}" />
                     </DockPanel>
                     <Button x:Name="ResetLocalDataButton"
                             Margin="0,10,0,0"
-                            TabIndex="17"
+                            TabIndex="18"
                             Click="OnResetLocalData"
                             IsEnabled="{Binding CanResetLocalData}"
                             automation:AutomationProperties.Name="{localization:Loc Settings.ResetButton}">
@@ -317,9 +336,10 @@
                             Orientation="Horizontal">
                     <Button x:Name="CheckForUpdatesButton"
                             Margin="0,0,10,0"
-                            TabIndex="16"
+                            TabIndex="19"
                             Click="OnCheckForUpdates"
-                            automation:AutomationProperties.Name="检查更新">
+                            Tag="{localization:Loc Settings.CheckUpdates}"
+                            automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                         <Button.Style>
                             <Style TargetType="Button"
                                    BasedOn="{StaticResource SecondaryButton}">
@@ -336,9 +356,10 @@
                     </Button>
                     <Button x:Name="SaveSettingsButton"
                         MinWidth="128"
-                        TabIndex="17"
+                        TabIndex="20"
                         Click="OnSaveSettings"
-                        automation:AutomationProperties.Name="保存设置">
+                        Tag="{localization:Loc Settings.Save}"
+                        automation:AutomationProperties.Name="{Binding Tag, RelativeSource={RelativeSource Self}}">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="✓" Margin="0,0,8,0"
                                        Foreground="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}" />

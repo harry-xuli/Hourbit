@@ -220,7 +220,8 @@ public class FakeReminderRepository : IReminderRepository
         lock (_gate)
         {
             if (!_occurrences.TryGetValue(occurrenceId, out var occurrence)
-                || occurrence.State is not (OccurrenceState.Scheduled or OccurrenceState.Fired))
+                || occurrence.State is not (
+                    OccurrenceState.Scheduled or OccurrenceState.Fired or OccurrenceState.Missed))
             {
                 return Task.CompletedTask;
             }

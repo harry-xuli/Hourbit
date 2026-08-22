@@ -268,6 +268,29 @@ public sealed class SqliteReminderRepositoryTests
     }
 
     [Fact]
+    public async Task ApplyActionAsync_accepts_a_missed_occurrence()
+    {
+        using var temp = new TempDirectory();
+        var repository = await SqliteReminderRepository.OpenAsync(
+            Path.Combine(temp.Path, "moment.db"), CancellationToken.None);
+        var due = new DateTimeOffset(2026, 8, 21, 8, 0, 0, TimeSpan.FromHours(8));
+        var current = TestData.Scheduled("已错过提醒", due.ToString("O"));
+        await repository.SaveItemWithOccurrenceAsync(
+            current.Item, current.Occurrence, CancellationToken.None);
+        Assert.True(await repository.TryTransitionAsync(
+            current.Occurrence.Id, OccurrenceState.Scheduled,
+            OccurrenceState.Missed, due.AddMinutes(6), CancellationToken.None));
+
+        await repository.ApplyActionAsync(
+            current.Occurrence.Id, OccurrenceState.Completed,
+            due.AddMinutes(7), null, CancellationToken.None);
+
+        var stored = await repository.GetScheduledReminderAsync(
+            current.Occurrence.Id, CancellationToken.None);
+        Assert.Equal(OccurrenceState.Completed, stored!.Occurrence.State);
+    }
+
+    [Fact]
     public async Task ApplyActionAsync_inserts_an_active_continuation_when_only_deleted_history_has_the_due_instant()
     {
         using var temp = new TempDirectory();

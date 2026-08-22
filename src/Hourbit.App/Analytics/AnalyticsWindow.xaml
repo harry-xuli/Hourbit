@@ -70,13 +70,27 @@
                     <DatePicker x:Name="StartDatePicker" Grid.Column="4"
                                 SelectedDate="{Binding CustomStartDate, Mode=TwoWay}"
                                 automation:AutomationProperties.Name="{Binding FromText}"
-                                MinWidth="140" MinHeight="38" />
+                                MinWidth="190" MinHeight="40"
+                                FontFamily="Segoe UI, Microsoft YaHei UI"
+                                FontSize="16"
+                                VerticalContentAlignment="Center">
+                        <DatePicker.Resources>
+                            <Style TargetType="{x:Type Button}" />
+                        </DatePicker.Resources>
+                    </DatePicker>
                     <TextBlock x:Name="ToLabel" Grid.Column="5" Text="{Binding ToText}"
                                Margin="12,0,7,0" VerticalAlignment="Center" />
                     <DatePicker x:Name="EndDatePicker" Grid.Column="6"
                                 SelectedDate="{Binding CustomEndDate, Mode=TwoWay}"
                                 automation:AutomationProperties.Name="{Binding ToText}"
-                                MinWidth="140" MinHeight="38" />
+                                MinWidth="190" MinHeight="40"
+                                FontFamily="Segoe UI, Microsoft YaHei UI"
+                                FontSize="16"
+                                VerticalContentAlignment="Center">
+                        <DatePicker.Resources>
+                            <Style TargetType="{x:Type Button}" />
+                        </DatePicker.Resources>
+                    </DatePicker>
                     <Button x:Name="ApplyRangeButton" Grid.Column="7"
                             Content="{Binding ApplyText}"
                             Command="{Binding RefreshCommand}"

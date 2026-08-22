@@ -4,10 +4,16 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using KeyEventArgs = System.Windows.Input.KeyEventArgs;
+using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+using DragEventArgs = System.Windows.DragEventArgs;
+using Point = System.Windows.Point;
+using DataObject = System.Windows.DataObject;
+using DragDropEffects = System.Windows.DragDropEffects;
 using ItemsControl = System.Windows.Controls.ItemsControl;
 using ListBox = System.Windows.Controls.ListBox;
 using ListBoxItem = System.Windows.Controls.ListBoxItem;
 using SelectionChangedEventArgs = System.Windows.Controls.SelectionChangedEventArgs;
+using ContextMenuEventArgs = System.Windows.Controls.ContextMenuEventArgs;
 using Hourbit.Core.Search;
 using UserControl = System.Windows.Controls.UserControl;
 
@@ -18,6 +24,8 @@ public partial class TimelineView : UserControl
     private TimelineViewModel? _viewModel;
     private bool _isSynchronizingSelection;
     private readonly DispatcherTimer _countdownTimer;
+    private Point? _todoDragStart;
+    private const string TodoDragFormat = "Hourbit.TodoId";
 
     public TimelineView()
     {
@@ -159,6 +167,65 @@ public partial class TimelineView : UserControl
                 currentViewModel.SelectedTodo = null;
             }
         }
+    }
+
+    private void OnRowContextMenuOpening(
+        object sender,
+        ContextMenuEventArgs eventArgs)
+    {
+        if (sender is not DependencyObject source)
+            return;
+        var row = FindTimelineRow(source);
+        if (row is null)
+            return;
+        row.IsSelected = true;
+        row.Focus();
+    }
+
+    private void OnTodoPreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs eventArgs) =>
+        _todoDragStart = eventArgs.GetPosition(PendingTodoList);
+
+    private void OnTodoPreviewMouseMove(
+        object sender,
+        MouseEventArgs eventArgs)
+    {
+        if (_todoDragStart is not { } start
+            || eventArgs.LeftButton != MouseButtonState.Pressed)
+            return;
+
+        var current = eventArgs.GetPosition(PendingTodoList);
+        if (Math.Abs(current.X - start.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(current.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance)
+            return;
+
+        _todoDragStart = null;
+        var row = FindTimelineRow(eventArgs.OriginalSource as DependencyObject);
+        if (row?.DataContext is not TodoTimelineItemViewModel todo)
+            return;
+        row.IsSelected = true;
+        var data = new DataObject(TodoDragFormat, todo.TodoId);
+        DragDrop.DoDragDrop(PendingTodoList, data, DragDropEffects.Move);
+    }
+
+    private async void OnTodoDrop(
+        object sender,
+        DragEventArgs eventArgs)
+    {
+        _todoDragStart = null;
+        if (_viewModel is null
+            || !eventArgs.Data.GetDataPresent(TodoDragFormat)
+            || eventArgs.Data.GetData(TodoDragFormat) is not Guid sourceId)
+            return;
+
+        var row = FindTimelineRow(eventArgs.OriginalSource as DependencyObject);
+        if (row?.DataContext is not TodoTimelineItemViewModel target)
+            return;
+
+        eventArgs.Handled = true;
+        await _viewModel.TryMoveTodoAsync(
+            sourceId, target.TodoId, CancellationToken.None);
     }
 
     private void OnLoaded(object sender, RoutedEventArgs eventArgs)

@@ -37,4 +37,20 @@ public sealed class TimelineCountdownTests
         Assert.False(vm.IsCountdown);
         Assert.Equal("", vm.RemainingText);
     }
+
+    [Theory]
+    [InlineData(OccurrenceState.Completed)]
+    [InlineData(OccurrenceState.Ignored)]
+    public void Terminal_countdown_has_no_remaining_text(OccurrenceState state)
+    {
+        var row = new TimelineRow(
+            Guid.NewGuid(), "已处理倒计时",
+            DateTimeOffset.Parse("2026-08-21T16:00:00+08:00"),
+            ReminderKind.Countdown, ReminderImportance.Normal,
+            state, null);
+        var vm = new TimelineItemViewModel(
+            row, DateTimeOffset.Parse("2026-08-21T15:55:00+08:00"));
+
+        Assert.Equal(string.Empty, vm.RemainingText);
+    }
 }

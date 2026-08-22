@@ -38,6 +38,22 @@ public sealed class SqliteSettingsStoreTests
         Assert.Equal("keep", await ReadAsync(path, "future-setting"));
     }
 
+    [Fact]
+    public async Task Todo_order_round_trips_in_the_existing_settings_table()
+    {
+        using var directory = new TempDirectory();
+        var path = Path.Combine(directory.Path, "moment.db");
+        await SqliteReminderRepository.OpenAsync(path, CancellationToken.None);
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var store = new SqliteTodoOrderStore(path);
+
+        await store.SaveAsync([second, first], CancellationToken.None);
+        var restored = await store.LoadAsync(CancellationToken.None);
+
+        Assert.Equal([second, first], restored);
+    }
+
     private static async Task InsertAsync(string path, string key, string value)
     {
         await using var connection = await DatabaseMigrator.OpenConnectionAsync(

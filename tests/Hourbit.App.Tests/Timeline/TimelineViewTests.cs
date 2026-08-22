@@ -199,9 +199,8 @@ public sealed class TimelineViewTests
                     selectedList.SelectedItem));
             var selectedSurface = Assert.Single(
                 Descendants<Border>(selected),
-                border => border.TemplatedParent == selected);
+                border => border.Name is "TodoRowSurface" or "ReminderRowSurface");
             AssertBrush(Colors.Yellow, selectedSurface.Background);
-            AssertBrush(Colors.Black, selected.Foreground);
             Assert.All(
                 Descendants<TextBlock>(selected).Where(text =>
                     text.IsVisible && Ancestor<Button>(text) is null),
@@ -258,17 +257,56 @@ public sealed class TimelineViewTests
             Assert.Equal("定时提醒", reminderHeader.Text);
             Assert.Equal("定时提醒", PeerName(reminderHeader));
             Assert.Equal(
-                "待办：逾期任务，2026-07-28，重要，已逾期",
+                "待办中：逾期任务，2026-07-28，重要，已逾期",
                 PeerName(todoRow));
             Assert.True(reminderHeader.TranslatePoint(new Point(), view).X <
                         todoHeader.TranslatePoint(new Point(), view).X);
-            Assert.Contains("!", VisibleText(view));
+            Assert.DoesNotContain("!", VisibleText(view));
             Assert.Contains("重要", VisibleText(view));
             Assert.DoesNotContain("无日期", VisibleText(view));
             Assert.DoesNotContain(
                 Descendants<TextBlock>(todoRow), text => text.Name == "TodoDueDate");
             Assert.True(todoTitle.ActualWidth >= 40d);
             Assert.DoesNotContain("完成任务", VisibleText(view));
+        });
+
+    [Fact]
+    public Task Dropping_a_pending_todo_on_another_row_moves_and_persists_it() =>
+        WpfTestHost.RunAsync(async () =>
+        {
+            var first = TodoRow("第一项", new DateOnly(2026, 7, 29));
+            var second = TodoRow("第二项", new DateOnly(2026, 7, 30));
+            var orderStore = new TodoOrderStoreStub();
+            var viewModel = Create(
+                new QueryStub(new TimelineSnapshot([first, second], [], 0, 0)),
+                todoOrderStore: orderStore);
+            await viewModel.LoadAsync();
+            var view = Show(viewModel);
+            var list = Assert.IsType<ListBox>(view.FindName("PendingTodoList"));
+            var targetRow = Assert.IsType<ListBoxItem>(
+                list.ItemContainerGenerator.ContainerFromIndex(1));
+            var targetSurface = Assert.Single(
+                Descendants<Border>(targetRow),
+                border => border.Name == "TodoRowSurface");
+            var data = new DataObject("Hourbit.TodoId", first.TodoId);
+            var drop = Assert.IsType<DragEventArgs>(Activator.CreateInstance(
+                typeof(DragEventArgs),
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic,
+                binder: null,
+                [data, DragDropKeyStates.LeftMouseButton, DragDropEffects.Move,
+                    targetSurface, new Point(4, 4)],
+                culture: null));
+            drop.RoutedEvent = DragDrop.DropEvent;
+
+            targetSurface.RaiseEvent(drop);
+            await System.Windows.Threading.Dispatcher.Yield();
+
+            Assert.True(drop.Handled);
+            Assert.Equal([second.TodoId, first.TodoId],
+                viewModel.PendingTodos.Select(todo => todo.TodoId));
+            Assert.Equal([second.TodoId, first.TodoId], Assert.Single(orderStore.Saved));
         });
 
     [Fact]
@@ -423,17 +461,9 @@ public sealed class TimelineViewTests
             var view = Show(viewModel);
             var button = Assert.IsType<Button>(
                 view.FindName("NewReminderButton"));
-            var copyButton = Assert.Single(
-                Descendants<Button>(view), candidate =>
-                    candidate.IsVisible && Equals(candidate.Content, viewModel.CopyText));
             var section = Assert.IsType<TextBlock>(
                 view.FindName("TodoSectionHeader"));
             section.Focusable = true;
-
-            Assert.Equal("复制", copyButton.Content);
-            Assert.Equal("复制当前事项并创建新记录（Ctrl+D）", copyButton.ToolTip);
-            Assert.Contains("复制当前", PeerName(copyButton));
-            Assert.True(Peer(copyButton).IsKeyboardFocusable());
 
             foreach (var target in new UIElement[] { button, section })
             {
@@ -688,7 +718,8 @@ public sealed class TimelineViewTests
         DialogStub? dialogs = null,
         Action<LocalDateRange>? analyticsNavigation = null,
         CultureInfo? culture = null,
-        SearchViewModel? search = null) =>
+        SearchViewModel? search = null,
+        ITodoOrderStore? todoOrderStore = null) =>
         new(query, new FakeClock("2026-07-29T09:00:00+08:00"),
             reminders ?? new ReminderServiceStub(), actions ?? new ActionServiceStub(),
             todos ?? new TodoServiceStub(), dialogs ?? new DialogStub(),
@@ -697,7 +728,8 @@ public sealed class TimelineViewTests
                 "UTC+08-view", TimeSpan.FromHours(8), "UTC+08", "UTC+08"),
             culture,
             analyticsNavigation,
-            search: search);
+            search: search,
+            todoOrderStore: todoOrderStore);
 
     private sealed class SearchQueryStub : Hourbit.Core.Search.IItemSearchQuery
     {
@@ -837,6 +869,20 @@ public sealed class TimelineViewTests
         public Task ConvertToTodoAsync(
             Guid occurrenceId, TodoDraft draft, SeriesScope scope, CancellationToken ct) =>
             Task.CompletedTask;
+    }
+
+    private sealed class TodoOrderStoreStub : ITodoOrderStore
+    {
+        public List<IReadOnlyList<Guid>> Saved { get; } = [];
+
+        public Task<IReadOnlyList<Guid>> LoadAsync(CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<Guid>>([]);
+
+        public Task SaveAsync(IReadOnlyList<Guid> orderedTodoIds, CancellationToken ct)
+        {
+            Saved.Add(orderedTodoIds.ToArray());
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class DialogStub : ITimelineDialogService, ITodoDialogService

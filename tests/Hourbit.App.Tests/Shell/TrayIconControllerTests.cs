@@ -20,8 +20,11 @@ public sealed class TrayIconControllerTests
         Assert.NotNull(notifyIcon.Icon);
 
         Assert.Equal(
-            "481254C68E1906032F0B5EEAFC5C65198F14CEE6E6C67C59FFBA7C31210FAD36",
+            "7D261125238F9EA45E22CA714CC6FD06DC984FF68CB83256E84EF96576F24FC3",
             HashPixelsAt32Pixels(notifyIcon.Icon));
+        Assert.True(
+            CountVisiblePixelsAt32Pixels(notifyIcon.Icon) >= 750,
+            "The tray icon must occupy most of its 32-pixel canvas.");
     }
 
     [Fact]
@@ -189,5 +192,24 @@ public sealed class TrayIconControllerTests
             }
         }
         return Convert.ToHexString(SHA256.HashData(bytes));
+    }
+
+    private static int CountVisiblePixelsAt32Pixels(System.Drawing.Icon source)
+    {
+        using var icon = new System.Drawing.Icon(
+            source, new System.Drawing.Size(32, 32));
+        using var bitmap = icon.ToBitmap();
+        var visiblePixels = 0;
+        for (var y = 0; y < 32; y++)
+        {
+            for (var x = 0; x < 32; x++)
+            {
+                if (bitmap.GetPixel(x, y).A > 32)
+                {
+                    visiblePixels++;
+                }
+            }
+        }
+        return visiblePixels;
     }
 }

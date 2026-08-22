@@ -495,7 +495,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
             UPDATE occurrences
             SET state = $state, handled_at = $handledAt
             WHERE id = $id
-              AND state IN ($scheduled, $fired)
+              AND state IN ($scheduled, $fired, $missed)
               AND deleted_at IS NULL;
             """;
         command.Parameters.AddWithValue("$state", (int)state);
@@ -503,6 +503,7 @@ public sealed class SqliteReminderRepository : IReminderRepository
         command.Parameters.AddWithValue("$id", occurrenceId.ToString("D"));
         command.Parameters.AddWithValue("$scheduled", (int)OccurrenceState.Scheduled);
         command.Parameters.AddWithValue("$fired", (int)OccurrenceState.Fired);
+        command.Parameters.AddWithValue("$missed", (int)OccurrenceState.Missed);
         return await command.ExecuteNonQueryAsync(ct) == 1;
     }
 
