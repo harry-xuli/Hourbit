@@ -19,10 +19,11 @@ v0.7.1 已将应用图标切换为确认的 B 方案（日历、勾选与时钟�
 ## v0.7.1 发布门禁
 
 - B 方案主图与 32 像素托盘图标回归：3/3 通过。
-- Core 259/259、Infrastructure 143/143、Windows 97/97 通过。
-- v0.7.0 的应用功能基线为 288/288；本机 v0.7.1 全量应用测试受既有 WPF 测试宿主随机死锁影响，未将环境超时误报为产品回归。
+- GitHub Actions 完整 Release：788/788（App 289、Core 259、Infrastructure 143、Windows 97），0 failed / 0 skipped。
+- 本机分层回归：Core 259/259、Infrastructure 143/143、Windows 97/97；本机 WPF 测试宿主的随机死锁由独立 GitHub Actions 全套通过补充验证。
 - Setup 与 Portable 内 `Hourbit.exe` 使用 `CN=Harry` 个人证书签名并带 DigiCert 时间戳。
 - packaged smoke 12/12 事件通过，版本、发布日期、设置页脚和产物名一致。
+- GitHub Release：[`v0.7.1`](https://github.com/harry-xuli/Hourbit/releases/tag/v0.7.1) 已公开，四个正式附件的名称、大小与 digest 已读回核对。
 
 ## v0.7.1 产物
 
