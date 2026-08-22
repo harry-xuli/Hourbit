@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-v0.7.0 汇总已确认的 A 方案 Logo、提醒可靠性、待办交互、本地化与日期控件修复，并整合 GitHub v0.6.3 的 Windows App SDK 启动修复。完整 Release 测试、个人签名和 packaged smoke 已通过，GitHub Release 正在执行。
+v0.7.0 汇总已确认的 A 方案 Logo、提醒可靠性、待办交互、本地化与日期控件修复，并整合 GitHub v0.6.3 的 Windows App SDK 启动修复。完整 Release 测试、个人签名、packaged smoke 与 GitHub Release 均已完成。
 
 ## v0.7.0 功能范围
 
@@ -21,10 +21,10 @@ v0.7.0 汇总已确认的 A 方案 Logo、提醒可靠性、待办交互、本�
 
 ## 发布门禁
 
-- 完整 Release 测试：786/786（App 287、Core 259、Infrastructure 143、Windows 97），0 failed / 0 skipped。
+- 完整 Release 测试：787/787（App 288、Core 259、Infrastructure 143、Windows 97），0 failed / 0 skipped。
 - 本机 `CN=Harry` 个人 Authenticode 签名：Setup 与 Portable 内 Hourbit.exe 均已验证；DigiCert 时间戳有效至 2036-09-04。
 - packaged smoke：12 个事件通过；版本 0.7.0 与发布日期 2026-08-22 一致。
-- GitHub Release：上传 Setup、Portable ZIP 和两个 SHA-256 sidecar 后读回核对。
+- GitHub Release：[`v0.7.0`](https://github.com/harry-xuli/Hourbit/releases/tag/v0.7.0) 已公开；Setup、Portable ZIP 和两个 SHA-256 sidecar 的名称、大小与 digest 已读回核对。
 
 ## v0.7.0 产物
 

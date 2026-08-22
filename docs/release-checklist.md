@@ -10,7 +10,7 @@
 
 | 检查 | 当前状态 | 最终证据 |
 |---|---|---|
-| 完整 Release 测试 | 通过 | App 287 + Core 259 + Infrastructure 143 + Windows 97 = 786/786 |
+| 完整 Release 测试 | 通过 | App 288 + Core 259 + Infrastructure 143 + Windows 97 = 787/787 |
 | schema v1/v2 至 v6 升级 | 通过 | packaged smoke 的 schema-v1-upgrade / schema-v2-upgrade |
 | 提醒投递、失败重试与恢复 | 通过 | packaged smoke 12/12 事件 |
 | 搜索、日期、待办排序和本地化 | 已有回归测试 | 完整 Release suite |
@@ -18,7 +18,7 @@
 | Setup/ZIP 文件名与版本一致 | 通过 | Hourbit / 0.7.0 / 2026-08-22 |
 | SHA-256 sidecar | 通过 | 与两个实际文件逐字节核对一致 |
 | Authenticode | 通过 | Setup 与 Portable 内 Hourbit.exe 均为 `CN=Harry`，指纹一致并含 DigiCert 时间戳 |
-| GitHub Release v0.7.0 | 待发布 | 读回四个附件名、大小和 digest |
+| GitHub Release v0.7.0 | 通过 | [公开发布页](https://github.com/harry-xuli/Hourbit/releases/tag/v0.7.0)；四个附件名、大小和 digest 已读回核对 |
 
 ## 安全与数据要求
 
