@@ -1,4 +1,5 @@
 using System.IO;
+using System.Security.Cryptography;
 
 namespace Hourbit.App.Tests.Diagnostics;
 
@@ -21,6 +22,20 @@ public sealed class PublicBrandingTests
         Assert.False(File.Exists(Path.Combine(root, "installer", "Moment.iss")));
         Assert.True(File.Exists(Path.Combine(
             root, "src", "Hourbit.App", "Assets", "hourbit.ico")));
+    }
+
+    [Fact]
+    public void Selected_B_logo_is_the_release_master_artwork()
+    {
+        var logo = Path.Combine(
+            RepositoryRoot(), "src", "Hourbit.App", "Assets",
+            "hourbit-logo-master.png");
+
+        var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(logo)));
+
+        Assert.Equal(
+            "AB42F148BCA83859399F8EDCED982B743DD990CC2B567F403657FA7A30A80364",
+            hash);
     }
 
     private static string RepositoryRoot() => Path.GetFullPath(Path.Combine(

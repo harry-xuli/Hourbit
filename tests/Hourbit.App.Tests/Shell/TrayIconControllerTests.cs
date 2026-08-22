@@ -20,10 +20,10 @@ public sealed class TrayIconControllerTests
         Assert.NotNull(notifyIcon.Icon);
 
         Assert.Equal(
-            "7D261125238F9EA45E22CA714CC6FD06DC984FF68CB83256E84EF96576F24FC3",
+            "288D698401227207027D0475408220C9CB1911867E3277B69E28570F46FF0BFF",
             HashPixelsAt32Pixels(notifyIcon.Icon));
         Assert.True(
-            CountVisiblePixelsAt32Pixels(notifyIcon.Icon) >= 750,
+            CountVisiblePixelsAt32Pixels(notifyIcon.Icon) >= 740,
             "The tray icon must occupy most of its 32-pixel canvas.");
     }
 
